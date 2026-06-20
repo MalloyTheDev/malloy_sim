@@ -81,6 +81,22 @@ target_link_libraries(malloy_nbody
         malloy::project_warnings
 )
 
+# malloy_scenario (M7): minimal text scenario/config loading (compiled STATIC).
+add_library(malloy_scenario STATIC
+    src/scenario/scenario.cpp
+)
+add_library(malloy::scenario ALIAS malloy_scenario)
+target_include_directories(malloy_scenario PUBLIC include)
+target_link_libraries(malloy_scenario
+    PUBLIC
+        malloy::nbody
+        malloy::sim_core
+        malloy::math
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -89,6 +105,7 @@ if(MALLOY_BUILD_APPS)
     target_link_libraries(malloy_nbody_terminal
         PRIVATE
             malloy::nbody
+            malloy::scenario
             malloy::project_options
             malloy::project_warnings
     )
@@ -185,4 +202,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_nbody_tests COMMAND malloy_nbody_tests)
+
+    add_executable(malloy_scenario_tests
+        tests/scenario/scenario_tests.cpp
+    )
+
+    target_include_directories(malloy_scenario_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_scenario_tests
+        PRIVATE
+            malloy::scenario
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_scenario_tests COMMAND malloy_scenario_tests)
 endif()

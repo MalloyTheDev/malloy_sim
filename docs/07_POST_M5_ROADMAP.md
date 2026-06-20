@@ -9,7 +9,7 @@ Recommended order:
 
 ```text
 M6  — stabilize N-body diagnostics      [done]
-M7  — minimal scenario/config loading
+M7  — minimal scenario/config loading   [done]
 M8  — simple 2D debug visualization
 M9  — collision primitives
 M10 — 2D rigid body basics

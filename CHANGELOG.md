@@ -17,6 +17,29 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Architecture Notes
 
+## [M7] - 2026-06-19  (scenario/config loading)
+
+### Added
+
+- `malloy_scenario` (STATIC, `malloy::scenario`): a minimal line-based text
+  parser turning a scenario file into `{SimulationSettings, NBodySettings,
+  bodies, steps, output_every}`. Parsing returns a result (line number +
+  message) and never throws; semantic validation stays in `NBodyWorld`.
+- Example scenarios in `scenarios/` (`two_body.scn`, `three_body_triangle.scn`).
+- `malloy_scenario_tests`.
+
+### Changed
+
+- `apps/nbody_terminal/main.cpp` loads and runs a scenario file given as its
+  single argument; with no argument it runs the built-in scenarios. The report
+  handles any body count (N<2 omits the separation column).
+
+### Architecture Notes
+
+- No CLI parser and no serialization library: a single positional path and a
+  hand-rolled plain-text format. Config parsing lives in its own library, not
+  in the dumb app or the physics library.
+
 ## [M6] - 2026-06-19  (N-body diagnostics)
 
 ### Added

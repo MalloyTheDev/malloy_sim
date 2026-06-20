@@ -20,10 +20,10 @@ Its first serious goal, a deterministic terminal-based 2D N-body gravity demo, i
 
 ## Status
 
-The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestone
-(**M6: N-body diagnostics**). The project builds clean under MSVC
-(`/W4 /permissive-`), all five test executables pass via CTest, and the terminal
-app runs two N-body scenarios (a two-body orbit and a three-body triangle)
+The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
+(**M6: N-body diagnostics**, **M7: scenario loading**). The project builds clean
+under MSVC (`/W4 /permissive-`), all six test executables pass via CTest, and the
+terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics.
 
 | Module | Type | Provides |
@@ -31,7 +31,8 @@ reporting conserved system diagnostics.
 | `malloy_math` | INTERFACE | `Real = double`, `Vec2`, vector/scalar helpers |
 | `malloy_time` | INTERFACE | `FixedStep` (fixed timestep, tick count, elapsed time) |
 | `malloy_sim_core` | STATIC | `SimulationSettings`, `StepStatus`, `StepResult` |
-| `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity |
+| `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
+| `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
@@ -75,6 +76,29 @@ step  10000   sep  1.73143038   E_total   -0.86601509   L_total    2.27951999
 The three-body triangle holds its shape (separation ~sqrt(3)) while total energy
 and angular momentum stay essentially constant -- the conservation you expect
 from semi-implicit (symplectic) Euler.
+
+### Load a scenario from a file
+
+Pass a scenario file as the single argument:
+
+```powershell
+.\out\build\windows-msvc-debug\Debug\malloy_nbody_terminal.exe scenarios\two_body.scn
+```
+
+Scenario files are plain text (`#` starts a comment):
+
+```text
+g 1.0
+softening 0.000001
+dt 0.001
+steps 10000
+output_every 1000
+body 1.0       0.0 0.0   0.0 0.0
+body 0.000001  1.0 0.0   0.0 1.0
+```
+
+Example scenarios live in `scenarios/`. With no argument, the app runs the
+built-in scenarios shown above.
 
 ## M1-M5 roadmap (complete)
 

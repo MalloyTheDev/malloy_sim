@@ -1,0 +1,12 @@
+# MalloySim scenario: rotating equilateral three-body (Lagrange) configuration.
+# Three equal masses on a triangle, with velocities for near-rigid rotation.
+
+g 1.0
+softening 0.001
+dt 0.001
+steps 10000
+output_every 1000
+
+body 1.0   1.0   0.0         0.0         0.75984
+body 1.0  -0.5   0.8660254  -0.65804    -0.37992
+body 1.0  -0.5  -0.8660254   0.65804    -0.37992

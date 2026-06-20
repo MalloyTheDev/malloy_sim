@@ -27,11 +27,11 @@ It is not:
 ## Current phase
 
 ```text
-M1-M5 complete (locked roadmap). M6 (N-body diagnostics) complete.
+M1-M5 complete (locked roadmap). M6-M7 (diagnostics, scenario loading) complete.
 ```
 
 Work continues through the post-M5 roadmap (see `docs/07_POST_M5_ROADMAP.md`).
-Do not start any further milestone (M7 or later) unless explicitly asked, and
+Do not start any further milestone (M8 or later) unless explicitly asked, and
 then work only on that one milestone at a time.
 
 ## M1-M5 order (all complete)
