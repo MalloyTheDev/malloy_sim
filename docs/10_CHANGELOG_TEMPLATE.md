@@ -1,6 +1,7 @@
 # 10 — Changelog Template
 
-Use this format after M1.
+This is the template/reference. The live changelog is `CHANGELOG.md` at the
+repo root; keep it updated with this format.
 
 ```markdown
 # Changelog

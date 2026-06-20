@@ -1,6 +1,9 @@
 # 07 — Post-M5 Roadmap
 
-Do not start these before M5.
+M1-M5 are complete, so this is now the live roadmap for what may come next.
+Treat each entry as its own milestone: start it only when explicitly asked,
+build it one milestone at a time, and do not expand scope immediately after M5
+(`docs/09_MISTAKES_TO_AVOID.md`, #10).
 
 Recommended order:
 

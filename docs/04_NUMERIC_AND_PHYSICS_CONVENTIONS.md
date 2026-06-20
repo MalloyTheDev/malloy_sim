@@ -1,5 +1,8 @@
 # 04 — Numeric and Physics Conventions
 
+> These conventions are in force in the shipped M1-M5 code (the softening
+> formula and validation rules below are implemented in `malloy_nbody`).
+
 Use:
 
 ```cpp

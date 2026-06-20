@@ -21,7 +21,7 @@ Do not use Catch2 or GoogleTest in M1-M5.
 
 ## Test executable layout
 
-By M5:
+All five exist and pass (one per module):
 
 ```text
 malloy_smoke_tests
@@ -35,9 +35,8 @@ Each test executable should return 0 on success, return nonzero on failure, prin
 
 ## Test helpers
 
-Use `MALLOY_CHECK_TRUE`, `MALLOY_CHECK_FALSE`, `MALLOY_CHECK_EQ`, and `MALLOY_CHECK_NEAR`.
-
-Future helper: `MALLOY_CHECK_VEC2_NEAR`.
+Use `MALLOY_CHECK_TRUE`, `MALLOY_CHECK_FALSE`, `MALLOY_CHECK_EQ`,
+`MALLOY_CHECK_NEAR`, and `MALLOY_CHECK_VEC2_NEAR` (all in `tests/test_check.hpp`).
 
 ## When to migrate to Catch2
 

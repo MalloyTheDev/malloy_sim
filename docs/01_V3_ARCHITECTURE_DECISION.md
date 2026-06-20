@@ -2,7 +2,8 @@
 
 ## Final verdict
 
-MalloySim is ready to start. No more architecture review is required before M1.
+This architecture is fully realized: every target below was built across M1-M5
+and the dependency direction holds in the shipped code.
 
 The V3 architecture is:
 
@@ -43,7 +44,7 @@ It starts with a terminal 2D N-body gravity simulation and later may grow into c
 | First app | `malloy_nbody_terminal` |
 | First simulation | Normalized two-body orbit |
 
-## Final target list by M5
+## Final target list by M5 (all built)
 
 ```text
 malloy_project_options      INTERFACE
@@ -86,3 +87,7 @@ It must stay tiny. It should contain only shared vocabulary and status/result ty
 It must not contain `ISimulation`, `virtual step()`, `WorldBase`, `Engine`, `Entity`, `Component`, `Scene`, `Scheduler`, `EventBus`, `ServiceLocator`, `Plugin`, `Registry`, or `SystemManager`.
 
 `NBodyWorld` remains concrete and owns its own `step()` behavior.
+
+As of M5 this held: `malloy_sim_core` contains only `SimulationSettings`,
+`StepStatus`, and `StepResult`, and `NBodyWorld` is a concrete class. Keep it
+that way.

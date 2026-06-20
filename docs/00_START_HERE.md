@@ -1,8 +1,10 @@
 # 00 — Start Here
 
-This repository is the start of **MalloySim C++**, a simulation-first C++20 project.
+**MalloySim C++** is a simulation-first C++20 project. Milestones **M1-M5 are
+complete**: the math, time, sim-core, and N-body libraries are built and the
+terminal N-body demo runs. See `README.md` and `CHANGELOG.md`.
 
-Read order:
+## Read order
 
 1. `README.md`
 2. `CLAUDE.md`
@@ -15,21 +17,7 @@ Read order:
 9. `docs/07_POST_M5_ROADMAP.md`
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 
-## Immediate goal
-
-Do not write physics first.
-
-The immediate goal is **M1**:
-
-```text
-CMake configures.
-MSVC builds.
-CTest runs.
-The terminal app prints one line.
-Commit green.
-```
-
-## M1 commands
+## Build and test
 
 ```powershell
 cmake --preset windows-msvc-debug
@@ -37,9 +25,12 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-## Commit M1 only after the commands pass
+All five test executables should pass, and
+`out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
+completion.
 
-```powershell
-git add .
-git commit -m "M1: CMake skeleton and smoke test"
-```
+## What's next
+
+The locked M1-M5 roadmap is done. Post-M5 work is gated and taken one milestone
+at a time -- see `docs/07_POST_M5_ROADMAP.md`. Do not expand scope immediately
+after M5 (`docs/09_MISTAKES_TO_AVOID.md`, #10).

@@ -26,35 +26,35 @@ It is not:
 
 ## Current phase
 
-The repository starts at:
-
 ```text
-M1: CMake skeleton and smoke test
+M1-M5 complete. The locked initial roadmap is built, green, and committed.
 ```
 
-Do not implement M2 or later unless explicitly asked.
+The next phase is post-M5 (see `docs/07_POST_M5_ROADMAP.md`). Do not start any
+post-M5 milestone (M6 or later) unless explicitly asked, and then work only on
+that one milestone at a time.
 
-## Locked M1-M5 order
+## M1-M5 order (all complete)
 
 ```text
-M1: CMake skeleton + smoke test
-M2: malloy_math
-M3: malloy_time + tiny malloy_sim_core
-M4: malloy_nbody
-M5: terminal N-body demo
+M1: CMake skeleton + smoke test        [done]
+M2: malloy_math                        [done]
+M3: malloy_time + tiny malloy_sim_core [done]
+M4: malloy_nbody                       [done]
+M5: terminal N-body demo               [done]
 ```
 
 ## Rules
 
-1. Do not jump ahead.
-2. Do not add rendering.
-3. Do not add ECS.
-4. Do not add collision before M5.
-5. Do not add rigid bodies before M5.
-6. Do not add 3D before M5.
-7. Do not add quantum before M5.
-8. Do not add a package manager before M5.
-9. Do not add Catch2 before M5.
+1. Do not jump ahead; work one milestone at a time.
+2. Do not add rendering until its dedicated post-M5 milestone.
+3. Do not add ECS (wait for real access-pattern pressure).
+4. Do not add collision until its dedicated post-M5 milestone.
+5. Do not add rigid bodies until their dedicated post-M5 milestone.
+6. Do not add 3D until its dedicated post-M5 milestone.
+7. Do not add quantum until its dedicated post-M5 milestone.
+8. Do not add a package manager unless a milestone explicitly needs one.
+9. Do not add Catch2/GoogleTest unless explicitly asked.
 10. Do not create empty architecture folders.
 11. Do not create speculative abstractions.
 12. Do not create `ISimulation`, `WorldBase`, `Engine`, `Scheduler`, `EventBus`, `ServiceLocator`, or plugin systems.
@@ -64,13 +64,13 @@ M5: terminal N-body demo
 
 ## Testing policy
 
-M1-M5 use:
+The project uses:
 
 ```text
-CTest + tiny custom CHECK macros
+CTest + tiny custom CHECK macros (tests/test_check.hpp)
 ```
 
-Do not replace this with Catch2 or GoogleTest unless explicitly asked after M5.
+Do not replace this with Catch2 or GoogleTest unless explicitly asked.
 
 ## Numeric policy
 
@@ -100,7 +100,10 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-## Expected M1 app output
+## Expected app output
+
+The terminal app's first line is its identity, followed by the periodic demo
+output (radius and specific orbital energy):
 
 ```text
 MalloySim nbody_terminal

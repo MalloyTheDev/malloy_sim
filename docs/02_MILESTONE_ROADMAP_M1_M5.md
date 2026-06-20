@@ -1,6 +1,10 @@
 # 02 — Milestone Roadmap M1-M5
 
-## M1 — CMake Skeleton and Smoke Test
+> **Status: M1-M5 are all complete and committed.** This document is kept as the
+> specification each milestone was built against; `CHANGELOG.md` records what
+> actually shipped.
+
+## M1 — CMake Skeleton and Smoke Test ✅
 
 Goal: prove the toolchain and workflow.
 
@@ -15,7 +19,7 @@ M1 must prove:
 
 M1 does not include `Vec2`, `Real`, physics, N-body, Catch2, rendering, CI, or empty module folders.
 
-## M2 — `malloy_math`
+## M2 — `malloy_math` ✅
 
 Add target:
 
@@ -55,7 +59,7 @@ Contents:
 
 Do not add `Vec3`, `Mat4`, `Quat`, templates, SIMD, GLM, Eigen, or a units library.
 
-## M3 — `malloy_time` + tiny `malloy_sim_core`
+## M3 — `malloy_time` + tiny `malloy_sim_core` ✅
 
 Add targets:
 
@@ -72,7 +76,7 @@ malloy_sim_core_tests EXECUTABLE
 
 No real-time loop, wall-clock timer, sleep, frame pacing, render interpolation, scheduler, `ISimulation`, `virtual step()`, `WorldBase`, or engine kernel.
 
-## M4 — `malloy_nbody`
+## M4 — `malloy_nbody` ✅
 
 Add targets:
 
@@ -111,7 +115,7 @@ Required M4 tests:
 - same initial state repeated gives equivalent final state
 - near-circular two-body radius stays within tolerance for a short run
 
-## M5 — Terminal N-body Demo
+## M5 — Terminal N-body Demo ✅
 
 Update `apps/nbody_terminal/main.cpp`.
 

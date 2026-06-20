@@ -13,4 +13,4 @@
 
 ## Scope creep watchlist
 
-Do not add Raylib, SDL, GLFW, SFML, rendering, input, camera, collision, rigid bodies, 3D, quantum, ECS, serialization, config files, CLI parser, logging framework, plugins, scripting, editor, asset manager, threading, package manager, or install/export rules before M5.
+Do not add Raylib, SDL, GLFW, SFML, rendering, input, camera, collision, rigid bodies, 3D, quantum, ECS, serialization, config files, CLI parser, logging framework, plugins, scripting, editor, asset manager, threading, package manager, or install/export rules until a dedicated post-M5 milestone explicitly calls for them.

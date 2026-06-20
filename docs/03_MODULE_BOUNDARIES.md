@@ -1,5 +1,8 @@
 # 03 — Module Boundaries
 
+> All four modules below are implemented (M2-M4). These boundaries are in force
+> in the shipped code; keep them when extending the project.
+
 ## `malloy_math`
 
 Responsible for `Real`, `Vec2`, scalar/vector helpers, approximate equality, and finite checks.
