@@ -1,0 +1,41 @@
+# Build output
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# CMake user/local files
+CMakeUserPresets.json
+compile_commands.json
+
+# Visual Studio / MSVC
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.exe
+*.dll
+*.lib
+*.exp
+
+# VS Code local settings
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.vscode/.cmake/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
