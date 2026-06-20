@@ -17,6 +17,32 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Architecture Notes
 
+## [M6] - 2026-06-19  (N-body diagnostics)
+
+### Added
+
+- Whole-system N-body diagnostics in `malloy_nbody`
+  (`include/malloy/nbody/diagnostics.hpp`): `total_kinetic_energy`,
+  `total_potential_energy` (softened), `total_energy`, `total_momentum`,
+  `center_of_mass`, `total_angular_momentum`.
+- A second hardcoded demo scenario: a rotating equilateral three-body (Lagrange)
+  configuration, exercising N>2.
+
+### Changed
+
+- `apps/nbody_terminal/main.cpp` refactored to run multiple scenarios via a
+  shared helper and report system diagnostics (separation, total energy, total
+  angular momentum).
+
+### Tests
+
+- Known-value diagnostics test and an N=3 conservation test (linear momentum to
+  machine precision; energy and angular momentum bounded over a run).
+
+### Architecture Notes
+
+- The app stays dumb: still no CLI/config; all diagnostics live in the library.
+
 ## [M5] - 2026-06-19  (terminal N-body demo)
 
 ### Added

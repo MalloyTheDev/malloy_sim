@@ -1,7 +1,8 @@
 # 00 — Start Here
 
-**MalloySim C++** is a simulation-first C++20 project. Milestones **M1-M5 are
-complete**: the math, time, sim-core, and N-body libraries are built and the
+**MalloySim C++** is a simulation-first C++20 project. The locked **M1-M5
+roadmap is complete**, plus the first post-M5 milestone (M6: N-body
+diagnostics): the math, time, sim-core, and N-body libraries are built and the
 terminal N-body demo runs. See `README.md` and `CHANGELOG.md`.
 
 ## Read order

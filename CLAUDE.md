@@ -27,12 +27,12 @@ It is not:
 ## Current phase
 
 ```text
-M1-M5 complete. The locked initial roadmap is built, green, and committed.
+M1-M5 complete (locked roadmap). M6 (N-body diagnostics) complete.
 ```
 
-The next phase is post-M5 (see `docs/07_POST_M5_ROADMAP.md`). Do not start any
-post-M5 milestone (M6 or later) unless explicitly asked, and then work only on
-that one milestone at a time.
+Work continues through the post-M5 roadmap (see `docs/07_POST_M5_ROADMAP.md`).
+Do not start any further milestone (M7 or later) unless explicitly asked, and
+then work only on that one milestone at a time.
 
 ## M1-M5 order (all complete)
 

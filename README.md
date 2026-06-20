@@ -20,9 +20,11 @@ Its first serious goal, a deterministic terminal-based 2D N-body gravity demo, i
 
 ## Status
 
-Milestones **M1-M5 are complete** -- the locked initial roadmap is done. The
-project builds clean under MSVC (`/W4 /permissive-`), all five test executables
-pass via CTest, and the terminal app runs a stable two-body orbit.
+The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestone
+(**M6: N-body diagnostics**). The project builds clean under MSVC
+(`/W4 /permissive-`), all five test executables pass via CTest, and the terminal
+app runs two N-body scenarios (a two-body orbit and a three-body triangle)
+reporting conserved system diagnostics.
 
 | Module | Type | Provides |
 |---|---|---|
@@ -52,20 +54,27 @@ With the Visual Studio generator, the debug executable is under:
 .\out\build\windows-msvc-debug\Debug\malloy_nbody_terminal.exe
 ```
 
-It runs the normalized sun + planet orbit and prints radius and specific
-orbital energy every 1000 steps. Sample output (abridged):
+It runs two hardcoded scenarios and prints conserved system diagnostics
+(separation, total energy, total angular momentum) periodically. Sample output
+(abridged):
 
 ```text
 MalloySim nbody_terminal
-two-body orbit (normalized units): G=1 dt=0.001 steps=10000
-step      0   radius   1.00000000   specific_energy    -0.50000100
-step   1000   radius   0.99957897   specific_energy    -0.50000089
+
+== two-body orbit (normalized units) ==  bodies=2  dt=0.00100000  steps=10000
+step      0   sep  1.00000000   E_total   -0.00000050   L_total    0.00000100
 ...
-step  10000   radius   1.00027148   specific_energy    -0.50000054
+step  10000   sep  1.00027148   E_total   -0.00000050   L_total    0.00000100
+
+== equilateral three-body (Lagrange) ==  bodies=3  dt=0.00100000  steps=10000
+step      0   sep  1.73205081   E_total   -0.86601529   L_total    2.27951999
+...
+step  10000   sep  1.73143038   E_total   -0.86601509   L_total    2.27951999
 ```
 
-The radius stays close to 1.0 and the specific energy is conserved to ~1e-7
-over 10,000 steps -- the expected behavior of semi-implicit (symplectic) Euler.
+The three-body triangle holds its shape (separation ~sqrt(3)) while total energy
+and angular momentum stay essentially constant -- the conservation you expect
+from semi-implicit (symplectic) Euler.
 
 ## M1-M5 roadmap (complete)
 

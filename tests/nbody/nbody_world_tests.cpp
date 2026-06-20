@@ -19,6 +19,12 @@ using malloy::math::Vec2;
 using malloy::nbody::Body2D;
 using malloy::nbody::NBodySettings;
 using malloy::nbody::NBodyWorld;
+using malloy::nbody::center_of_mass;
+using malloy::nbody::total_angular_momentum;
+using malloy::nbody::total_energy;
+using malloy::nbody::total_kinetic_energy;
+using malloy::nbody::total_momentum;
+using malloy::nbody::total_potential_energy;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
 
@@ -184,6 +190,43 @@ int main()
         const Real final_energy =
             malloy::nbody::specific_orbital_energy(w.bodies()[0], w.bodies()[1], 1.0);
         MALLOY_CHECK_NEAR(final_energy, initial_energy, 0.01);
+    }
+
+    // --- System diagnostics: known values for a hand-computed configuration. ---
+    {
+        const std::vector<Body2D> b = {Body2D{Vec2{0.0, 0.0}, Vec2{1.0, 0.0}, 2.0},
+                                       Body2D{Vec2{4.0, 0.0}, Vec2{0.0, 2.0}, 3.0}};
+        MALLOY_CHECK_NEAR(total_kinetic_energy(b), 7.0, 1e-9);
+        MALLOY_CHECK_NEAR(total_potential_energy(b, 1.0, 0.0), -1.5, 1e-9);
+        MALLOY_CHECK_NEAR(total_energy(b, 1.0, 0.0), 5.5, 1e-9);
+        MALLOY_CHECK_VEC2_NEAR(total_momentum(b), Vec2(2.0, 6.0), 1e-9);
+        MALLOY_CHECK_VEC2_NEAR(center_of_mass(b), Vec2(2.4, 0.0), 1e-9);
+        MALLOY_CHECK_NEAR(total_angular_momentum(b), 24.0, 1e-9);
+    }
+
+    // --- N>2 conservation: a rotating equilateral triangle (Lagrange config)
+    //     keeps its conserved quantities bounded across a run; linear momentum
+    //     is held to machine precision. ---
+    {
+        const Real omega = 0.75984;
+        const std::vector<Body2D> triangle = {
+            Body2D{Vec2{1.0, 0.0}, Vec2{0.0, omega}, 1.0},
+            Body2D{Vec2{-0.5, 0.8660254}, Vec2{-0.8660254 * omega, -0.5 * omega}, 1.0},
+            Body2D{Vec2{-0.5, -0.8660254}, Vec2{0.8660254 * omega, -0.5 * omega}, 1.0}};
+        NBodyWorld world{SimulationSettings{0.001}, NBodySettings{1.0, 0.001}, triangle};
+
+        const Real energy0 = total_energy(world.bodies(), 1.0, 0.001);
+        const Vec2 momentum0 = total_momentum(world.bodies());
+        const Real angular0 = total_angular_momentum(world.bodies());
+
+        for (int i = 0; i < 1000; ++i)
+        {
+            MALLOY_CHECK_TRUE(world.step().ok());
+        }
+
+        MALLOY_CHECK_VEC2_NEAR(total_momentum(world.bodies()), momentum0, 1e-9);
+        MALLOY_CHECK_NEAR(total_energy(world.bodies(), 1.0, 0.001), energy0, 0.02);
+        MALLOY_CHECK_NEAR(total_angular_momentum(world.bodies()), angular0, 0.02);
     }
 
     std::cout << "malloy_nbody_tests passed\n";

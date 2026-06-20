@@ -8,7 +8,7 @@ build it one milestone at a time, and do not expand scope immediately after M5
 Recommended order:
 
 ```text
-M6  — stabilize N-body diagnostics
+M6  — stabilize N-body diagnostics      [done]
 M7  — minimal scenario/config loading
 M8  — simple 2D debug visualization
 M9  — collision primitives
