@@ -66,6 +66,21 @@ target_link_libraries(malloy_sim_core
         malloy::project_warnings
 )
 
+# malloy_nbody (M4): concrete 2D N-body gravity simulation (compiled STATIC).
+add_library(malloy_nbody STATIC
+    src/nbody/nbody.cpp
+)
+add_library(malloy::nbody ALIAS malloy_nbody)
+target_include_directories(malloy_nbody PUBLIC include)
+target_link_libraries(malloy_nbody
+    PUBLIC
+        malloy::math
+        malloy::sim_core
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -151,4 +166,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_sim_core_tests COMMAND malloy_sim_core_tests)
+
+    add_executable(malloy_nbody_tests
+        tests/nbody/nbody_world_tests.cpp
+    )
+
+    target_include_directories(malloy_nbody_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_nbody_tests
+        PRIVATE
+            malloy::nbody
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_nbody_tests COMMAND malloy_nbody_tests)
 endif()
