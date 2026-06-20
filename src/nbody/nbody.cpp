@@ -108,4 +108,14 @@ sim_core::StepResult NBodyWorld::step()
 
     return sim_core::StepResult{sim_core::StepStatus::Ok}; // (6)
 }
+
+math::Real specific_orbital_energy(const Body2D& a, const Body2D& b, math::Real g)
+{
+    const math::Vec2 relative_position = b.position - a.position;
+    const math::Vec2 relative_velocity = b.velocity - a.velocity;
+    const math::Real r = math::length(relative_position);
+    const math::Real v_squared = math::dot(relative_velocity, relative_velocity);
+    const math::Real mu = g * (a.mass + b.mass);
+    return v_squared / math::Real{2} - mu / r;
+}
 } // namespace malloy::nbody

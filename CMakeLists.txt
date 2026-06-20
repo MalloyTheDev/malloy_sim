@@ -88,6 +88,7 @@ if(MALLOY_BUILD_APPS)
 
     target_link_libraries(malloy_nbody_terminal
         PRIVATE
+            malloy::nbody
             malloy::project_options
             malloy::project_warnings
     )

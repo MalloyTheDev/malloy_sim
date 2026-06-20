@@ -167,6 +167,25 @@ int main()
         MALLOY_CHECK_TRUE(max_deviation < tolerance);
     }
 
+    // --- Specific orbital energy: known value, then approximate conservation. ---
+    {
+        const Body2D sun{Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 1.0};
+        const Body2D planet{Vec2{1.0, 0.0}, Vec2{0.0, 1.0}, 1e-6};
+        MALLOY_CHECK_NEAR(malloy::nbody::specific_orbital_energy(sun, planet, 1.0),
+                          -0.500001, 1e-9);
+
+        NBodyWorld w = make_orbit_world();
+        const Real initial_energy =
+            malloy::nbody::specific_orbital_energy(w.bodies()[0], w.bodies()[1], 1.0);
+        for (int i = 0; i < 1000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const Real final_energy =
+            malloy::nbody::specific_orbital_energy(w.bodies()[0], w.bodies()[1], 1.0);
+        MALLOY_CHECK_NEAR(final_energy, initial_energy, 0.01);
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }
