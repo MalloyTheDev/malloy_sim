@@ -36,6 +36,16 @@ else()
     )
 endif()
 
+# ----------------------------------------------------------------------------
+# Libraries
+# ----------------------------------------------------------------------------
+
+# malloy_math (M2): header-only Real + Vec2 vocabulary.
+add_library(malloy_math INTERFACE)
+add_library(malloy::math ALIAS malloy_math)
+target_include_directories(malloy_math INTERFACE include)
+target_link_libraries(malloy_math INTERFACE malloy::project_options)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -67,4 +77,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_smoke_tests COMMAND malloy_smoke_tests)
+
+    add_executable(malloy_math_tests
+        tests/math/vec2_tests.cpp
+    )
+
+    target_include_directories(malloy_math_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_math_tests
+        PRIVATE
+            malloy::math
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_math_tests COMMAND malloy_math_tests)
 endif()
