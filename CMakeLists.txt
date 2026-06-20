@@ -46,6 +46,26 @@ add_library(malloy::math ALIAS malloy_math)
 target_include_directories(malloy_math INTERFACE include)
 target_link_libraries(malloy_math INTERFACE malloy::project_options)
 
+# malloy_time (M3): header-only fixed timestep + tick counter.
+add_library(malloy_time INTERFACE)
+add_library(malloy::time ALIAS malloy_time)
+target_include_directories(malloy_time INTERFACE include)
+target_link_libraries(malloy_time INTERFACE malloy::math malloy::project_options)
+
+# malloy_sim_core (M3): tiny shared simulation vocabulary (compiled STATIC).
+add_library(malloy_sim_core STATIC
+    src/sim_core/sim_core.cpp
+)
+add_library(malloy::sim_core ALIAS malloy_sim_core)
+target_include_directories(malloy_sim_core PUBLIC include)
+target_link_libraries(malloy_sim_core
+    PUBLIC
+        malloy::math
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -95,4 +115,40 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_math_tests COMMAND malloy_math_tests)
+
+    add_executable(malloy_time_tests
+        tests/time/fixed_step_tests.cpp
+    )
+
+    target_include_directories(malloy_time_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_time_tests
+        PRIVATE
+            malloy::time
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_time_tests COMMAND malloy_time_tests)
+
+    add_executable(malloy_sim_core_tests
+        tests/sim_core/sim_core_tests.cpp
+    )
+
+    target_include_directories(malloy_sim_core_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_sim_core_tests
+        PRIVATE
+            malloy::sim_core
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_sim_core_tests COMMAND malloy_sim_core_tests)
 endif()
