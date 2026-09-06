@@ -5,6 +5,7 @@
 #include <malloy/sim_core/sim_core.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <utility>
@@ -94,7 +95,7 @@ int run_scenario(const char* title, const SimulationSettings& sim,
     // needed, so successive frames share a scale and can be compared.
     Viewport view = fit_viewport(positions_of(world.bodies()));
 
-    const auto report = [&world, &nbody, &view](int step_index) {
+    const auto report = [&world, &nbody, &view](std::int64_t step_index) {
         const auto& bodies_now = world.bodies();
         std::cout << "step " << std::setw(6) << step_index;
         if (bodies_now.size() >= 2)
@@ -110,7 +111,10 @@ int run_scenario(const char* title, const SimulationSettings& sim,
     };
 
     report(0);
-    for (int step = 1; step <= steps; ++step)
+    // int64 counter: with steps == INT_MAX an int counter reaches INT_MAX,
+    // passes the test, and overflows on ++, which is undefined behavior and
+    // in practice loops forever.
+    for (std::int64_t step = 1; step <= steps; ++step)
     {
         if (!world.step().ok())
         {

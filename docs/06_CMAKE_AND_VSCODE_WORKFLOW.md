@@ -15,7 +15,10 @@ VS Code extensions:
 
 ## CMake strategy
 
-Use CMake 3.21+, one root `CMakeLists.txt` through M5, `CMakePresets.json` from M1, out-of-source build prevention, `target_compile_features(... cxx_std_20)`, `CMAKE_EXPORT_COMPILE_COMMANDS ON`, `/W4` on MSVC, and explicit `/fp:precise` on MSVC.
+Use CMake 3.21+ for the project itself. The shipped presets additionally
+require CMake 4.2+, because the `Visual Studio 18 2026` generator was added in
+4.2; on an older CMake, configure without a preset or add one naming a
+generator your version has, one root `CMakeLists.txt` through M5, `CMakePresets.json` from M1, out-of-source build prevention, `target_compile_features(... cxx_std_20)`, `CMAKE_EXPORT_COMPILE_COMMANDS ON`, `/W4` on MSVC, and explicit `/fp:precise` on MSVC.
 
 Avoid package managers, install/export rules, complex CMake functions, source globbing, nested CMake files before M5, and dependency fetching before M5.
 

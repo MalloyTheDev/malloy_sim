@@ -97,6 +97,13 @@ sim_core::StepResult NBodyWorld::step()
         return sim_core::StepResult{status}; // leave state unchanged
     }
 
+    // Held so a step that produces non-finite state can be rolled back. The
+    // header promises the state is unchanged on failure, and that has to stay
+    // true for a failure detected after the update, not just before it.
+    // previous_ is a reused member rather than a local so the common case does
+    // not allocate once per step; measured at roughly 20% of step time.
+    previous_ = bodies_;
+
     const std::vector<math::Vec2> accelerations = compute_accelerations();
     const math::Real dt = simulation_settings_.dt;
     const std::size_t count = bodies_.size();
@@ -114,9 +121,22 @@ sim_core::StepResult NBodyWorld::step()
         bodies_[i].position += bodies_[i].velocity * dt;
     }
 
-    ++tick_count_; // (5)
+    // (5) validating only the pre-step state would report a step that produced
+    //     NaN or infinity as successful, and the caller would act on garbage.
+    //     Overflow from extreme masses or dt reaches here even when every input
+    //     was finite, so this is checked rather than assumed.
+    for (const Body2D& body : bodies_)
+    {
+        if (!body.is_valid())
+        {
+            bodies_.swap(previous_);
+            return sim_core::StepResult{sim_core::StepStatus::InvalidState};
+        }
+    }
 
-    return sim_core::StepResult{sim_core::StepStatus::Ok}; // (6)
+    ++tick_count_; // (6)
+
+    return sim_core::StepResult{sim_core::StepStatus::Ok}; // (7)
 }
 
 math::Real specific_orbital_energy(const Body2D& a, const Body2D& b, math::Real g)

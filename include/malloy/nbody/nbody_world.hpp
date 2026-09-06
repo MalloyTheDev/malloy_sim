@@ -38,6 +38,11 @@ public:
     // Advance the simulation by exactly one fixed step. On validation failure
     // the state is left unchanged and the failing status is returned; this
     // never throws (docs/04).
+    //
+    // The state is validated both before and after the update, so a step that
+    // produces non-finite values (overflow from an extreme mass or dt, say)
+    // returns InvalidState and rolls back instead of reporting success. A
+    // successful step therefore always leaves every body finite.
     sim_core::StepResult step();
 
     const std::vector<Body2D>& bodies() const { return bodies_; }
@@ -53,6 +58,10 @@ private:
     sim_core::SimulationSettings simulation_settings_;
     NBodySettings nbody_settings_;
     std::vector<Body2D> bodies_;
+    // Scratch copy of the pre-step state, used only to roll back a step that
+    // produced non-finite values. Kept as a member so the common case reuses
+    // its allocation instead of allocating once per step.
+    std::vector<Body2D> previous_;
     std::uint64_t tick_count_{0};
 };
 } // namespace malloy::nbody

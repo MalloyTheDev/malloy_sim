@@ -361,6 +361,40 @@ int main()
         MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
     }
 
+    // --- Issue #3: a step that produces non-finite state must report failure
+    //     and roll back, not return Ok. Overflow reaches here even when every
+    //     input was finite and passed validate(). ---
+    {
+        // g * mass overflows to infinity: 1e10 * 1e300 exceeds the range of
+        // double, so the acceleration is non-finite even though both bodies and
+        // both settings are individually valid.
+        const std::vector<Body2D> before = {Body2D{Vec2{0.0, 0.0}, Vec2{}, 1e300},
+                                            Body2D{Vec2{1.0, 0.0}, Vec2{}, 1e300}};
+        NBodyWorld w{SimulationSettings{1e10}, NBodySettings{1e10, 1.0}, before};
+        MALLOY_CHECK_TRUE(w.validate() == StepStatus::Ok); // the inputs are fine
+
+        const auto result = w.step();
+        MALLOY_CHECK_TRUE(result.status == StepStatus::InvalidState);
+        MALLOY_CHECK_FALSE(result.ok());
+
+        // Rolled back: the documented "state is left unchanged on failure"
+        // contract has to hold for a failure detected after the update too.
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
+        for (std::size_t i = 0; i < before.size(); ++i)
+        {
+            MALLOY_CHECK_VEC2_NEAR(w.bodies()[i].position, before[i].position, 0.0);
+            MALLOY_CHECK_VEC2_NEAR(w.bodies()[i].velocity, before[i].velocity, 0.0);
+        }
+    }
+
+    // --- Issue #3: a normal step is unaffected by the post-check. ---
+    {
+        NBodyWorld w{SimulationSettings{0.5}, NBodySettings{1.0, 0.0}, two_unit_bodies()};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{1});
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].position, Vec2(0.25, 0.0), eps);
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

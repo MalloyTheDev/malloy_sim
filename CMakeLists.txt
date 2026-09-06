@@ -234,6 +234,13 @@ if(MALLOY_BUILD_TESTS)
             malloy::project_warnings
     )
 
+    # The shipped templates are a deliverable (CLAUDE.md rule 16), so the
+    # scenario tests parse every one of them rather than trusting them by sight.
+    target_compile_definitions(malloy_scenario_tests
+        PRIVATE
+            MALLOY_SCENARIO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scenarios"
+    )
+
     add_test(NAME malloy_scenario_tests COMMAND malloy_scenario_tests)
 
     add_executable(malloy_ascii_tests

@@ -38,7 +38,7 @@ validates its input, holds its invariants, and ships tested templates.
 |---|---|
 | Language | C++20 |
 | Build system | CMake |
-| Minimum CMake | 3.21 |
+| Minimum CMake | 3.21 for the project, 4.2 for the shipped presets |
 | Editor | VS Code |
 | VS Code workflow | CMake Tools |
 | Compiler first | MSVC on Windows |

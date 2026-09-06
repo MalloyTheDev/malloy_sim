@@ -18,6 +18,16 @@ ScenarioParseResult make_error(std::size_t line_number, const std::string& messa
                                "line " + std::to_string(line_number) + ": " + message,
                                {}};
 }
+
+// True when nothing but whitespace remains. A directive that parsed its fields
+// and left tokens behind is a malformed line, not a valid one: silently
+// dropping the remainder would accept a body line written with 3D fields and
+// run a different simulation than the file describes.
+bool at_end_of_directive(std::istringstream& tokens)
+{
+    tokens >> std::ws;
+    return tokens.eof();
+}
 } // namespace
 
 ScenarioParseResult parse_scenario(std::istream& input)
@@ -84,6 +94,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "steps requires an integer");
             }
+            if (scenario.steps < 0)
+            {
+                return make_error(line_number, "steps must be >= 0");
+            }
         }
         else if (key == "output_every")
         {
@@ -91,11 +105,29 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "output_every requires an integer");
             }
+            if (scenario.output_every < 0)
+            {
+                return make_error(line_number, "output_every must be >= 0");
+            }
         }
         else
         {
             return make_error(line_number, "unknown key '" + key + "'");
         }
+
+        if (!at_end_of_directive(tokens))
+        {
+            std::string extra;
+            tokens >> extra;
+            return make_error(line_number, "unexpected extra token '" + extra + "'");
+        }
+    }
+
+    // --- #7: getline stops on a read error as well as on end of input, so a
+    //     truncated read would otherwise be reported as a successful parse.
+    if (input.bad())
+    {
+        return make_error(line_number, "read error");
     }
 
     return ScenarioParseResult{true, "", std::move(scenario)};
@@ -103,7 +135,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
 
 ScenarioParseResult parse_scenario_file(const std::string& path)
 {
-    std::ifstream file(path);
+    // Binary mode on purpose: in text mode the MSVC CRT treats 0x1A as end of
+    // file, silently truncating a scenario mid-parse and reporting success.
+    // CRLF still parses, because '' is whitespace to operator>>.
+    std::ifstream file(path, std::ios::binary);
     if (!file)
     {
         return ScenarioParseResult{false, "cannot open scenario file: " + path, {}};

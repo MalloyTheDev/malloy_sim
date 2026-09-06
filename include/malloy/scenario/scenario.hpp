@@ -42,7 +42,11 @@ struct ScenarioParseResult
 //   output_every <value>  steps between reports    (default 100)
 //   body <mass> <px> <py> <vx> <vy>
 //
-// Only syntax is checked here (bad numbers, wrong field counts, unknown keys).
+// Only syntax is checked here: bad numbers, too few or too many fields on a
+// line, unknown keys, and run lengths that cannot be run at all (a negative
+// `steps` or `output_every`). Trailing tokens are an error rather than being
+// ignored, so a body line written with 3D fields is rejected instead of
+// silently running a different simulation.
 // Semantic validity (dt > 0, mass > 0, ...) is left to NBodyWorld::validate so
 // that rule lives in exactly one place.
 ScenarioParseResult parse_scenario(std::istream& input);

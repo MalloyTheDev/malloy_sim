@@ -2,6 +2,7 @@
 
 #include <test_check.hpp>
 
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -145,6 +146,39 @@ int main()
         MALLOY_CHECK_NEAR(view.max_x, 1.0, eps);
         MALLOY_CHECK_NEAR(view.min_y, -1.0, eps);
         MALLOY_CHECK_NEAR(view.max_y, 1.0, eps);
+    }
+
+    // --- Issue #5: a viewport that overflowed to infinity used to make the
+    //     normalized coordinates inf/inf = NaN. Every comparison against NaN is
+    //     false, so the point escaped the clip test and reached std::lround,
+    //     whose NaN result is unspecified: 0 on MSVC, LONG_MIN on GCC, which
+    //     then casts to a huge index. ---
+    {
+        const Real infinity_value = std::numeric_limits<Real>::infinity();
+        const Viewport infinite{-infinity_value, infinity_value, -1.0, 1.0};
+        const std::string grid = render({Vec2{0.0, 0.0}}, infinite, 3, 3);
+        const std::string expected = "+---+\n"
+                                     "|   |\n"
+                                     "|   |\n"
+                                     "|   |\n"
+                                     "+---+\n";
+        MALLOY_CHECK_TRUE(grid == expected); // skipped, not drawn at column 0
+    }
+
+    // --- Issue #5: fit_viewport never returns a non-finite rectangle, even
+    //     when every input point is finite. Coordinates near the limits of
+    //     double make the extent, and then the margin, overflow. ---
+    {
+        const Viewport view = fit_viewport({Vec2{-1e308, 0.0}, Vec2{1e308, 0.0}}, 0.1);
+        MALLOY_CHECK_TRUE(std::isfinite(view.min_x));
+        MALLOY_CHECK_TRUE(std::isfinite(view.max_x));
+        MALLOY_CHECK_TRUE(std::isfinite(view.min_y));
+        MALLOY_CHECK_TRUE(std::isfinite(view.max_y));
+
+        // And the pair renders without indexing out of range.
+        const std::string grid =
+            render({Vec2{-1e308, 0.0}, Vec2{1e308, 0.0}}, view, 5, 3);
+        MALLOY_CHECK_TRUE(grid.size() > 0);
     }
 
     std::cout << "malloy_ascii_tests passed\n";

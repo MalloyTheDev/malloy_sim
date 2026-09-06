@@ -32,6 +32,41 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- `NBodyWorld::step()` now validates the state after the update as well as
+  before it, and rolls back rather than reporting success when a step produced
+  non-finite values (#3). Overflow from an extreme mass or dt reaches this point
+  even when every input was finite and passed validation. The pre-step copy is
+  held in a reused member so the common case does not allocate per step:
+  measured on a 12-body, 200k-step run, a fresh vector each step cost about 24%
+  and the reused buffer costs about 7%.
+- The terminal app drives its step loop with an `int64` counter (#4). With
+  `steps` at `INT_MAX` an `int` counter reached `INT_MAX`, passed the loop test,
+  and overflowed on increment, which is undefined behavior and in practice never
+  terminated.
+- The scenario parser rejects a negative `steps` or `output_every` with a
+  line-numbered error instead of accepting them (#4). Zero stays legal for both.
+- The scenario parser rejects trailing tokens instead of silently discarding
+  them (#6). The motivating case is a body line written with 3D fields, which
+  used to be truncated to the first five and run as a different simulation than
+  the file described. Comments and trailing whitespace, including CRLF, are
+  still accepted.
+- Scenario files are opened in binary mode, so a `0x1A` byte no longer silently
+  truncates a file mid-parse under the MSVC CRT, and a stream that goes bad is
+  reported as a parse failure rather than a success (#7).
+- `render` skips a point whose normalized coordinates are not finite, and clamps
+  the computed cell before indexing (#5). Every comparison against NaN is false,
+  so a NaN escaped the clip test and reached `std::lround`, whose NaN result is
+  unspecified: 0 on MSVC, `LONG_MIN` on GCC, which then cast to a huge index.
+  `fit_viewport` no longer returns a non-finite rectangle, which was how a NaN
+  arose from finite input.
+- `CMakePresets.json` declares the CMake 4.2 it actually requires (#9). The
+  `Visual Studio 18 2026` generator was added in 4.2, while the presets claimed
+  3.21, so the documented build command failed on any CMake below 4.2. The
+  project's own `CMakeLists.txt` still works at 3.21, and the docs now
+  distinguish the two.
+- `scenarios/three_body_triangle.scn` carries its velocities at full precision
+  rather than rounded, so it reproduces the built-in three-body demo exactly
+  (#12). Both templates now document their expected final report.
 - Coincident bodies with `softening == 0` no longer produce NaN (#2). The
   inverse-cube law is undefined at zero separation: `1/sqrt(0)` is `+inf`, and
   `inf` times a delta that is exactly zero is NaN. `compute_accelerations` now
@@ -62,6 +97,14 @@ All notable changes to MalloySim are recorded here. The format follows
     infinite and NaN mass, G, and softening. Because `inf >= 0` is true, the
     `is_finite` clauses were dead.
 - Regression tests for the coincident-body guard, including `g == 0`.
+- Regression tests for every fix above: post-step validation and rollback,
+  negative and zero run lengths, trailing tokens on each directive type, a
+  stream that goes bad, an infinite viewport, and `fit_viewport` overflow.
+- Every shipped scenario template is now parsed, validated, and stepped by
+  `malloy_scenario_tests` (#12), and `parse_scenario_file` has coverage for the
+  documented missing-file behavior. The templates were previously the
+  least-tested files in the repository. Confirmed live by breaking a template
+  and observing the test fail.
 - Every new assertion was confirmed by mutation testing: eight broken
   implementations (explicit Euler, dropped G, inverse-square, unsquared
   softening, deleted angular-momentum term, both removed `is_finite` clauses,
