@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted, and implemented as of M10.
 
 ## Context
 
@@ -29,22 +29,25 @@ A scenario file selects its domain with a `type` key. The loader dispatches on
 that key with a plain switch, calling one concrete parser and constructing one
 concrete world.
 
-This is planned, not implemented: the shipped parser rejects `type` as an
-unknown key, and there is no dispatch switch yet. The intended shape is:
+Implemented in M10, when `malloy_particles` became the second domain:
 
 ```text
-type nbody          # planned, not parsed today
+type nbody          # or: particles
 dt 0.001
 steps 10000
 body 1.0  0.0 0.0  0.0 0.0
 ```
 
+`type` defaults to `nbody` when absent, so the format change was additive and
+both existing templates kept working untouched. A key belonging to another
+domain is a parse error rather than being ignored.
+
 There is no base class, no virtual `step()`, no registry, and no plugin
 mechanism. Adding a domain means adding a library, a parser branch, and a test
 executable. It does not mean touching `malloy_sim_core`.
 
-The `type` key is introduced only when a second domain actually exists. Until
-then the scenario format stays as M7 shipped it.
+The `type` key was introduced only once a second domain actually existed, which
+happened in M10. Before that the format stayed exactly as M7 shipped it.
 
 ## Rationale
 

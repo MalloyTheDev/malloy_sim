@@ -1,6 +1,7 @@
 #include <malloy/ascii/grid.hpp>
 #include <malloy/math/math.hpp>
 #include <malloy/nbody/nbody.hpp>
+#include <malloy/particles/particles.hpp>
 #include <malloy/scenario/scenario.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 
@@ -28,8 +29,14 @@ using malloy::nbody::Body2D;
 using malloy::nbody::NBodySettings;
 using malloy::nbody::NBodyWorld;
 using malloy::nbody::total_angular_momentum;
+using malloy::particles::Particle2D;
 using malloy::nbody::total_energy;
+using malloy::particles::total_kinetic_energy;
+using malloy::particles::total_momentum;
+using malloy::particles::ParticleSettings;
+using malloy::particles::ParticleWorld;
 using malloy::scenario::parse_scenario_file;
+using malloy::scenario::ScenarioType;
 using malloy::scenario::ScenarioParseResult;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
@@ -54,14 +61,27 @@ std::vector<Vec2> positions_of(const std::vector<Body2D>& bodies)
     return points;
 }
 
+// The same, for the other domain. Two small loops rather than a shared
+// abstraction over "things with a position": the duplication is three lines and
+// the abstraction would be a template or a base class (ADR 0006).
+std::vector<Vec2> particle_positions(const std::vector<Particle2D>& particles)
+{
+    std::vector<Vec2> points;
+    points.reserve(particles.size());
+    for (const Particle2D& p : particles)
+    {
+        points.push_back(p.position);
+    }
+    return points;
+}
+
 // Draws the current body positions, first expanding `view` so that every body
 // is inside it. The view only ever grows: refitting it from scratch each frame
 // would rescale the picture every report and make a stationary body appear to
 // drift, while growing keeps the framing steady and still guarantees no body is
 // silently clipped. The extents are printed so a change of scale is visible.
-void print_view(Viewport& view, const std::vector<Body2D>& bodies)
+void print_view(Viewport& view, const std::vector<Vec2>& points)
 {
-    const std::vector<Vec2> points = positions_of(bodies);
     const Viewport frame = fit_viewport(points);
 
     view.min_x = std::min(view.min_x, frame.min_x);
@@ -72,6 +92,55 @@ void print_view(Viewport& view, const std::vector<Body2D>& bodies)
     std::cout << render(points, view, view_width, view_height) << "  view x ["
               << view.min_x << ", " << view.max_x << "]  y [" << view.min_y << ", "
               << view.max_y << "]\n";
+}
+
+// Runs one particle scenario to completion, reporting the conserved quantities
+// this domain actually has. Deliberately a separate function from
+// run_scenario: ParticleWorld and NBodyWorld share no base class, and ADR 0006
+// says a dispatch switch is the whole mechanism.
+int run_particles(const char* title, const SimulationSettings& sim,
+                  const ParticleSettings& settings, std::vector<Particle2D> particles,
+                  int steps, int output_every)
+{
+    ParticleWorld world{sim, settings, std::move(particles)};
+
+    std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
+              << "  dt=" << sim.dt << "  steps=" << steps
+              << "  restitution=" << settings.restitution << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(particle_positions(world.particles()));
+
+    const auto report = [&world, &view](std::int64_t step_index) {
+        const auto& now = world.particles();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        std::cout << "   KE " << std::setw(16) << total_kinetic_energy(now)
+                  << "   p " << std::setw(16) << total_momentum(now).x << std::setw(16)
+                  << total_momentum(now).y << '\n';
+        std::cout << std::fixed;
+        print_view(view, particle_positions(now));
+    };
+
+    report(0);
+    for (std::int64_t step = 1; step <= steps; ++step)
+    {
+        if (!world.step().ok())
+        {
+            std::cerr << title << ": step " << step << " failed\n";
+            return 1;
+        }
+        if (output_every > 0 && step % output_every == 0)
+        {
+            report(step);
+        }
+    }
+    return 0;
 }
 
 // Runs one scenario to completion, printing system diagnostics every
@@ -115,7 +184,7 @@ int run_scenario(const char* title, const SimulationSettings& sim,
                   << "   L_total " << std::setw(16) << total_angular_momentum(bodies_now)
                   << '\n';
         std::cout << std::fixed;
-        print_view(view, bodies_now);
+        print_view(view, positions_of(bodies_now));
     };
 
     report(0);
@@ -178,8 +247,18 @@ int main(int argc, char** argv)
             return 1;
         }
         const auto& s = parsed.scenario;
-        return run_scenario(argv[1], s.simulation, s.nbody_settings, s.bodies, s.steps,
-                            s.output_every);
+        // The whole multi-domain mechanism: one switch, one concrete runner per
+        // domain, no base class (ADR 0006).
+        switch (s.type)
+        {
+        case ScenarioType::NBody:
+            return run_scenario(argv[1], s.simulation, s.nbody_settings, s.bodies,
+                                s.steps, s.output_every);
+        case ScenarioType::Particles:
+            return run_particles(argv[1], s.simulation, s.particle_settings,
+                                 s.particle_list, s.steps, s.output_every);
+        }
+        return 1;
     }
 
     return run_builtin_scenarios();

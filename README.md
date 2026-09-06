@@ -31,8 +31,8 @@ complete and shipping (milestones M1-M8).
 
 The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 (**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
-**M9: collision primitives**).
-The project builds clean under MSVC (`/W4 /permissive-`), all eight test
+**M9: collision primitives**, **M10: colliding particles**).
+The project builds clean under MSVC (`/W4 /permissive-`), all nine test
 executables pass via CTest, and the terminal app runs N-body scenarios --
 built-in, or loaded from a text file -- reporting conserved system diagnostics
 alongside an ASCII view of the bodies.
@@ -46,6 +46,7 @@ alongside an ASCII view of the bodies.
 | `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | `Circle`, `Aabb`, overlap tests, contact normal/depth/point |
+| `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, wall containment |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
@@ -66,10 +67,26 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. Gravity ships two today.
+and runnable with the shipped binary. Gravity ships two and colliding particles
+one, and every template is parsed, validated and stepped by the test suite.
 
-The active track is classical mechanics depth (collision, rigid bodies,
-ballistics, springs and oscillators). Work is gated one milestone at a time; see
+A scenario names its domain with a `type` key, dispatched by a plain switch to
+one concrete world per domain. There is no simulation base class:
+
+```text
+type particles
+dt 0.004
+steps 6000
+restitution 1.0
+bounds -3.0 -3.0 3.0 3.0
+particle 1.0  0.30  -2.0 -2.0   1.30 0.90
+```
+
+`type` defaults to `nbody` when absent, so scenarios written before it existed
+keep working unchanged.
+
+The active track is classical mechanics depth: collision geometry and colliding
+particles have shipped; rigid bodies, ballistics and springs remain. Work is gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 
 ## Build
@@ -196,6 +213,7 @@ built-in scenarios shown above.
 | M7 | `malloy_scenario`: scenario/config text loading | ✅ Done |
 | M8 | `malloy_ascii`: 2D ASCII debug visualization | ✅ Done |
 | M9 | `malloy_collide`: 2D collision primitives and contacts | ✅ Done |
+| M10 | `malloy_particles`: colliding particles + multi-domain dispatch | ✅ Done |
 
 ## Out of scope (gated)
 

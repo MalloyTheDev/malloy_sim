@@ -142,6 +142,76 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M10] - 2026-09-06  (colliding particles + multi-domain dispatch)
+
+### Added
+
+- `malloy_particles` (STATIC, `malloy::particles`): `Particle2D`,
+  `ParticleSettings`, and a concrete `ParticleWorld` with non-rotational contact
+  response (positional correction split by inverse mass, plus an impulse along
+  the contact normal), wall containment, and `total_momentum` /
+  `total_kinetic_energy` diagnostics.
+- `malloy_particles_tests`.
+- A `type` key in the scenario format selecting the domain, with `restitution`,
+  `bounds`, and `particle` keys for the particles domain.
+- `scenarios/bouncing_particles.scn`, the first non-gravity template.
+
+### Changed
+
+- `Scenario` carries a `ScenarioType` tag and both domains' field sets. `type`
+  defaults to `NBody` when absent, so the format change is additive and both
+  existing templates still parse and run byte-identically.
+- `apps/nbody_terminal/main.cpp` dispatches on that tag to one concrete runner
+  per domain, and reports the quantities each domain actually conserves.
+- `print_view` takes a point list rather than a body list, so both domains share
+  the ASCII view without either knowing the other's type.
+
+### Architecture Notes
+
+- This is the first milestone with two domains, and it is what ADR 0006 was
+  waiting for: the `type` key was introduced only once a second world type
+  actually existed. The whole dispatch mechanism is one switch and one concrete
+  runner per domain. No base class, no virtual step, no registry, and
+  `malloy_sim_core` is unchanged at three types.
+- `Particle2D` is a separate type rather than a widened `nbody::Body2D`.
+  Gravity has no use for a radius, and `Body2D` is documented as pure
+  simulation state, so each domain owns its own concrete state instead. This
+  also settles the M9 question of where a collision radius lives.
+- M10 was re-scoped from rigid bodies to colliding particles, so collision
+  became demonstrable one milestone sooner. Rigid bodies (orientation, angular
+  velocity, torque) moved to M11.
+- Walls are immovable, so they carry momentum away. Momentum is a conserved
+  quantity only for a run where nothing touches a wall, and the tests and the
+  template both say so rather than asserting a conservation that does not hold.
+
+### Tests
+
+- Invariants: particle/particle collisions conserve momentum at every
+  restitution, restitution 1 also conserves kinetic energy exactly, and anything
+  below it strictly removes energy.
+- Exact hand-computed results: equal-mass head-on elastic collision exchanges
+  velocities; restitution 0 leaves no separation at all; free flight moves by
+  exactly `velocity * dt`.
+- All four walls, each a separate branch, with position and both velocity
+  components asserted.
+- Containment over a 4000-step run in a crowded box, and no energy created from
+  nothing over a 3000-step elastic run.
+- Determinism to exact equality, and validation of settings, particles, and a
+  particle too large for its box.
+- Multi-domain parsing: absent `type` still means nbody, a key from the wrong
+  domain is a line-numbered error, an unknown type is rejected by name, `type`
+  after a domain key is rejected, and every new key's field count is checked.
+- Verified by mutation testing. Nine mutations were applied; two escaped and
+  exposed real coverage gaps, both since closed:
+  - re-impulsing an already separating pair conserves both momentum and energy,
+    so no invariant could see it; it needed a direct velocity assertion.
+  - splitting the positional correction by the wrong mass is invisible with
+    equal masses and never touches velocity; it needed an unequal-mass pair.
+  A third mutation (resolving each pair twice) is an equivalent mutant: the
+  second visit finds the pair separating and returns early, and a self-pair
+  applies equal and opposite corrections to the same object. That is reasoned,
+  not measured.
+
 ## [M9] - 2026-09-06  (collision primitives)
 
 ### Added

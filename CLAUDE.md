@@ -40,15 +40,17 @@ It is still not:
 ## Current phase
 
 ```text
-M1-M9 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
-scenario loading, ASCII debug view, collision primitives.
+M1-M10 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+scenario loading, ASCII debug view, collision primitives, colliding particles
+with multi-domain scenario dispatch.
 ```
 
-Active track: **classical mechanics depth**. M9 (collision primitives) is done;
-rigid bodies, ballistics, and springs remain, then multi-domain scenario
-dispatch, then wider domains. See `docs/07_POST_M5_ROADMAP.md`.
+Active track: **classical mechanics depth**. M9 (collision geometry) and M10
+(colliding particles) are done, and M10 also introduced the multi-domain
+`type` key. Rigid bodies, ballistics, and springs remain. See
+`docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M10 or later) unless explicitly asked, and
+Do not start any further milestone (M11 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -67,8 +69,8 @@ M5: terminal N-body demo               [done]
 1. Do not jump ahead; work one milestone at a time.
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
-4. Collision geometry landed in M9 (`malloy_collide`). Do not add contact response until its dedicated milestone.
-5. Do not add rigid bodies until their dedicated milestone.
+4. Collision geometry landed in M9 and non-rotational contact response in M10. Do not add rotational (rigid-body) response until its dedicated milestone.
+5. Do not add rigid bodies, meaning orientation, angular velocity, or torque, until their dedicated milestone.
 6. Do not add 3D until its dedicated milestone.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
@@ -91,17 +93,19 @@ and the tiny `malloy::sim_core` vocabulary (`SimulationSettings`, `StepStatus`,
 Domains are selected by a `type` key in the scenario file, dispatched with a
 plain switch to one concrete loader and one concrete world per domain.
 
-PLANNED, NOT YET IMPLEMENTED. The shipped parser rejects `type` as an unknown
-key. This is the shape the format will take when a second domain exists:
+Implemented in M10, once `malloy_particles` gave the format a second domain to
+dispatch to:
 
 ```text
-type nbody          # planned, not parsed today
+type nbody          # or: particles
 dt 0.001
 steps 10000
 ```
 
-Add the `type` key only once a second domain actually exists. Until then the
-scenario format stays exactly as it is.
+`type` defaults to `nbody` when absent, so scenarios written before the key
+existed keep working unchanged. A key belonging to another domain is a parse
+error, so a typo in `type` surfaces immediately instead of silently running the
+wrong simulation.
 
 ## Template library
 

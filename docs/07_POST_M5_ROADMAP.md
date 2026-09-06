@@ -23,6 +23,7 @@ M6  - stabilize N-body diagnostics      [done]
 M7  - minimal scenario/config loading   [done]
 M8  - simple 2D debug visualization     [done]
 M9  - collision primitives              [done]
+M10 - colliding particles               [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -36,20 +37,22 @@ does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
 collision demonstrable.
 
 ```text
-M10 - 2D rigid body basics
-M11 - ballistics/projectiles
-M12 - springs and oscillators
+M11 - 2D rigid body basics
+M12 - ballistics/projectiles
+M13 - springs and oscillators
 ```
+
+M10 was re-scoped from rigid bodies to colliding particles, so that collision
+became demonstrable one milestone sooner and the project gained a second real
+domain. Rigid bodies (orientation, angular velocity, torque) moved to M11.
 
 ## Track 2: the multi-domain shell
 
-Only meaningful once Track 1 has produced a genuine second world type. This is
-where the scenario `type` key and the dispatch switch are introduced, per ADR
-0006. Introducing it earlier would be speculative infrastructure.
+The scenario `type` key and the dispatch switch landed in M10, because that is
+when a genuine second world type first existed. What remains is hardening.
 
 ```text
-M13 - multi-domain scenario dispatch
-M14 - template library hardening
+M14 - template library hardening        (dispatch itself shipped in M10)
 ```
 
 ## Track 3: wider domains (direction, not commitment)

@@ -90,6 +90,7 @@ target_include_directories(malloy_scenario PUBLIC include)
 target_link_libraries(malloy_scenario
     PUBLIC
         malloy::nbody
+        malloy::particles
         malloy::sim_core
         malloy::math
         malloy::project_options
@@ -120,6 +121,22 @@ target_include_directories(malloy_collide PUBLIC include)
 target_link_libraries(malloy_collide
     PUBLIC
         malloy::math
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
+# malloy_particles (M10): 2D colliding particles (compiled STATIC).
+add_library(malloy_particles STATIC
+    src/particles/particles.cpp
+)
+add_library(malloy::particles ALIAS malloy_particles)
+target_include_directories(malloy_particles PUBLIC include)
+target_link_libraries(malloy_particles
+    PUBLIC
+        malloy::collide
+        malloy::math
+        malloy::sim_core
         malloy::project_options
     PRIVATE
         malloy::project_warnings
@@ -292,4 +309,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_collide_tests COMMAND malloy_collide_tests)
+
+    add_executable(malloy_particles_tests
+        tests/particles/particle_world_tests.cpp
+    )
+
+    target_include_directories(malloy_particles_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_particles_tests
+        PRIVATE
+            malloy::particles
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_particles_tests COMMAND malloy_particles_tests)
 endif()

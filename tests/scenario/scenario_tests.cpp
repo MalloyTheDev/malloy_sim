@@ -1,6 +1,7 @@
 #include <malloy/scenario/scenario.hpp>
 
 #include <malloy/nbody/nbody.hpp>
+#include <malloy/particles/particles.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <test_check.hpp>
 
@@ -154,7 +155,8 @@ int main()
     //     the least-tested files in the repository. ---
 #ifdef MALLOY_SCENARIO_DIR
     {
-        const char* templates[] = {"two_body.scn", "three_body_triangle.scn"};
+        const char* templates[] = {"two_body.scn", "three_body_triangle.scn",
+                                   "bouncing_particles.scn"};
         for (const char* name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;
@@ -166,13 +168,27 @@ int main()
                           << '\n';
                 return 1;
             }
-            MALLOY_CHECK_TRUE(r.scenario.bodies.size() >= 2);
             MALLOY_CHECK_TRUE(r.scenario.steps > 0);
 
-            NBodyWorld world{r.scenario.simulation, r.scenario.nbody_settings,
-                             r.scenario.bodies};
-            MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-            MALLOY_CHECK_TRUE(world.step().ok());
+            // Same dispatch the app performs, so a template is validated by the
+            // domain it actually declares.
+            if (r.scenario.type == malloy::scenario::ScenarioType::NBody)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.bodies.size() >= 2);
+                NBodyWorld world{r.scenario.simulation, r.scenario.nbody_settings,
+                                 r.scenario.bodies};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            else
+            {
+                MALLOY_CHECK_TRUE(r.scenario.particle_list.size() >= 2);
+                malloy::particles::ParticleWorld world{r.scenario.simulation,
+                                                      r.scenario.particle_settings,
+                                                      r.scenario.particle_list};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
         }
     }
 #endif
@@ -184,6 +200,107 @@ int main()
             malloy::scenario::parse_scenario_file("no_such_scenario_12345.scn");
         MALLOY_CHECK_FALSE(r.ok);
         MALLOY_CHECK_FALSE(r.error.empty());
+    }
+
+    // --- Issue: multi-domain dispatch. An absent `type` still means nbody, so
+    //     every scenario written before the key existed keeps working. ---
+    {
+        std::istringstream in("dt 0.5\ng 2.0\nbody 1.0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::NBody);
+        MALLOY_CHECK_EQ(r.scenario.bodies.size(), std::size_t{1});
+    }
+    {
+        // Stating it explicitly is identical.
+        std::istringstream in("type nbody\ng 2.0\nbody 1.0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::NBody);
+    }
+
+    // --- A particles scenario parses into the particle fields. ---
+    {
+        std::istringstream in("type particles\n"
+                              "dt 0.01\n"
+                              "steps 50\n"
+                              "restitution 0.25\n"
+                              "bounds -2 -3 4 5\n"
+                              "particle 1.5 0.4 1.0 2.0 3.0 4.0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Particles);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.restitution, 0.25, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.bounds.min.x, -2.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.bounds.min.y, -3.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.bounds.max.x, 4.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.bounds.max.y, 5.0, eps);
+        MALLOY_CHECK_EQ(r.scenario.particle_list.size(), std::size_t{1});
+        // Every field distinct, so a swapped pair in the constructor shows up.
+        MALLOY_CHECK_NEAR(r.scenario.particle_list[0].mass, 1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_list[0].radius, 0.4, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_list[0].position.x, 1.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_list[0].position.y, 2.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_list[0].velocity.x, 3.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_list[0].velocity.y, 4.0, eps);
+    }
+
+    // --- A key from the wrong domain is an error, so a typo in `type` surfaces
+    //     immediately instead of silently running the wrong simulation. ---
+    {
+        std::istringstream in("type particles\nbody 1.0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+        MALLOY_CHECK_TRUE(r.error.find("line 2") != std::string::npos);
+    }
+    {
+        std::istringstream in("type nbody\nparticle 1.0 0.5 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+    }
+    {
+        std::istringstream in("type nbody\nrestitution 0.5\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+    }
+    {
+        std::istringstream in("type particles\ng 1.0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+    }
+
+    // --- An unknown type is rejected by name. ---
+    {
+        std::istringstream in("type fluid\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+        MALLOY_CHECK_TRUE(r.error.find("fluid") != std::string::npos);
+    }
+
+    // --- `type` after a domain key is rejected: the keys already read would
+    //     have been validated against the wrong domain. ---
+    {
+        std::istringstream in("body 1.0 0 0 0 0\ntype particles\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+        MALLOY_CHECK_TRUE(r.error.find("line 2") != std::string::npos);
+    }
+
+    // --- Field counts on the new keys. ---
+    {
+        std::istringstream in("type particles\nparticle 1.0 0.5 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok); // one field short
+    }
+    {
+        std::istringstream in("type particles\nbounds -1 -1 1\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+    }
+    {
+        std::istringstream in("type particles\nbounds -1 -1 1 1 EXTRA\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok); // trailing tokens still rejected
     }
 
     std::cout << "malloy_scenario_tests passed\n";

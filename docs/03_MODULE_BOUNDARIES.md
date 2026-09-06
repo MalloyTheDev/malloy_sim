@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M9). These boundaries are in force
+> All modules below are implemented (M2-M10). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -36,7 +36,7 @@ Not responsible for printing, rendering, app loop policy, config files, input, o
 
 ## `malloy_scenario`
 
-Responsible for parsing a scenario/config text file into `SimulationSettings`, `NBodySettings`, bodies, and run length, and for reporting syntax errors with a line number.
+Responsible for parsing a scenario/config text file into a `Scenario` for whichever domain its `type` key names, and for reporting syntax errors with a line number. It knows every domain's key set, which is the price of a plain dispatch switch and is cheaper than the abstraction it replaces.
 
 Not responsible for semantic validation (that stays in `NBodyWorld`), physics, printing, rendering, or CLI argument handling.
 
@@ -51,6 +51,12 @@ Not responsible for physics, body types, simulation state, terminal control sequ
 Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, and contact data (normal, penetration depth, contact point), including a documented deterministic answer wherever the contact normal is geometrically undefined.
 
 Not responsible for bodies, mass, velocity, contact response, integration, broadphase acceleration, or scenario loading. Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
+
+## `malloy_particles`
+
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, and its own validation and diagnostics.
+
+Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, gravity, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 
 ## `malloy_nbody_terminal`
 

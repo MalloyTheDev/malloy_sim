@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 
+#include <malloy/collide/shapes.hpp>
 #include <malloy/math/vec2.hpp>
 
 namespace malloy::scenario
@@ -35,6 +36,9 @@ ScenarioParseResult parse_scenario(std::istream& input)
     Scenario scenario;
     std::string line;
     std::size_t line_number = 0;
+    // `type` selects which domain keys are legal, so it has to be settled
+    // before any of them appear.
+    bool saw_domain_key = false;
 
     while (std::getline(input, line))
     {
@@ -53,13 +57,43 @@ ScenarioParseResult parse_scenario(std::istream& input)
             continue; // blank or comment-only line
         }
 
-        if (key == "body")
+        if (key == "type")
+        {
+            std::string value;
+            if (!(tokens >> value))
+            {
+                return make_error(line_number, "type requires nbody or particles");
+            }
+            if (value == "nbody")
+            {
+                scenario.type = ScenarioType::NBody;
+            }
+            else if (value == "particles")
+            {
+                scenario.type = ScenarioType::Particles;
+            }
+            else
+            {
+                return make_error(line_number, "unknown type '" + value + "'");
+            }
+            if (saw_domain_key)
+            {
+                return make_error(line_number,
+                                  "type must come before any domain-specific key");
+            }
+        }
+        else if (key == "body")
         {
             math::Real mass{};
             math::Real px{};
             math::Real py{};
             math::Real vx{};
             math::Real vy{};
+            if (scenario.type != ScenarioType::NBody)
+            {
+                return make_error(line_number, "body belongs to type nbody");
+            }
+            saw_domain_key = true;
             if (!(tokens >> mass >> px >> py >> vx >> vy))
             {
                 return make_error(line_number, "body requires: mass px py vx vy");
@@ -76,6 +110,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "g")
         {
+            if (scenario.type != ScenarioType::NBody)
+            {
+                return make_error(line_number, "g belongs to type nbody");
+            }
+            saw_domain_key = true;
             if (!(tokens >> scenario.nbody_settings.g))
             {
                 return make_error(line_number, "g requires a number");
@@ -83,6 +122,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "softening")
         {
+            if (scenario.type != ScenarioType::NBody)
+            {
+                return make_error(line_number, "softening belongs to type nbody");
+            }
+            saw_domain_key = true;
             if (!(tokens >> scenario.nbody_settings.softening))
             {
                 return make_error(line_number, "softening requires a number");
@@ -109,6 +153,57 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "output_every must be >= 0");
             }
+        }
+        else if (key == "restitution")
+        {
+            if (scenario.type != ScenarioType::Particles)
+            {
+                return make_error(line_number, "restitution belongs to type particles");
+            }
+            saw_domain_key = true;
+            if (!(tokens >> scenario.particle_settings.restitution))
+            {
+                return make_error(line_number, "restitution requires a number");
+            }
+        }
+        else if (key == "bounds")
+        {
+            if (scenario.type != ScenarioType::Particles)
+            {
+                return make_error(line_number, "bounds belongs to type particles");
+            }
+            saw_domain_key = true;
+            math::Real min_x{};
+            math::Real min_y{};
+            math::Real max_x{};
+            math::Real max_y{};
+            if (!(tokens >> min_x >> min_y >> max_x >> max_y))
+            {
+                return make_error(line_number, "bounds requires: minx miny maxx maxy");
+            }
+            scenario.particle_settings.bounds =
+                collide::Aabb{math::Vec2{min_x, min_y}, math::Vec2{max_x, max_y}};
+        }
+        else if (key == "particle")
+        {
+            if (scenario.type != ScenarioType::Particles)
+            {
+                return make_error(line_number, "particle belongs to type particles");
+            }
+            saw_domain_key = true;
+            math::Real mass{};
+            math::Real radius{};
+            math::Real px{};
+            math::Real py{};
+            math::Real vx{};
+            math::Real vy{};
+            if (!(tokens >> mass >> radius >> px >> py >> vx >> vy))
+            {
+                return make_error(line_number,
+                                  "particle requires: mass radius px py vx vy");
+            }
+            scenario.particle_list.push_back(particles::Particle2D{
+                math::Vec2{px, py}, math::Vec2{vx, vy}, mass, radius});
         }
         else
         {
@@ -137,7 +232,8 @@ ScenarioParseResult parse_scenario_file(const std::string& path)
 {
     // Binary mode on purpose: in text mode the MSVC CRT treats 0x1A as end of
     // file, silently truncating a scenario mid-parse and reporting success.
-    // CRLF still parses, because '' is whitespace to operator>>.
+    // CRLF still parses, because a carriage return is whitespace to the
+    // stream extractor.
     std::ifstream file(path, std::ios::binary);
     if (!file)
     {
