@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <malloy/math/vec2.hpp>
 #include <malloy/nbody/body2d.hpp>
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/sim_core/sim_core.hpp>
+#include <malloy/time/fixed_step.hpp>
 
 namespace malloy::nbody
 {
@@ -46,7 +48,14 @@ public:
     sim_core::StepResult step();
 
     const std::vector<Body2D>& bodies() const { return bodies_; }
-    std::uint64_t tick_count() const { return tick_count_; }
+    std::uint64_t tick_count() const { return step_ ? step_->tick_count() : 0; }
+
+    // Accumulated simulation time. Computed as ticks * dt by FixedStep, so it
+    // cannot drift the way repeated addition would.
+    math::Real elapsed_time() const
+    {
+        return step_ ? step_->elapsed_time() : math::Real{0};
+    }
 
     const sim_core::SimulationSettings& simulation_settings() const
     {
@@ -62,6 +71,9 @@ private:
     // produced non-finite values. Kept as a member so the common case reuses
     // its allocation instead of allocating once per step.
     std::vector<Body2D> previous_;
-    std::uint64_t tick_count_{0};
+    // The tick counter and elapsed time live in malloy_time rather than being
+    // reimplemented here. Empty when dt is unusable, which validate() reports
+    // as InvalidSettings.
+    std::optional<time::FixedStep> step_;
 };
 } // namespace malloy::nbody

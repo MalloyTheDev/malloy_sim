@@ -80,19 +80,17 @@ app
  ↓
 malloy_nbody
  ↓
-malloy_sim_core + malloy_math
+malloy_sim_core + malloy_time + malloy_math
  ↓
 foundation
 ```
 
 No dependency may point upward.
 
-`malloy_time` is built and tested but is currently linked by nothing except its
-own test executable: `NBodyWorld` keeps its own tick count and
-`SimulationSettings` holds its own `dt`. It is shown outside the chain above on
-purpose. Adopting `FixedStep` in `NBodyWorld` would make the chain read
-`malloy_sim_core + malloy_time + malloy_math`, but that is a design change for
-its own milestone, not a documentation fix.
+`malloy_time` was linked by nothing but its own test until the worlds adopted
+`FixedStep` for tick counting and elapsed time. Both `NBodyWorld` and
+`ParticleWorld` now hold one instead of reimplementing a counter each, which is
+also what gave them `elapsed_time()`.
 
 ## Biggest risk
 

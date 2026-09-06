@@ -29,6 +29,13 @@ All notable changes to MalloySim are recorded here. The format follows
   `docs/03_MODULE_BOUNDARIES.md` and `README.md` updated to match.
 - `README.md` milestone table extended through M8 and retitled, since M6-M8
   were complete but only M1-M5 were listed.
+- `NBodyWorld` and `ParticleWorld` hold a `time::FixedStep` instead of a private
+  `tick_count_` each. `malloy_time` had been built and tested since M3 while
+  linked by nothing but its own test, and the two worlds had begun duplicating
+  what it already does. `SimulationSettings` remains where `dt` is configured;
+  `FixedStep` is the runtime counter built from it.
+- Both worlds gained `elapsed_time()`, computed as ticks * dt rather than
+  accumulated, so it cannot drift.
 
 ### Fixed
 
@@ -99,6 +106,18 @@ All notable changes to MalloySim are recorded here. The format follows
 - `specific_orbital_energy` no longer evaluates 0/0 when `g == 0` and the bodies
   coincide. Its header now states that it is the unsoftened Kepler energy and is
   therefore not the quantity the softened integrator conserves.
+- `-ffp-contract=off` is now set for GCC and Clang. The MSVC branch has always
+  set `/fp:precise`, but the other branch set no floating-point flag at all, and
+  both compilers default to `-ffp-contract=fast`, which fuses `a*b+c` into an
+  FMA and silently changes results. `docs/04` forbids fast-math, so the policy
+  was being enforced on one compiler only.
+- `docs/05` and ADR 0006 claimed per-module test executables catch dependency
+  leaks. They catch LINK-time leaks only: every module puts the whole `include/`
+  tree on its consumers' include path, so using another module's header without
+  linking it still compiles. Both documents now say so.
+- The M10 changelog recorded the "resolve each pair twice" mutation as an
+  equivalent mutant on the strength of reasoning. Measuring it disproved that,
+  and the M10 entry has been corrected.
 
 ### Removed
 
@@ -129,6 +148,20 @@ All notable changes to MalloySim are recorded here. The format follows
   implementations (explicit Euler, dropped G, inverse-square, unsquared
   softening, deleted angular-momentum term, both removed `is_finite` clauses,
   and a removed coincident guard) each make the suite fail.
+- Closed the `malloy_math` and `malloy_time` coverage gaps found during the M8
+  review and never filed: `distance` and `distance_squared` were only tested
+  against the origin, where `a - b` and `a + b` are identical; `dot` was tested
+  only as `dot(a, a)` and on a perpendicular pair; `approx_equal(Vec2)` never
+  had x as the sole difference, so a y-only implementation passed everything;
+  the `<=` boundary was untested in both overloads; `FixedStep::elapsed_time`'s
+  no-drift guarantee was untested because `dt = 0.25` over four ticks is
+  bit-identical either way; and negative infinity was untested in
+  `FixedStep::create`.
+- `elapsed_time()` on both worlds, including that an unusable `dt` leaves it at
+  zero rather than reporting a bogus time.
+- Verified by mutation testing: six broken implementations (a+b in distance,
+  y-only vector equality, a sign-flipped dot term, a strict `<` boundary, and
+  accumulated elapsed time in both `FixedStep` and the worlds) each fail.
 
 ### Architecture Notes
 
@@ -207,10 +240,15 @@ All notable changes to MalloySim are recorded here. The format follows
     so no invariant could see it; it needed a direct velocity assertion.
   - splitting the positional correction by the wrong mass is invisible with
     equal masses and never touches velocity; it needed an unequal-mass pair.
-  A third mutation (resolving each pair twice) is an equivalent mutant: the
-  second visit finds the pair separating and returns early, and a self-pair
-  applies equal and opposite corrections to the same object. That is reasoned,
-  not measured.
+  A third mutation (resolving each pair twice) is NOT caught. It was originally
+  recorded here as an equivalent mutant on the strength of reasoning; measuring
+  it afterwards disproved that. Diffing a full 6000-step run shows the results
+  diverge from about step 4500, in the eighth significant digit and growing,
+  because the doubled pass applies an extra rounding-level positional
+  correction. It is a change in update order, not a physics error, and no
+  portable test can catch it: the only assertion that would is a hardcoded
+  golden value, which asserts the cross-toolchain bitwise determinism docs/04
+  explicitly declines to claim.
 
 ## [M9] - 2026-09-06  (collision primitives)
 

@@ -62,7 +62,9 @@ Concrete-per-domain keeps every property this project already has:
 - `NBodyWorld` stays concrete and owns its own `step()`.
 - Each domain validates its own input and returns status rather than throwing.
 - Each domain is independently testable, and a test executable links only the
-  module it tests, so dependency leaks stay visible.
+  module it tests, so link-time dependency leaks stay visible. Header-only leaks
+  do not: every module exposes the whole `include/` tree, so using another
+  module's header without linking it still compiles (`docs/05`).
 - The dependency direction still points one way, with nothing pointing upward.
 
 The cost is real and accepted: a switch statement grows by one branch per

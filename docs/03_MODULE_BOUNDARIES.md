@@ -18,7 +18,7 @@ Not responsible for mass, force, velocity semantics, acceleration semantics, tim
 
 Responsible for fixed timestep representation, tick count, elapsed simulation time, and positive dt validation.
 
-Currently exercised only by its own test executable. No library or app links it: `NBodyWorld` keeps its own tick count and `SimulationSettings` holds its own `dt`.
+Used by every world: `NBodyWorld` and `ParticleWorld` each hold a `FixedStep` for tick counting and elapsed time rather than reimplementing a counter per domain. `SimulationSettings` remains the public place `dt` is configured; `FixedStep` is the runtime counter built from it.
 
 Not responsible for wall-clock time, frame pacing, sleeping, render interpolation, or physics formulas.
 

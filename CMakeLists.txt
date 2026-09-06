@@ -33,6 +33,10 @@ else()
         -Wall
         -Wextra
         -Wpedantic
+        # The MSVC branch sets /fp:precise. GCC and Clang default to
+        # -ffp-contract=fast, which lets the compiler fuse a*b+c into an FMA and
+        # silently change results. docs/04 forbids fast-math, so match MSVC.
+        -ffp-contract=off
     )
 endif()
 
@@ -76,6 +80,7 @@ target_link_libraries(malloy_nbody
     PUBLIC
         malloy::math
         malloy::sim_core
+        malloy::time
         malloy::project_options
     PRIVATE
         malloy::project_warnings
@@ -137,6 +142,7 @@ target_link_libraries(malloy_particles
         malloy::collide
         malloy::math
         malloy::sim_core
+        malloy::time
         malloy::project_options
     PRIVATE
         malloy::project_warnings

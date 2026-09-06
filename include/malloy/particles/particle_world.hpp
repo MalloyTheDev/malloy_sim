@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <malloy/math/vec2.hpp>
 #include <malloy/particles/particle2d.hpp>
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/sim_core/sim_core.hpp>
+#include <malloy/time/fixed_step.hpp>
 
 namespace malloy::particles
 {
@@ -40,7 +42,13 @@ public:
     sim_core::StepResult step();
 
     const std::vector<Particle2D>& particles() const { return particles_; }
-    std::uint64_t tick_count() const { return tick_count_; }
+    std::uint64_t tick_count() const { return step_ ? step_->tick_count() : 0; }
+
+    // Accumulated simulation time, computed as ticks * dt by FixedStep.
+    math::Real elapsed_time() const
+    {
+        return step_ ? step_->elapsed_time() : math::Real{0};
+    }
 
     const sim_core::SimulationSettings& simulation_settings() const
     {
@@ -56,7 +64,9 @@ private:
     // produced non-finite values. A member so the common case reuses its
     // allocation rather than allocating once per step.
     std::vector<Particle2D> previous_;
-    std::uint64_t tick_count_{0};
+    // Tick counting and elapsed time come from malloy_time rather than being
+    // reimplemented per domain. Empty when dt is unusable.
+    std::optional<time::FixedStep> step_;
 };
 
 // --- Whole-system diagnostics ---

@@ -17,7 +17,11 @@ Do not use Catch2 or GoogleTest in M1-M5.
 - no package manager
 - CTest is already available
 - simple tests are enough for M1-M5
-- per-module test executables catch dependency leaks
+- per-module test executables catch LINK-time dependency leaks
+
+Note the limit: every module puts the whole `include/` tree on its consumers'
+include path, so a header-only leak (using another module's header without
+linking it) still compiles. The guard is real but it is link-time only.
 
 ## Test executable layout
 

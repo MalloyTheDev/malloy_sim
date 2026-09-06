@@ -114,7 +114,8 @@ ParticleWorld::ParticleWorld(sim_core::SimulationSettings simulation_settings,
                              std::vector<Particle2D> particles)
     : simulation_settings_{simulation_settings},
       particle_settings_{particle_settings},
-      particles_{std::move(particles)}
+      particles_{std::move(particles)},
+      step_{time::FixedStep::create(simulation_settings.dt)}
 {
 }
 
@@ -195,7 +196,7 @@ sim_core::StepResult ParticleWorld::step()
         }
     }
 
-    ++tick_count_;
+    step_->advance();
     return sim_core::StepResult{sim_core::StepStatus::Ok};
 }
 

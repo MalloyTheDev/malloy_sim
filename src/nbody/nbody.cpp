@@ -27,7 +27,8 @@ NBodyWorld::NBodyWorld(sim_core::SimulationSettings simulation_settings,
                        std::vector<Body2D> bodies)
     : simulation_settings_{simulation_settings},
       nbody_settings_{nbody_settings},
-      bodies_{std::move(bodies)}
+      bodies_{std::move(bodies)},
+      step_{time::FixedStep::create(simulation_settings.dt)}
 {
 }
 
@@ -134,7 +135,7 @@ sim_core::StepResult NBodyWorld::step()
         }
     }
 
-    ++tick_count_; // (6)
+    step_->advance(); // (6)
 
     return sim_core::StepResult{sim_core::StepStatus::Ok}; // (7)
 }

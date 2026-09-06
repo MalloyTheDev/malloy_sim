@@ -395,6 +395,29 @@ int main()
         MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].position, Vec2(0.25, 0.0), eps);
     }
 
+    // --- Elapsed simulation time comes from malloy_time, so it is ticks * dt
+    //     rather than an accumulated sum and cannot drift. dt = 0.1 is chosen
+    //     because accumulating it ten times does NOT give exactly 1.0. ---
+    {
+        NBodyWorld w{SimulationSettings{0.1}, NBodySettings{1.0, 1e-6},
+                     two_unit_bodies()};
+        MALLOY_CHECK_NEAR(w.elapsed_time(), 0.0, 0.0); // exact before any step
+        for (int i = 0; i < 10; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{10});
+        MALLOY_CHECK_NEAR(w.elapsed_time(), 1.0, 1e-17);
+    }
+    {
+        // An unusable dt leaves both at zero rather than reporting a bogus time.
+        NBodyWorld w{SimulationSettings{0.0}, NBodySettings{1.0, 1e-6},
+                     two_unit_bodies()};
+        MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidSettings);
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
+        MALLOY_CHECK_NEAR(w.elapsed_time(), 0.0, 0.0);
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

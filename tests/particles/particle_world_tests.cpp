@@ -371,6 +371,22 @@ int main()
         MALLOY_CHECK_NEAR(total_kinetic_energy(none), 0.0, eps);
     }
 
+    // --- Elapsed simulation time comes from malloy_time, shared with the other
+    //     domain rather than reimplemented here. dt = 0.1 separates ticks * dt
+    //     from an accumulated sum. ---
+    {
+        const std::vector<Particle2D> p = {
+            Particle2D{Vec2{0.0, 0.0}, Vec2{0.1, 0.0}, 1.0, 0.1}};
+        ParticleWorld w{SimulationSettings{0.1}, ParticleSettings{1.0, big_box()}, p};
+        MALLOY_CHECK_NEAR(w.elapsed_time(), 0.0, 0.0);
+        for (int i = 0; i < 10; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{10});
+        MALLOY_CHECK_NEAR(w.elapsed_time(), 1.0, 1e-17);
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }

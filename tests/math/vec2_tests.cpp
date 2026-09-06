@@ -107,6 +107,43 @@ int main()
         MALLOY_CHECK_FALSE(is_finite(Vec2(0.0, nan)));
     }
 
+    // --- distance between two points that are BOTH away from the origin.
+    //     Every existing case passed Vec2(0,0) as the second argument, where
+    //     a - b and a + b are identical, so a sign error was invisible. ---
+    {
+        const Vec2 a(1.0, 2.0);
+        const Vec2 b(4.0, 6.0);
+        MALLOY_CHECK_NEAR(distance_squared(a, b), 25.0, eps); // a+b would give 89
+        MALLOY_CHECK_NEAR(distance(a, b), 5.0, eps);
+        MALLOY_CHECK_NEAR(distance(b, a), 5.0, eps); // symmetric
+    }
+
+    // --- dot of two distinct vectors with a nonzero result. The existing cases
+    //     are dot(a, a) and a perpendicular pair, so neither pins the cross
+    //     terms of a general product. ---
+    {
+        MALLOY_CHECK_NEAR(dot(Vec2(1.0, 2.0), Vec2(3.0, 5.0)), 13.0, eps);
+        MALLOY_CHECK_NEAR(dot(Vec2(3.0, 5.0), Vec2(1.0, 2.0)), 13.0, eps); // symmetric
+        MALLOY_CHECK_NEAR(dot(Vec2(1.0, 2.0), Vec2(-3.0, 1.0)), -1.0, eps);
+    }
+
+    // --- approx_equal(Vec2) with x as the SOLE difference. The existing true
+    //     case differs only in x within tolerance and the false case only in y,
+    //     so an implementation checking y alone passes both. ---
+    {
+        MALLOY_CHECK_FALSE(approx_equal(Vec2(1.0, 2.0), Vec2(1.5, 2.0), eps));
+        MALLOY_CHECK_FALSE(approx_equal(Vec2(1.0, 2.0), Vec2(1.5, 2.5), eps));
+        MALLOY_CHECK_TRUE(approx_equal(Vec2(1.0, 2.0), Vec2(1.0, 2.0), eps));
+    }
+
+    // --- approx_equal is documented as <=, so a difference of exactly epsilon
+    //     compares equal. The boundary is exactly representable here. ---
+    {
+        MALLOY_CHECK_TRUE(approx_equal(1.0, 1.25, 0.25));
+        MALLOY_CHECK_FALSE(approx_equal(1.0, 1.26, 0.25));
+        MALLOY_CHECK_TRUE(approx_equal(Vec2(0.0, 0.0), Vec2(0.25, -0.25), 0.25));
+    }
+
     std::cout << "malloy_math_tests passed\n";
     return 0;
 }
