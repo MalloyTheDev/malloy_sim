@@ -28,6 +28,11 @@ public:
 
     // Pairwise gravitational accelerations for the current state, with
     // softening (docs/04). accelerations[i] corresponds to bodies()[i].
+    //
+    // A pair whose softened separation is zero (coincident bodies with
+    // softening == 0) contributes nothing rather than dividing by zero, so the
+    // result stays finite for any state that passes validate(). Softening is
+    // still the intended way to keep close encounters well behaved.
     std::vector<math::Vec2> compute_accelerations() const;
 
     // Advance the simulation by exactly one fixed step. On validation failure

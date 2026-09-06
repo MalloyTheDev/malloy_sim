@@ -71,6 +71,16 @@ std::vector<math::Vec2> NBodyWorld::compute_accelerations() const
             }
             const math::Vec2 delta = bodies_[j].position - bodies_[i].position;
             const math::Real r2 = math::dot(delta, delta) + softening_squared;
+            // Coincident bodies with no softening give r2 == 0, where the
+            // inverse-cube law is undefined: 1/sqrt(0) is +inf, and inf times a
+            // delta that is exactly zero is NaN. Contribute nothing instead,
+            // which is also the correct answer when g == 0. Softening remains
+            // the documented way to keep close encounters finite (docs/04).
+            // The negated form also rejects a NaN r2.
+            if (!(r2 > math::Real{0}))
+            {
+                continue;
+            }
             const math::Real inv_r = math::Real{1} / std::sqrt(r2);
             const math::Real inv_r3 = inv_r * inv_r * inv_r;
             accelerations[i] += g * bodies_[j].mass * delta * inv_r3;
@@ -116,7 +126,15 @@ math::Real specific_orbital_energy(const Body2D& a, const Body2D& b, math::Real 
     const math::Real r = math::length(relative_position);
     const math::Real v_squared = math::dot(relative_velocity, relative_velocity);
     const math::Real mu = g * (a.mass + b.mass);
-    return v_squared / math::Real{2} - mu / r;
+    const math::Real kinetic = v_squared / math::Real{2};
+    // With g == 0 there is no potential term at all, so r never matters and
+    // coincident bodies must not produce 0/0. For mu > 0 with r == 0 the limit
+    // is genuinely -infinity, which is left to the caller's r > 0 precondition.
+    if (!(mu > math::Real{0}))
+    {
+        return kinetic;
+    }
+    return kinetic - mu / r;
 }
 
 math::Real total_kinetic_energy(const std::vector<Body2D>& bodies)
@@ -140,6 +158,13 @@ math::Real total_potential_energy(const std::vector<Body2D>& bodies, math::Real 
         {
             const math::Vec2 delta = bodies[j].position - bodies[i].position;
             const math::Real r = std::sqrt(math::dot(delta, delta) + softening_squared);
+            // The same guard as compute_accelerations, so force and energy stay
+            // consistent: a pair that contributes no force must contribute no
+            // potential energy either (docs/04).
+            if (!(r > math::Real{0}))
+            {
+                continue;
+            }
             potential -= g * bodies[i].mass * bodies[j].mass / r;
         }
     }

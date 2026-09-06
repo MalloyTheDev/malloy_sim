@@ -229,6 +229,138 @@ int main()
         MALLOY_CHECK_NEAR(total_angular_momentum(world.bodies()), angular0, 0.02);
     }
 
+    // --- Issue #2: coincident bodies with softening == 0 stay finite. The
+    //     inverse-cube law is undefined there, so the pair contributes nothing
+    //     rather than producing NaN. ---
+    {
+        std::vector<Body2D> b = {Body2D{Vec2{0.0, 0.0}, Vec2{}, 1.0},
+                                 Body2D{Vec2{0.0, 0.0}, Vec2{}, 1.0}};
+        NBodyWorld w{SimulationSettings{0.001}, NBodySettings{1.0, 0.0}, b};
+        const auto acc = w.compute_accelerations();
+        MALLOY_CHECK_VEC2_NEAR(acc[0], Vec2(0.0, 0.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(acc[1], Vec2(0.0, 0.0), eps);
+
+        // The energy diagnostics must be finite for the same configuration, and
+        // must use the same guard so force and energy stay consistent.
+        MALLOY_CHECK_NEAR(total_potential_energy(w.bodies(), 1.0, 0.0), 0.0, eps);
+        MALLOY_CHECK_TRUE(is_finite(total_energy(w.bodies(), 1.0, 0.0)));
+
+        // A full step must leave every body finite and report success.
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_TRUE(is_finite(w.bodies()[0].position));
+        MALLOY_CHECK_TRUE(is_finite(w.bodies()[0].velocity));
+        MALLOY_CHECK_TRUE(is_finite(w.bodies()[1].position));
+        MALLOY_CHECK_TRUE(is_finite(w.bodies()[1].velocity));
+    }
+
+    // --- Issue #2: g == 0 is legal and means no gravity, so coincident bodies
+    //     must give exactly zero acceleration rather than 0 * inf. ---
+    {
+        std::vector<Body2D> b = {Body2D{Vec2{0.0, 0.0}, Vec2{}, 1.0},
+                                 Body2D{Vec2{0.0, 0.0}, Vec2{}, 1.0}};
+        NBodyWorld w{SimulationSettings{0.001}, NBodySettings{0.0, 0.0}, b};
+        const auto acc = w.compute_accelerations();
+        MALLOY_CHECK_VEC2_NEAR(acc[0], Vec2(0.0, 0.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(acc[1], Vec2(0.0, 0.0), eps);
+        // specific_orbital_energy has no potential term when g == 0, so it must
+        // not evaluate 0/0 for a coincident pair either.
+        const Real e = malloy::nbody::specific_orbital_energy(b[0], b[1], 0.0);
+        MALLOY_CHECK_NEAR(e, 0.0, eps);
+    }
+
+    // --- Issue #8: the integrator is semi-implicit (symplectic) Euler, not
+    //     explicit Euler. One hand-computable step pins the order exactly:
+    //     two unit masses 1 apart with G=1 and no softening give a = (+-1, 0),
+    //     so with dt = 0.5 the velocities become (+-0.5, 0) and the positions
+    //     move by velocity*dt AFTER that update. Explicit Euler would use the
+    //     old zero velocities and leave both positions unchanged. ---
+    {
+        NBodyWorld w{SimulationSettings{0.5}, NBodySettings{1.0, 0.0}, two_unit_bodies()};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(0.5, 0.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(-0.5, 0.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].position, Vec2(0.25, 0.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].position, Vec2(0.75, 0.0), eps);
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{1});
+    }
+
+    // --- Issue #8: pin the acceleration MAGNITUDE, not just its symmetry.
+    //     Force symmetry alone survives a dropped G, a wrong inverse power, and
+    //     even a sign flip, so assert exact known values instead. ---
+    {
+        // m=2 at the origin, m=3 at (1,0), G=2, no softening.
+        // a0 = G*m1/r^2 = 2*3 = 6 toward +x; a1 = G*m0/r^2 = 2*2 = 4 toward -x.
+        std::vector<Body2D> b = {Body2D{Vec2{0.0, 0.0}, Vec2{}, 2.0},
+                                 Body2D{Vec2{1.0, 0.0}, Vec2{}, 3.0}};
+        NBodyWorld w{SimulationSettings{0.001}, NBodySettings{2.0, 0.0}, b};
+        const auto acc = w.compute_accelerations();
+        MALLOY_CHECK_VEC2_NEAR(acc[0], Vec2(6.0, 0.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(acc[1], Vec2(-4.0, 0.0), eps);
+    }
+
+    // --- Issue #8: softening enters the denominator SQUARED (docs/04). With
+    //     r = 1 and softening = 2, r2 = 1 + 4 = 5, so |a| = 5^-1.5. If softening
+    //     were added unsquared, r2 would be 3 and |a| would be 3^-1.5. ---
+    {
+        std::vector<Body2D> b = {Body2D{Vec2{0.0, 0.0}, Vec2{}, 1.0},
+                                 Body2D{Vec2{1.0, 0.0}, Vec2{}, 1.0}};
+        NBodyWorld w{SimulationSettings{0.001}, NBodySettings{1.0, 2.0}, b};
+        const auto acc = w.compute_accelerations();
+        MALLOY_CHECK_VEC2_NEAR(acc[0], Vec2(0.0894427190999916, 0.0), 1e-15);
+        MALLOY_CHECK_VEC2_NEAR(acc[1], Vec2(-0.0894427190999916, 0.0), 1e-15);
+    }
+
+    // --- Issue #8: exercise the second half of the angular-momentum formula.
+    //     Every existing case has position.y * velocity.x == 0, so the
+    //     "- y*vx" term never contributes and could be deleted undetected.
+    //     Bodies are built as named locals because the check macros are
+    //     function-like and would split a braced initializer on its commas. ---
+    {
+        // Single body at (0,1) moving along +x: L = m(x*vy - y*vx) = -2.
+        const std::vector<Body2D> spin_y = {Body2D{Vec2{0.0, 1.0}, Vec2{2.0, 0.0}, 1.0}};
+        MALLOY_CHECK_NEAR(total_angular_momentum(spin_y), -2.0, eps);
+
+        // Both terms nonzero and of opposite sign: L = 1*(2*3 - 4*5) = -14.
+        const std::vector<Body2D> spin_both = {Body2D{Vec2{2.0, 4.0}, Vec2{5.0, 3.0}, 1.0}};
+        MALLOY_CHECK_NEAR(total_angular_momentum(spin_both), -14.0, eps);
+    }
+
+    // --- Issue #8: the is_finite clauses in validation were never exercised.
+    //     inf >= 0 is true, so without them an infinite G or mass passes
+    //     validation and silently turns the whole world into NaN. ---
+    {
+        const Body2D good{Vec2{1.0, 2.0}, Vec2{3.0, 4.0}, 1.0};
+        const Body2D inf_mass{Vec2{}, Vec2{}, inf};
+        const Body2D neg_inf_mass{Vec2{}, Vec2{}, -inf};
+        const Body2D nan_mass{Vec2{}, Vec2{}, nan};
+        const Body2D inf_position{Vec2{inf, 0.0}, Vec2{}, 1.0};
+        const Body2D nan_velocity{Vec2{}, Vec2{0.0, nan}, 1.0};
+
+        MALLOY_CHECK_TRUE(good.is_valid());
+        MALLOY_CHECK_FALSE(inf_mass.is_valid());
+        MALLOY_CHECK_FALSE(neg_inf_mass.is_valid());
+        MALLOY_CHECK_FALSE(nan_mass.is_valid());
+        MALLOY_CHECK_FALSE(inf_position.is_valid());
+        MALLOY_CHECK_FALSE(nan_velocity.is_valid());
+
+        const NBodySettings no_gravity{0.0, 0.0}; // G = 0 is legal
+        const NBodySettings inf_g{inf, 0.0};
+        const NBodySettings nan_g{nan, 0.0};
+        const NBodySettings inf_softening{1.0, inf};
+        const NBodySettings nan_softening{1.0, nan};
+
+        MALLOY_CHECK_TRUE(no_gravity.is_valid());
+        MALLOY_CHECK_FALSE(inf_g.is_valid());
+        MALLOY_CHECK_FALSE(nan_g.is_valid());
+        MALLOY_CHECK_FALSE(inf_softening.is_valid());
+        MALLOY_CHECK_FALSE(nan_softening.is_valid());
+
+        // And end to end, so the rule is enforced where it matters.
+        NBodyWorld w{SimulationSettings{0.001}, inf_g, two_unit_bodies()};
+        MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidSettings);
+        MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

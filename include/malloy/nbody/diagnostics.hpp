@@ -11,7 +11,14 @@ namespace malloy::nbody
 
 // Specific orbital energy of the two-body relative motion (energy per unit
 // reduced mass): v_rel^2 / 2 - G * (m_a + m_b) / r, where r and v_rel are the
-// separation and relative speed of the two bodies. Requires r > 0.
+// separation and relative speed of the two bodies. Requires r > 0; for r == 0
+// with G > 0 the potential term diverges and the result is -infinity. When
+// G == 0 there is no potential term at all, so r is irrelevant and the result
+// is purely kinetic.
+//
+// Note this is the UNSOFTENED Kepler energy. Unlike total_energy it is not the
+// quantity the softened integrator conserves, so it is only a good drift
+// measure when softening is small compared with r.
 math::Real specific_orbital_energy(const Body2D& a, const Body2D& b, math::Real g);
 
 // --- Whole-system diagnostics (any number of bodies) ---
@@ -24,7 +31,9 @@ math::Real total_kinetic_energy(const std::vector<Body2D>& bodies);
 
 // Total potential energy with softening: sum over unique pairs of
 // -G m_i m_j / sqrt(r^2 + softening^2). Uses the same softening as the
-// integrator so that total_energy is a quantity the dynamics conserve.
+// integrator so that total_energy is a quantity the dynamics conserve, and
+// skips a pair whose softened separation is zero for the same reason: a pair
+// contributing no force must contribute no potential energy.
 math::Real total_potential_energy(const std::vector<Body2D>& bodies, math::Real g,
                                   math::Real softening);
 

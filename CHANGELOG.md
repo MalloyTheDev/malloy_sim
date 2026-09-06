@@ -32,17 +32,52 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Coincident bodies with `softening == 0` no longer produce NaN (#2). The
+  inverse-cube law is undefined at zero separation: `1/sqrt(0)` is `+inf`, and
+  `inf` times a delta that is exactly zero is NaN. `compute_accelerations` now
+  skips such a pair, which is also the correct answer when `g == 0`. Both
+  preconditions passed validation before, and `softening` defaults to 0 in the
+  scenario format, so any scenario omitting that line was exposed.
+- `total_potential_energy` carries the matching guard, so force and energy stay
+  consistent as `docs/04` requires. Verified numerically: the central-difference
+  gradient of the potential still matches the acceleration.
+- `specific_orbital_energy` no longer evaluates 0/0 when `g == 0` and the bodies
+  coincide. Its header now states that it is the unsoftened Kepler energy and is
+  therefore not the quantity the softened integrator conserves.
+
 ### Removed
 
 ### Tests
+
+- Closed four gaps in `malloy_nbody_tests` where a plausible physics regression
+  would have shipped undetected (#8):
+  - an exact single-step assertion that distinguishes semi-implicit from
+    explicit Euler, which the previous tolerance-based orbit tests could not;
+  - exact acceleration magnitudes, pinning both the `G * m / r^3` law and that
+    softening enters the denominator squared. The existing force-symmetry check
+    survived a dropped `G`, a wrong inverse power, and a sign flip;
+  - an angular-momentum case where `position.y * velocity.x` is nonzero. Every
+    prior case left that term at zero, so half the formula was never exercised;
+  - direct tests of `Body2D::is_valid` and `NBodySettings::is_valid` for
+    infinite and NaN mass, G, and softening. Because `inf >= 0` is true, the
+    `is_finite` clauses were dead.
+- Regression tests for the coincident-body guard, including `g == 0`.
+- Every new assertion was confirmed by mutation testing: eight broken
+  implementations (explicit Euler, dropped G, inverse-square, unsquared
+  softening, deleted angular-momentum term, both removed `is_finite` clauses,
+  and a removed coincident guard) each make the suite fail.
 
 ### Architecture Notes
 
 - The all-in-one goal raises rather than retires the engine-kernel risk named
   in `docs/01`. ADR 0006 is the standing answer: adding a domain must leave
   `malloy_sim_core` unchanged.
-- No code changed. `malloy_sim_core` still contains exactly three types and
-  `NBodyWorld` is still concrete.
+- The charter amendment changed no code. `malloy_sim_core` still contains
+  exactly three types and `NBodyWorld` is still concrete.
+- The #2 fix chooses to skip a degenerate pair rather than fail the step. That
+  keeps the simulation running and matches the documented role of softening,
+  but it does mean a modelling mistake stays silent. Reporting non-finite state
+  loudly is tracked separately (#3).
 
 ## [M8] - 2026-09-06  (simple 2D debug visualization)
 
