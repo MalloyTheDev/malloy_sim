@@ -27,10 +27,13 @@ no domain derives from anything.
 
 A scenario file selects its domain with a `type` key. The loader dispatches on
 that key with a plain switch, calling one concrete parser and constructing one
-concrete world:
+concrete world.
+
+This is planned, not implemented: the shipped parser rejects `type` as an
+unknown key, and there is no dispatch switch yet. The intended shape is:
 
 ```text
-type nbody
+type nbody          # planned, not parsed today
 dt 0.001
 steps 10000
 body 1.0  0.0 0.0  0.0 0.0

@@ -89,10 +89,13 @@ and the tiny `malloy::sim_core` vocabulary (`SimulationSettings`, `StepStatus`,
 `StepResult`). No domain knows that any other domain exists.
 
 Domains are selected by a `type` key in the scenario file, dispatched with a
-plain switch to one concrete loader and one concrete world per domain:
+plain switch to one concrete loader and one concrete world per domain.
+
+PLANNED, NOT YET IMPLEMENTED. The shipped parser rejects `type` as an unknown
+key. This is the shape the format will take when a second domain exists:
 
 ```text
-type nbody
+type nbody          # planned, not parsed today
 dt 0.001
 steps 10000
 ```

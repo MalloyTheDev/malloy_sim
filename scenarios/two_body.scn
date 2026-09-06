@@ -11,5 +11,5 @@ body 1.0       0.0  0.0   0.0  0.0
 body 0.000001  1.0  0.0   0.0  1.0
 
 # Expected final report (Debug and Release, MSVC):
-#   step  10000   sep  1.00027148   E_total   -0.00000050   L_total    0.00000100
+#   step  10000   sep  1.00027148   E_total  -4.99999540e-07   L_total   1.00000000e-06
 # Matches the built-in two-body demo exactly.

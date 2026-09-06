@@ -1,4 +1,4 @@
-# 06 — CMake and VS Code Workflow
+# 06 - CMake and VS Code Workflow
 
 ## Required tools
 

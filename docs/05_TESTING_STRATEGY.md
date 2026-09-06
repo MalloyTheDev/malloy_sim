@@ -1,4 +1,4 @@
-# 05 — Testing Strategy
+# 05 - Testing Strategy
 
 ## Final decision
 

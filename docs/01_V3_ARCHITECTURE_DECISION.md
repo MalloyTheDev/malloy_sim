@@ -1,4 +1,4 @@
-# 01 — V3 Architecture Decision
+# 01 - V3 Architecture Decision
 
 ## Final verdict
 
@@ -12,9 +12,9 @@ C++20 + CMake + VS Code + MSVC
 terminal-first
 simulation-first
 2D first
-no graphics before M5
+no graphics before the rendering milestone
 no ECS before real pressure
-no package manager before M5
+no package manager until a milestone needs one
 ```
 
 ## Core identity
@@ -42,13 +42,13 @@ validates its input, holds its invariants, and ships tested templates.
 | Editor | VS Code |
 | VS Code workflow | CMake Tools |
 | Compiler first | MSVC on Windows |
-| Package manager | None for M1-M5 |
+| Package manager | None until a milestone needs one |
 | Test framework | CTest + tiny custom CHECK macros |
 | Test executable style | One test executable per module |
-| CMake layout | Single root `CMakeLists.txt` through M5 |
+| CMake layout | Single root `CMakeLists.txt` |
 | Numeric type | `malloy::math::Real = double` |
 | Timestep | Fixed timestep only |
-| Graphics | Excluded until after M5 |
+| Graphics | Excluded until the rendering milestone |
 | ECS | Excluded until real access-pattern pressure |
 | First app | `malloy_nbody_terminal` |
 | First simulation | Normalized two-body orbit |
@@ -80,12 +80,19 @@ app
  ↓
 malloy_nbody
  ↓
-malloy_sim_core + malloy_time + malloy_math
+malloy_sim_core + malloy_math
  ↓
 foundation
 ```
 
 No dependency may point upward.
+
+`malloy_time` is built and tested but is currently linked by nothing except its
+own test executable: `NBodyWorld` keeps its own tick count and
+`SimulationSettings` holds its own `dt`. It is shown outside the chain above on
+purpose. Adopting `FixedStep` in `NBodyWorld` would make the chain read
+`malloy_sim_core + malloy_time + malloy_math`, but that is a design change for
+its own milestone, not a documentation fix.
 
 ## Biggest risk
 

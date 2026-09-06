@@ -1,4 +1,4 @@
-# ADR 0004 — Tiny `malloy_sim_core`
+# ADR 0004 - Tiny `malloy_sim_core`
 
 ## Status
 

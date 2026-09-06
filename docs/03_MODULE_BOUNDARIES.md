@@ -1,4 +1,4 @@
-# 03 — Module Boundaries
+# 03 - Module Boundaries
 
 > All modules below are implemented (M2-M8). These boundaries are in force
 > in the shipped code; keep them when extending the project.
@@ -17,6 +17,8 @@ Not responsible for mass, force, velocity semantics, acceleration semantics, tim
 ## `malloy_time`
 
 Responsible for fixed timestep representation, tick count, elapsed simulation time, and positive dt validation.
+
+Currently exercised only by its own test executable. No library or app links it: `NBodyWorld` keeps its own tick count and `SimulationSettings` holds its own `dt`.
 
 Not responsible for wall-clock time, frame pacing, sleeping, render interpolation, or physics formulas.
 
@@ -46,6 +48,6 @@ Not responsible for physics, body types, simulation state, terminal control sequ
 
 ## `malloy_nbody_terminal`
 
-Responsible for hardcoded demo setup, calling library APIs, fixed number of steps, formatted terminal output, view framing policy (which viewport each frame shows), and returning nonzero on validation failure.
+Responsible for hardcoded demo setup, reading a single positional scenario path from argv and choosing between a file and the built-in scenarios, calling library APIs, fixed number of steps, formatted terminal output, view framing policy (which viewport each frame shows), and returning nonzero on validation or step failure.
 
 Not responsible for reusable physics logic.

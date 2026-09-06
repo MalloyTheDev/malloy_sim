@@ -15,4 +15,4 @@ body 1.0  -0.5  -0.8660254   0.6580407399359999  -0.37992
 # this file reproduces the built-in three-body demo exactly.
 #
 # Expected final report (Debug and Release, MSVC):
-#   step  10000   sep  1.73143038   E_total   -0.86601509   L_total    2.27951999
+#   step  10000   sep  1.73143038   E_total  -8.66015093e-01   L_total   2.27951999e+00

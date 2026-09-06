@@ -1,4 +1,4 @@
-# ADR 0005 — Normalized Demo Units
+# ADR 0005 - Normalized Demo Units
 
 ## Status
 

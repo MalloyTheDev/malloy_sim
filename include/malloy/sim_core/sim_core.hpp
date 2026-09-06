@@ -8,7 +8,7 @@ namespace malloy::sim_core
 //
 // Deliberately coarse and domain-agnostic: concrete simulations map their
 // specific validation failures onto these categories. Keeping this tiny is a
-// hard rule (ADR 0004) — no engine kernel vocabulary belongs here.
+// hard rule (ADR 0004): no engine kernel vocabulary belongs here.
 enum class StepStatus
 {
     Ok,

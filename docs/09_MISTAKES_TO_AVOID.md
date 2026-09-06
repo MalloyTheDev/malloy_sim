@@ -1,4 +1,4 @@
-# 09 — Mistakes To Avoid
+# 09 - Mistakes To Avoid
 
 1. Turning `malloy_sim_core` into an engine kernel.
 2. Adding rendering before terminal N-body works.

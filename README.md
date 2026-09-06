@@ -96,19 +96,26 @@ an ASCII view of the bodies. Sample output (diagnostics only, abridged):
 MalloySim nbody_terminal
 
 == two-body orbit (normalized units) ==  bodies=2  dt=0.00100000  steps=10000
-step      0   sep  1.00000000   E_total   -0.00000050   L_total    0.00000100
+step      0   sep  1.00000000   E_total  -5.00000000e-07   L_total   1.00000000e-06
 ...
-step  10000   sep  1.00027148   E_total   -0.00000050   L_total    0.00000100
+step  10000   sep  1.00027148   E_total  -4.99999540e-07   L_total   1.00000000e-06
 
 == equilateral three-body (Lagrange) ==  bodies=3  dt=0.00100000  steps=10000
-step      0   sep  1.73205081   E_total   -0.86601529   L_total    2.27951999
+step      0   sep  1.73205081   E_total  -8.66015288e-01   L_total   2.27951999e+00
 ...
-step  10000   sep  1.73143038   E_total   -0.86601509   L_total    2.27951999
+step  10000   sep  1.73143038   E_total  -8.66015093e-01   L_total   2.27951999e+00
 ```
 
 The three-body triangle holds its shape (separation ~sqrt(3)) while total energy
 and angular momentum stay essentially constant -- the conservation you expect
 from semi-implicit (symplectic) Euler.
+
+The conserved quantities print in scientific notation so that drift stays
+visible at any magnitude. The two-body demo's energy is of order 1e-6, and under
+fixed-point formatting every step showed the same value, which would have looked
+perfectly conserved even if it were not. Watch `E_total` oscillate rather than
+walk in one direction: a bounded oscillation is the symplectic signature, while
+a monotone drift would indicate the integrator had been broken.
 
 ### The ASCII view
 

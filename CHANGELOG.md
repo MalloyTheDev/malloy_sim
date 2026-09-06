@@ -67,6 +67,26 @@ All notable changes to MalloySim are recorded here. The format follows
 - `scenarios/three_body_triangle.scn` carries its velocities at full precision
   rather than rounded, so it reproduces the built-in three-body demo exactly
   (#12). Both templates now document their expected final report.
+- The terminal demo prints the conserved quantities in scientific notation
+  (#10). The two-body demo's energy is of order 1e-6, and under fixed(8) every
+  step printed the identical `-0.00000050`, so the output would have looked
+  perfectly conserved even if it were not. `E_total` now visibly oscillates
+  within a bounded window, which is the symplectic signature; a monotone walk
+  would indicate a broken integrator. Separation stays fixed-point. README
+  sample output and both template expected-result comments were regenerated.
+- Documentation corrected where it contradicted the code (#11). `docs/01` no
+  longer gates graphics, the package manager, or the CMake layout on M5, which
+  shipped. `malloy_time` is documented as currently linked by nothing but its
+  own test, and removed from the dependency chain it was never part of;
+  adopting `FixedStep` in `NBodyWorld` is left as a design change for its own
+  milestone rather than papered over. ADRs 0002 and 0003 are restated against
+  the milestone that owns them instead of expiring at M5. The `docs/00` read
+  order includes `docs/09` and `docs/10`. The `docs/03` app boundary records
+  that the app reads a scenario path from argv. The `type nbody` snippets in
+  `CLAUDE.md` and ADR 0006 are labelled as planned and not parsed today.
+- Removed every em dash (U+2014) from tracked content (#1). Nineteen were
+  heading separators, where a hyphen reads correctly; one was prose in
+  `sim_core.hpp`, where a colon does.
 - Coincident bodies with `softening == 0` no longer produce NaN (#2). The
   inverse-cube law is undefined at zero separation: `1/sqrt(0)` is `+inf`, and
   `inf` times a delta that is exactly zero is NaN. `compute_accelerations` now

@@ -1,4 +1,4 @@
-# 10 — Changelog Template
+# 10 - Changelog Template
 
 This is the template/reference. The live changelog is `CHANGELOG.md` at the
 repo root; keep it updated with this format.

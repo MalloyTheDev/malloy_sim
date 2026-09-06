@@ -1,4 +1,4 @@
-# ADR 0003 — No Catch2 Before M5
+# ADR 0003 - No Catch2 Before M5
 
 ## Status
 
@@ -6,9 +6,11 @@ Accepted.
 
 ## Decision
 
-M1-M5 use CTest plus tiny custom check macros.
+The project uses CTest plus tiny custom check macros.
 
-Catch2 is delayed until after M5.
+Catch2 and GoogleTest are not added unless explicitly asked for (`CLAUDE.md`
+rule 9). This was originally scoped to M1-M5; the constraint outlived that
+window and now stands on its own.
 
 ## Rationale
 

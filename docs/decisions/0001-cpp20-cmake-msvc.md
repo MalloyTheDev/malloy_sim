@@ -1,4 +1,4 @@
-# ADR 0001 — C++20 + CMake + MSVC
+# ADR 0001 - C++20 + CMake + MSVC
 
 ## Status
 

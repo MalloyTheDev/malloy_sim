@@ -103,10 +103,18 @@ int run_scenario(const char* title, const SimulationSettings& sim,
             std::cout << "   sep " << std::setw(11)
                       << distance(bodies_now[0].position, bodies_now[1].position);
         }
-        std::cout << "   E_total " << std::setw(13)
+        // The conserved quantities are the whole point of this output, and for
+        // the normalized two-body demo they are of order 1e-6. Under fixed(8)
+        // every step printed the identical -0.00000050, which would look
+        // perfectly conserved even if it were not. Scientific notation keeps
+        // significant digits at any magnitude; separation stays fixed because
+        // it is order 1 and reads better that way.
+        std::cout << std::scientific;
+        std::cout << "   E_total " << std::setw(16)
                   << total_energy(bodies_now, nbody.g, nbody.softening)
-                  << "   L_total " << std::setw(13) << total_angular_momentum(bodies_now)
+                  << "   L_total " << std::setw(16) << total_angular_momentum(bodies_now)
                   << '\n';
+        std::cout << std::fixed;
         print_view(view, bodies_now);
     };
 

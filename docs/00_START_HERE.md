@@ -1,4 +1,4 @@
-# 00 — Start Here
+# 00 - Start Here
 
 **MalloySim C++** is an all-in-one science physics simulation in C++20, built
 simulation-first and terminal-first. It grows one finished physics domain at a
@@ -21,7 +21,9 @@ finished domain. See `README.md` and `CHANGELOG.md`.
 8. `docs/06_CMAKE_AND_VSCODE_WORKFLOW.md`
 9. `docs/07_POST_M5_ROADMAP.md`
 10. `docs/08_AI_HANDOFF_PROMPT.md`
-11. `docs/decisions/` (ADRs 0001-0006)
+11. `docs/09_MISTAKES_TO_AVOID.md`
+12. `docs/10_CHANGELOG_TEMPLATE.md`
+13. `docs/decisions/` (ADRs 0001-0006)
 
 ## Build and test
 
