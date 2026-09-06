@@ -3,6 +3,11 @@
 > All modules below are implemented (M2-M8). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
+> New physics domains follow the same shape: one library, one concrete world
+> type, one settings type, one test executable, depending only on
+> `malloy_math` and `malloy_sim_core`. No domain depends on another and none
+> derives from a shared base (`docs/decisions/0006-multi-domain-dispatch.md`).
+
 ## `malloy_math`
 
 Responsible for `Real`, `Vec2`, scalar/vector helpers, approximate equality, and finite checks.

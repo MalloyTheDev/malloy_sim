@@ -1,10 +1,18 @@
 # MalloySim C++
 
-MalloySim is a from-scratch **simulation-first C++20 engine project**.
+MalloySim is a from-scratch **all-in-one science physics simulation** in C++20.
 
-It starts as a terminal-only 2D classical simulation project. It is not a Unity, Godot, Unreal, ECS, editor, rendering, plugin, or scripting project.
+The goal is a robust simulator spanning many physics domains, each shipping
+ready-to-run templates so you can pick a scenario and get correct physics
+immediately. It is terminal-first, and it is built as many concrete domain
+simulations behind a thin shared shell rather than as one generic engine
+(`docs/decisions/0006-multi-domain-dispatch.md`).
 
-Its first serious goal, a deterministic terminal-based 2D N-body gravity demo, is complete (milestones M1-M5).
+It is not a Unity, Godot, Unreal, ECS, editor, rendering, plugin, or scripting
+project.
+
+Its first domain, a deterministic terminal 2D N-body gravity simulation, is
+complete and shipping (milestones M1-M8).
 
 ## Locked baseline
 
@@ -12,11 +20,12 @@ Its first serious goal, a deterministic terminal-based 2D N-body gravity demo, i
 - Build system: CMake
 - Editor: VS Code + CMake Tools
 - Compiler first: MSVC on Windows
-- Tests: CTest + tiny custom check macros for M1-M5
-- Package manager: none for M1-M5
-- Graphics: none for M1-M5
+- Tests: CTest + tiny custom check macros
+- Package manager: none until a milestone needs one
+- Graphics: none until the rendering milestone
 - Simulation timestep: fixed timestep only
 - Numeric type: `double`
+- Domain model: one concrete world per domain, no engine kernel
 
 ## Status
 
@@ -38,6 +47,28 @@ alongside an ASCII view of the bodies.
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
+
+## Domains and templates
+
+MalloySim grows one finished physics domain at a time. Each domain is its own
+library with its own concrete world type, its own settings, and its own test
+executable. Domains share only `malloy_math` and the tiny `malloy_sim_core`
+vocabulary; none of them knows the others exist. There is no simulation base
+class and no engine kernel, by design.
+
+A domain counts as finished only when it has all four of:
+
+1. validation of its own settings and state, returning status rather than throwing;
+2. an invariant or conserved quantity checked by tests;
+3. malformed and boundary input tests;
+4. at least one scenario template in `scenarios/`.
+
+Templates in `scenarios/` are a first-class deliverable: plain text, documented,
+and runnable with the shipped binary. Gravity ships two today.
+
+The active track is classical mechanics depth (collision, rigid bodies,
+ballistics, springs and oscillators). Work is gated one milestone at a time; see
+`docs/07_POST_M5_ROADMAP.md`.
 
 ## Build
 
@@ -143,7 +174,7 @@ body 0.000001  1.0 0.0   0.0 1.0
 Example scenarios live in `scenarios/`. With no argument, the app runs the
 built-in scenarios shown above.
 
-## M1-M5 roadmap (complete)
+## Milestones complete
 
 | Milestone | Goal | Status |
 |---|---|---|
@@ -152,6 +183,9 @@ built-in scenarios shown above.
 | M3 | `malloy_time` + tiny `malloy_sim_core` | ✅ Done |
 | M4 | `malloy_nbody`: `Body2D`, `NBodyWorld`, gravity, tests | ✅ Done |
 | M5 | Terminal N-body sun/planet demo | ✅ Done |
+| M6 | N-body system diagnostics + three-body demo | ✅ Done |
+| M7 | `malloy_scenario`: scenario/config text loading | ✅ Done |
+| M8 | `malloy_ascii`: 2D ASCII debug visualization | ✅ Done |
 
 ## Out of scope (gated)
 

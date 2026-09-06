@@ -19,9 +19,18 @@ no package manager before M5
 
 ## Core identity
 
-MalloySim is a simulation-first C++ project.
+MalloySim is an all-in-one science physics simulation in C++, built
+simulation-first and terminal-first.
 
-It starts with a terminal 2D N-body gravity simulation and later may grow into collision, 2D rigid-body physics, ballistics, vehicles, a visual sandbox, 3D, and quantum as a separate domain.
+It started as a terminal 2D N-body gravity simulation. It grows one finished
+physics domain at a time: collision, 2D rigid bodies, ballistics, springs and
+oscillators, then fluids, 3D, and quantum. Each domain is a concrete library
+with its own world type, settings type, and tests, selected by a scenario
+`type` key rather than through a generic engine interface
+(`docs/decisions/0006-multi-domain-dispatch.md`).
+
+The measure of the project is depth, not coverage: a domain counts when it
+validates its input, holds its invariants, and ships tested templates.
 
 ## Final locked decisions
 
@@ -88,6 +97,11 @@ It must not contain `ISimulation`, `virtual step()`, `WorldBase`, `Engine`, `Ent
 
 `NBodyWorld` remains concrete and owns its own `step()` behavior.
 
-As of M5 this held: `malloy_sim_core` contains only `SimulationSettings`,
+As of M8 this holds: `malloy_sim_core` contains only `SimulationSettings`,
 `StepStatus`, and `StepResult`, and `NBodyWorld` is a concrete class. Keep it
 that way.
+
+The all-in-one goal raises this risk rather than retiring it, because "support
+every domain" is the exact argument that produces an engine kernel. ADR 0006 is
+the standing answer: many concrete worlds and a dispatch key, never a base
+class. Adding a domain must leave `malloy_sim_core` unchanged.

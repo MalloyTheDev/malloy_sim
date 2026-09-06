@@ -1,10 +1,13 @@
 # 00 — Start Here
 
-**MalloySim C++** is a simulation-first C++20 project. The locked **M1-M5
-roadmap is complete**, plus the first post-M5 milestones (M6: N-body
-diagnostics, M7: scenario loading, M8: ASCII debug view): the math, time,
-sim-core, N-body, scenario, and ASCII libraries are built and the terminal
-N-body demo runs. See `README.md` and `CHANGELOG.md`.
+**MalloySim C++** is an all-in-one science physics simulation in C++20, built
+simulation-first and terminal-first. It grows one finished physics domain at a
+time, each shipping tested scenario templates, with no engine kernel and no
+simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
+
+M1-M8 are complete: the math, time, sim-core, N-body, scenario, and ASCII
+libraries are built and the terminal N-body demo runs. Gravity is the first
+finished domain. See `README.md` and `CHANGELOG.md`.
 
 ## Read order
 
@@ -18,6 +21,7 @@ N-body demo runs. See `README.md` and `CHANGELOG.md`.
 8. `docs/06_CMAKE_AND_VSCODE_WORKFLOW.md`
 9. `docs/07_POST_M5_ROADMAP.md`
 10. `docs/08_AI_HANDOFF_PROMPT.md`
+11. `docs/decisions/` (ADRs 0001-0006)
 
 ## Build and test
 
@@ -33,6 +37,11 @@ completion.
 
 ## What's next
 
-The locked M1-M5 roadmap is done. Post-M5 work is gated and taken one milestone
-at a time -- see `docs/07_POST_M5_ROADMAP.md`. Do not expand scope immediately
-after M5 (`docs/09_MISTAKES_TO_AVOID.md`, #10).
+M1-M8 are done and gravity is the first finished domain. The active track is
+classical mechanics depth: collision, rigid bodies, ballistics, springs and
+oscillators. Work stays gated one milestone at a time; see
+`docs/07_POST_M5_ROADMAP.md`.
+
+The all-in-one goal is not a license to build ahead. Breadth is earned by
+finishing domains, not by scaffolding for them
+(`docs/09_MISTAKES_TO_AVOID.md`, #10).

@@ -7,7 +7,28 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Added
 
+- `docs/decisions/0006-multi-domain-dispatch.md`: records how the all-in-one
+  goal is reached without a simulation base class. Each domain is a concrete
+  library selected by a scenario `type` key and a plain dispatch switch. The
+  `type` key is introduced only once a second domain exists.
+- `CLAUDE.md` sections for multi-domain architecture and the template library,
+  plus rule 16 defining when a domain counts as finished (validation, a tested
+  invariant, malformed-input tests, and a scenario template).
+- `README.md` section describing domains and templates.
+
 ### Changed
+
+- Project identity amended from "simulation-first C++20 engine project" to
+  "all-in-one science physics simulation". Terminal-first still holds, the
+  anti-framework rules are unchanged, and work stays gated one milestone at a
+  time.
+- `docs/07_POST_M5_ROADMAP.md` restructured into tracks. The committed next
+  stretch is classical mechanics depth (collision, rigid bodies, ballistics,
+  springs and oscillators); later tracks are direction rather than commitment.
+- `docs/00_START_HERE.md`, `docs/01_V3_ARCHITECTURE_DECISION.md`,
+  `docs/03_MODULE_BOUNDARIES.md` and `README.md` updated to match.
+- `README.md` milestone table extended through M8 and retitled, since M6-M8
+  were complete but only M1-M5 were listed.
 
 ### Fixed
 
@@ -16,6 +37,12 @@ All notable changes to MalloySim are recorded here. The format follows
 ### Tests
 
 ### Architecture Notes
+
+- The all-in-one goal raises rather than retires the engine-kernel risk named
+  in `docs/01`. ADR 0006 is the standing answer: adding a domain must leave
+  `malloy_sim_core` unchanged.
+- No code changed. `malloy_sim_core` still contains exactly three types and
+  `NBodyWorld` is still concrete.
 
 ## [M8] - 2026-09-06  (simple 2D debug visualization)
 
