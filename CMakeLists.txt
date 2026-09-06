@@ -97,6 +97,20 @@ target_link_libraries(malloy_scenario
         malloy::project_warnings
 )
 
+# malloy_ascii (M8): simple 2D ASCII debug visualization (compiled STATIC).
+add_library(malloy_ascii STATIC
+    src/ascii/grid.cpp
+)
+add_library(malloy::ascii ALIAS malloy_ascii)
+target_include_directories(malloy_ascii PUBLIC include)
+target_link_libraries(malloy_ascii
+    PUBLIC
+        malloy::math
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -104,6 +118,7 @@ if(MALLOY_BUILD_APPS)
 
     target_link_libraries(malloy_nbody_terminal
         PRIVATE
+            malloy::ascii
             malloy::nbody
             malloy::scenario
             malloy::project_options
@@ -220,4 +235,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_scenario_tests COMMAND malloy_scenario_tests)
+
+    add_executable(malloy_ascii_tests
+        tests/ascii/grid_tests.cpp
+    )
+
+    target_include_directories(malloy_ascii_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_ascii_tests
+        PRIVATE
+            malloy::ascii
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_ascii_tests COMMAND malloy_ascii_tests)
 endif()

@@ -21,7 +21,7 @@ Do not use Catch2 or GoogleTest in M1-M5.
 
 ## Test executable layout
 
-All five exist and pass (one per module):
+All seven exist and pass (one per module):
 
 ```text
 malloy_smoke_tests
@@ -29,6 +29,8 @@ malloy_math_tests
 malloy_time_tests
 malloy_sim_core_tests
 malloy_nbody_tests
+malloy_scenario_tests
+malloy_ascii_tests
 ```
 
 Each test executable should return 0 on success, return nonzero on failure, print useful failure messages, and link only the module it tests.

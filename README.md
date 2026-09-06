@@ -21,10 +21,11 @@ Its first serious goal, a deterministic terminal-based 2D N-body gravity demo, i
 ## Status
 
 The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
-(**M6: N-body diagnostics**, **M7: scenario loading**). The project builds clean
-under MSVC (`/W4 /permissive-`), all six test executables pass via CTest, and the
-terminal app runs N-body scenarios -- built-in, or loaded from a text file --
-reporting conserved system diagnostics.
+(**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**).
+The project builds clean under MSVC (`/W4 /permissive-`), all seven test
+executables pass via CTest, and the terminal app runs N-body scenarios --
+built-in, or loaded from a text file -- reporting conserved system diagnostics
+alongside an ASCII view of the bodies.
 
 | Module | Type | Provides |
 |---|---|---|
@@ -33,6 +34,7 @@ reporting conserved system diagnostics.
 | `malloy_sim_core` | STATIC | `SimulationSettings`, `StepStatus`, `StepResult` |
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
 | `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
+| `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
@@ -55,9 +57,9 @@ With the Visual Studio generator, the debug executable is under:
 .\out\build\windows-msvc-debug\Debug\malloy_nbody_terminal.exe
 ```
 
-It runs two hardcoded scenarios and prints conserved system diagnostics
-(separation, total energy, total angular momentum) periodically. Sample output
-(abridged):
+It runs two hardcoded scenarios and prints, at each report, one line of conserved
+system diagnostics (separation, total energy, total angular momentum) followed by
+an ASCII view of the bodies. Sample output (diagnostics only, abridged):
 
 ```text
 MalloySim nbody_terminal
@@ -76,6 +78,47 @@ step  10000   sep  1.73143038   E_total   -0.86601509   L_total    2.27951999
 The three-body triangle holds its shape (separation ~sqrt(3)) while total energy
 and angular momentum stay essentially constant -- the conservation you expect
 from semi-implicit (symplectic) Euler.
+
+### The ASCII view
+
+Each report is followed by a frame of the body positions. This is step 1000
+of the two-body orbit, with the sun on the left and the planet a sixth of the
+way round:
+
+```text
++-------------------------------------------------------------+
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                *                            |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|     *                                                       |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
+|                                                             |
++-------------------------------------------------------------+
+  view x [-0.10000000, 1.10000000]  y [-1.20000000, 1.20000000]
+```
+
+The view is fitted to the bodies at the start of a run and afterwards only
+grows, so frames share a scale, a near-stationary body keeps its cell, and no
+body is ever silently clipped. The printed extents show when it has grown.
 
 ### Load a scenario from a file
 
@@ -115,7 +158,7 @@ built-in scenarios shown above.
 These remain out of scope until taken up as their own dedicated post-M5
 milestone (`docs/07_POST_M5_ROADMAP.md`) -- never added speculatively:
 
-- rendering
+- graphical rendering (the M8 debug view is ASCII text only)
 - Raylib / SDL / GLFW / SFML
 - collision
 - rigid bodies
@@ -129,7 +172,6 @@ milestone (`docs/07_POST_M5_ROADMAP.md`) -- never added speculatively:
 - asset manager
 - threading
 - package manager
-- config/scenario files
 - CLI parser
 
 ## Before committing

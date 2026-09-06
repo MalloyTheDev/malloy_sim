@@ -17,6 +17,40 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Architecture Notes
 
+## [M8] - 2026-09-06  (simple 2D debug visualization)
+
+### Added
+
+- `malloy_ascii` (STATIC, `malloy::ascii`): `Viewport`, `fit_viewport` (bounding
+  box of the finite points plus a margin, widened when an extent is zero), and
+  `render` (points into a framed character grid, y up, with out-of-view and
+  non-finite points clipped).
+- `malloy_ascii_tests`.
+
+### Changed
+
+- `apps/nbody_terminal/main.cpp` prints an ASCII view of the body positions
+  after each diagnostics line. One viewport is held for the whole run, seeded
+  from the initial state and only ever grown, so successive frames share a
+  scale and a near-stationary body keeps its cell.
+
+### Tests
+
+- Grid placement (center, y-up orientation, custom characters), clipping of
+  out-of-view points, empty input, and `fit_viewport` margin and
+  degenerate-extent behavior.
+- Boundary and malformed input: non-finite coordinates, a zero-extent viewport,
+  and non-positive grid sizes, each of which must degrade to an empty or
+  clamped grid rather than index out of range.
+
+### Architecture Notes
+
+- `malloy_ascii` depends only on `malloy::math`: it knows about points, not
+  bodies, so the physics libraries stay free of presentation code.
+- Framing policy (which viewport a frame shows) lives in the app; the library
+  only fits and draws.
+- Still no graphics API, no terminal control sequences, and no CLI parser.
+
 ## [M7] - 2026-06-19  (scenario/config loading)
 
 ### Added

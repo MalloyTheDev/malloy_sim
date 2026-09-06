@@ -1,9 +1,10 @@
 # 00 — Start Here
 
 **MalloySim C++** is a simulation-first C++20 project. The locked **M1-M5
-roadmap is complete**, plus the first post-M5 milestone (M6: N-body
-diagnostics): the math, time, sim-core, and N-body libraries are built and the
-terminal N-body demo runs. See `README.md` and `CHANGELOG.md`.
+roadmap is complete**, plus the first post-M5 milestones (M6: N-body
+diagnostics, M7: scenario loading, M8: ASCII debug view): the math, time,
+sim-core, N-body, scenario, and ASCII libraries are built and the terminal
+N-body demo runs. See `README.md` and `CHANGELOG.md`.
 
 ## Read order
 
@@ -26,7 +27,7 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-All five test executables should pass, and
+All seven test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
 completion.
 

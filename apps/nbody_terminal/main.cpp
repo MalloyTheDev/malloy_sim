@@ -1,19 +1,25 @@
+#include <malloy/ascii/grid.hpp>
 #include <malloy/math/math.hpp>
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/scenario/scenario.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <utility>
 #include <vector>
 
-// M7 terminal demo: runs an N-body scenario and reports the conserved system
-// diagnostics (separation, total energy, total angular momentum). The scenario
-// is either loaded from a file given as the single argument, or one of the
-// built-in scenarios when no argument is given. The app stays dumb -- it owns
-// no physics and has no CLI parser (docs/03, rules 14-15).
+// M8 terminal demo: runs an N-body scenario and reports the conserved system
+// diagnostics (separation, total energy, total angular momentum) together with
+// an ASCII view of the body positions. The scenario is either loaded from a
+// file given as the single argument, or one of the built-in scenarios when no
+// argument is given. The app stays dumb -- it owns no physics, no rendering
+// math, and has no CLI parser (docs/03, rules 14-15).
 
+using malloy::ascii::fit_viewport;
+using malloy::ascii::render;
+using malloy::ascii::Viewport;
 using malloy::math::distance;
 using malloy::math::Real;
 using malloy::math::Vec2;
@@ -29,6 +35,44 @@ using malloy::sim_core::StepStatus;
 
 namespace
 {
+// Size of the ASCII debug view. Roughly 2:1 because terminal cells are about
+// twice as tall as they are wide, so a square region of world space reads as
+// square on screen.
+constexpr int view_width = 61;
+constexpr int view_height = 25;
+
+// The body positions, as the plain point list the ASCII view works with.
+std::vector<Vec2> positions_of(const std::vector<Body2D>& bodies)
+{
+    std::vector<Vec2> points;
+    points.reserve(bodies.size());
+    for (const Body2D& body : bodies)
+    {
+        points.push_back(body.position);
+    }
+    return points;
+}
+
+// Draws the current body positions, first expanding `view` so that every body
+// is inside it. The view only ever grows: refitting it from scratch each frame
+// would rescale the picture every report and make a stationary body appear to
+// drift, while growing keeps the framing steady and still guarantees no body is
+// silently clipped. The extents are printed so a change of scale is visible.
+void print_view(Viewport& view, const std::vector<Body2D>& bodies)
+{
+    const std::vector<Vec2> points = positions_of(bodies);
+    const Viewport frame = fit_viewport(points);
+
+    view.min_x = std::min(view.min_x, frame.min_x);
+    view.max_x = std::max(view.max_x, frame.max_x);
+    view.min_y = std::min(view.min_y, frame.min_y);
+    view.max_y = std::max(view.max_y, frame.max_y);
+
+    std::cout << render(points, view, view_width, view_height) << "  view x ["
+              << view.min_x << ", " << view.max_x << "]  y [" << view.min_y << ", "
+              << view.max_y << "]\n";
+}
+
 // Runs one scenario to completion, printing system diagnostics every
 // output_every steps. Returns 0 on success, 1 on validation/step failure.
 int run_scenario(const char* title, const SimulationSettings& sim,
@@ -46,7 +90,11 @@ int run_scenario(const char* title, const SimulationSettings& sim,
         return 1;
     }
 
-    const auto report = [&world, &nbody](int step_index) {
+    // One view for the whole run, seeded from the initial state and grown as
+    // needed, so successive frames share a scale and can be compared.
+    Viewport view = fit_viewport(positions_of(world.bodies()));
+
+    const auto report = [&world, &nbody, &view](int step_index) {
         const auto& bodies_now = world.bodies();
         std::cout << "step " << std::setw(6) << step_index;
         if (bodies_now.size() >= 2)
@@ -58,6 +106,7 @@ int run_scenario(const char* title, const SimulationSettings& sim,
                   << total_energy(bodies_now, nbody.g, nbody.softening)
                   << "   L_total " << std::setw(13) << total_angular_momentum(bodies_now)
                   << '\n';
+        print_view(view, bodies_now);
     };
 
     report(0);

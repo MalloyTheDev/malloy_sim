@@ -1,6 +1,6 @@
 # 03 — Module Boundaries
 
-> All four modules below are implemented (M2-M4). These boundaries are in force
+> All modules below are implemented (M2-M8). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 ## `malloy_math`
@@ -27,8 +27,20 @@ Responsible for `Body2D`, `NBodySettings`, `NBodyWorld`, pairwise gravity, softe
 
 Not responsible for printing, rendering, app loop policy, config files, input, or GUI.
 
+## `malloy_scenario`
+
+Responsible for parsing a scenario/config text file into `SimulationSettings`, `NBodySettings`, bodies, and run length, and for reporting syntax errors with a line number.
+
+Not responsible for semantic validation (that stays in `NBodyWorld`), physics, printing, rendering, or CLI argument handling.
+
+## `malloy_ascii`
+
+Responsible for turning 2D points into a character grid: viewport fitting (`fit_viewport`) and framed grid rendering (`render`).
+
+Not responsible for physics, body types, simulation state, terminal control sequences, color, animation, or any graphics API.
+
 ## `malloy_nbody_terminal`
 
-Responsible for hardcoded demo setup, calling library APIs, fixed number of steps, formatted terminal output, and returning nonzero on validation failure.
+Responsible for hardcoded demo setup, calling library APIs, fixed number of steps, formatted terminal output, view framing policy (which viewport each frame shows), and returning nonzero on validation failure.
 
 Not responsible for reusable physics logic.

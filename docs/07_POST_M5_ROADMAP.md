@@ -8,17 +8,17 @@ build it one milestone at a time, and do not expand scope immediately after M5
 Recommended order:
 
 ```text
-M6  — stabilize N-body diagnostics      [done]
-M7  — minimal scenario/config loading   [done]
-M8  — simple 2D debug visualization
-M9  — collision primitives
-M10 — 2D rigid body basics
-M11 — ballistics/projectiles
-M12 — vehicle experiments
-M13 — broader 2D sandbox integration
-M14 — 3D math
-M15 — 3D simulation experiments
-M16 — quantum side project/module
+M6  - stabilize N-body diagnostics      [done]
+M7  - minimal scenario/config loading   [done]
+M8  - simple 2D debug visualization     [done]
+M9  - collision primitives
+M10 - 2D rigid body basics
+M11 - ballistics/projectiles
+M12 - vehicle experiments
+M13 - broader 2D sandbox integration
+M14 - 3D math
+M15 - 3D simulation experiments
+M16 - quantum side project/module
 ```
 
 Raylib is the likely first visualization choice later because it gets pixels on screen quickly without turning this into a graphics project.

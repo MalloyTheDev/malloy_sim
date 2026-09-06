@@ -27,11 +27,12 @@ It is not:
 ## Current phase
 
 ```text
-M1-M5 complete (locked roadmap). M6-M7 (diagnostics, scenario loading) complete.
+M1-M5 complete (locked roadmap). M6-M8 (diagnostics, scenario loading, ASCII
+debug view) complete.
 ```
 
 Work continues through the post-M5 roadmap (see `docs/07_POST_M5_ROADMAP.md`).
-Do not start any further milestone (M8 or later) unless explicitly asked, and
+Do not start any further milestone (M9 or later) unless explicitly asked, and
 then work only on that one milestone at a time.
 
 ## M1-M5 order (all complete)
@@ -103,7 +104,8 @@ ctest --preset windows-msvc-debug
 ## Expected app output
 
 The terminal app's first line is its identity, followed by the periodic demo
-output (radius and specific orbital energy):
+output: one diagnostics line (separation, total energy, total angular momentum)
+and one ASCII view frame per report.
 
 ```text
 MalloySim nbody_terminal
