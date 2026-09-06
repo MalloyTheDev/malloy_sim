@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M8). These boundaries are in force
+> All modules below are implemented (M2-M9). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -45,6 +45,12 @@ Not responsible for semantic validation (that stays in `NBodyWorld`), physics, p
 Responsible for turning 2D points into a character grid: viewport fitting (`fit_viewport`) and framed grid rendering (`render`).
 
 Not responsible for physics, body types, simulation state, terminal control sequences, color, animation, or any graphics API.
+
+## `malloy_collide`
+
+Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, and contact data (normal, penetration depth, contact point), including a documented deterministic answer wherever the contact normal is geometrically undefined.
+
+Not responsible for bodies, mass, velocity, contact response, integration, broadphase acceleration, or scenario loading. Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
 
 ## `malloy_nbody_terminal`
 

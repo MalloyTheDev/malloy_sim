@@ -5,9 +5,9 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M8 are complete: the math, time, sim-core, N-body, scenario, and ASCII
-libraries are built and the terminal N-body demo runs. Gravity is the first
-finished domain. See `README.md` and `CHANGELOG.md`.
+M1-M9 are complete: the math, time, sim-core, N-body, scenario, ASCII, and
+collide libraries are built and the terminal N-body demo runs. Gravity is the
+first finished domain. See `README.md` and `CHANGELOG.md`.
 
 ## Read order
 
@@ -33,15 +33,15 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-All seven test executables should pass, and
+All eight test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
 completion.
 
 ## What's next
 
-M1-M8 are done and gravity is the first finished domain. The active track is
-classical mechanics depth: collision, rigid bodies, ballistics, springs and
-oscillators. Work stays gated one milestone at a time; see
+M1-M9 are done and gravity is the first finished domain. The active track is
+classical mechanics depth: collision geometry shipped in M9, and rigid bodies,
+ballistics, and springs remain. Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 
 The all-in-one goal is not a license to build ahead. Breadth is earned by

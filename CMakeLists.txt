@@ -111,6 +111,20 @@ target_link_libraries(malloy_ascii
         malloy::project_warnings
 )
 
+# malloy_collide (M9): 2D collision primitives and contacts (compiled STATIC).
+add_library(malloy_collide STATIC
+    src/collide/collide.cpp
+)
+add_library(malloy::collide ALIAS malloy_collide)
+target_include_directories(malloy_collide PUBLIC include)
+target_link_libraries(malloy_collide
+    PUBLIC
+        malloy::math
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -260,4 +274,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_ascii_tests COMMAND malloy_ascii_tests)
+
+    add_executable(malloy_collide_tests
+        tests/collide/collide_tests.cpp
+    )
+
+    target_include_directories(malloy_collide_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_collide_tests
+        PRIVATE
+            malloy::collide
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_collide_tests COMMAND malloy_collide_tests)
 endif()

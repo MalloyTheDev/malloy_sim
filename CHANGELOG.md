@@ -142,6 +142,63 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M9] - 2026-09-06  (collision primitives)
+
+### Added
+
+- `malloy_collide` (STATIC, `malloy::collide`): `Circle` and `Aabb` shapes with
+  their own validation, cheap `overlaps` tests, and `contact` queries returning
+  `std::optional<Contact>` (normal, penetration depth, contact point) for all
+  three shape pairs.
+- `malloy_collide_tests`.
+
+### Architecture Notes
+
+- `malloy_collide` depends only on `malloy::math` and knows nothing about
+  `Body2D` or any simulation type, exactly as `malloy_ascii` knows points rather
+  than bodies. Pairing a body with a shape is the caller's job, so
+  `malloy_nbody` stays free of collision concerns and `Body2D` keeps its
+  documented scope of position, velocity, and mass.
+- Shipped as a support library, not a domain: it has no world and no scenario
+  template, so rule 16 does not apply to it. M10 (rigid bodies) is what will
+  make collision demonstrable.
+- Contact conventions are fixed and documented: the normal points from `a` to
+  `b` and is unit length, penetration is never negative, and moving `b` by
+  `+normal * penetration` separates the pair exactly. Shapes that merely touch
+  produce a contact with zero penetration rather than none, because the boundary
+  is exactly representable and therefore testable.
+- Every configuration where the normal is geometrically undefined has a fixed,
+  documented answer rather than a NaN: coincident circle centers and an exactly
+  centered circle inside a box both give +x, and an equal box overlap on both
+  axes resolves along x. Fixed choices keep degenerate cases repeatable
+  (docs/04 determinism).
+- No broadphase. Pair testing is the caller's loop, matching the existing O(n^2)
+  gravity loop. A spatial hash is the right answer when N actually hurts, and
+  building it now would be speculative infrastructure.
+- No new `StepStatus` values were needed, so `malloy_sim_core` is unchanged and
+  still contains exactly three types (ADR 0004, ADR 0006).
+
+### Tests
+
+- Separated, exactly touching, and overlapping cases for all three shape pairs,
+  with hand-computed penetration depths and unit normals including diagonal
+  ones.
+- Degenerate and hostile input: coincident centers, zero-radius circles,
+  zero-area boxes, inverted boxes, NaN and infinite coordinates and radii, a
+  circle centered exactly inside a box, and coordinates large enough that both
+  the squared distance and the squared radius sum overflow.
+- A round trip asserting the convention actually works: moving `b` by
+  `+normal * penetration` leaves the pair exactly touching.
+- A 61x61 sweep asserting `overlaps` and `contact().has_value()` agree, since
+  they are separate code paths that could silently diverge.
+- Verified by mutation testing: nine broken implementations (flipped normal,
+  dropped touching case, removed coincident fallback, deepest-axis separation,
+  forgotten radius in the inside case, changed tie-break, both dropped
+  validation clauses, and removed overflow guards) each make the suite fail.
+  The overflow mutation initially survived, which showed the first version of
+  that test never reached the guard; the test was corrected rather than the
+  claim being softened.
+
 ## [M8] - 2026-09-06  (simple 2D debug visualization)
 
 ### Added

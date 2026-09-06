@@ -30,8 +30,9 @@ complete and shipping (milestones M1-M8).
 ## Status
 
 The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
-(**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**).
-The project builds clean under MSVC (`/W4 /permissive-`), all seven test
+(**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
+**M9: collision primitives**).
+The project builds clean under MSVC (`/W4 /permissive-`), all eight test
 executables pass via CTest, and the terminal app runs N-body scenarios --
 built-in, or loaded from a text file -- reporting conserved system diagnostics
 alongside an ASCII view of the bodies.
@@ -44,6 +45,7 @@ alongside an ASCII view of the bodies.
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
 | `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
+| `malloy_collide` | STATIC | `Circle`, `Aabb`, overlap tests, contact normal/depth/point |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
@@ -193,6 +195,7 @@ built-in scenarios shown above.
 | M6 | N-body system diagnostics + three-body demo | ✅ Done |
 | M7 | `malloy_scenario`: scenario/config text loading | ✅ Done |
 | M8 | `malloy_ascii`: 2D ASCII debug visualization | ✅ Done |
+| M9 | `malloy_collide`: 2D collision primitives and contacts | ✅ Done |
 
 ## Out of scope (gated)
 
@@ -201,7 +204,7 @@ milestone (`docs/07_POST_M5_ROADMAP.md`) -- never added speculatively:
 
 - graphical rendering (the M8 debug view is ASCII text only)
 - Raylib / SDL / GLFW / SFML
-- collision
+- collision response (M9 shipped the geometry; resolving contacts has not)
 - rigid bodies
 - vehicles
 - 3D

@@ -22,6 +22,7 @@ A domain is finished when it has all four (`CLAUDE.md` rule 16):
 M6  - stabilize N-body diagnostics      [done]
 M7  - minimal scenario/config loading   [done]
 M8  - simple 2D debug visualization     [done]
+M9  - collision primitives              [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -29,8 +30,12 @@ M8  - simple 2D debug visualization     [done]
 This is the committed next stretch. It turns one working domain into four and
 produces the first real template library.
 
+M9 shipped as a support library rather than a domain: `malloy_collide` works on
+shapes, not bodies, so it has no world and no scenario template, and rule 16
+does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
+collision demonstrable.
+
 ```text
-M9  - collision primitives
 M10 - 2D rigid body basics
 M11 - ballistics/projectiles
 M12 - springs and oscillators

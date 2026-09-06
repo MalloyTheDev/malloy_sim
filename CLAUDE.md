@@ -40,15 +40,15 @@ It is still not:
 ## Current phase
 
 ```text
-M1-M8 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
-scenario loading, ASCII debug view.
+M1-M9 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+scenario loading, ASCII debug view, collision primitives.
 ```
 
-Active track: **classical mechanics depth** (collision, rigid bodies,
-ballistics, springs and oscillators), then multi-domain scenario dispatch, then
-wider domains. See `docs/07_POST_M5_ROADMAP.md`.
+Active track: **classical mechanics depth**. M9 (collision primitives) is done;
+rigid bodies, ballistics, and springs remain, then multi-domain scenario
+dispatch, then wider domains. See `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M9 or later) unless explicitly asked, and
+Do not start any further milestone (M10 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -67,7 +67,7 @@ M5: terminal N-body demo               [done]
 1. Do not jump ahead; work one milestone at a time.
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
-4. Do not add collision until its dedicated milestone.
+4. Collision geometry landed in M9 (`malloy_collide`). Do not add contact response until its dedicated milestone.
 5. Do not add rigid bodies until their dedicated milestone.
 6. Do not add 3D until its dedicated milestone.
 7. Do not add quantum until its dedicated milestone.
