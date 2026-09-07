@@ -37,7 +37,7 @@ does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
 collision demonstrable.
 
 ```text
-M11 - 2D rigid body basics
+M11 - 2D rigid body basics              [scoped, not started]
 M12 - ballistics/projectiles
 M13 - springs and oscillators
 ```
@@ -45,6 +45,11 @@ M13 - springs and oscillators
 M10 was re-scoped from rigid bodies to colliding particles, so that collision
 became demonstrable one milestone sooner and the project gained a second real
 domain. Rigid bodies (orientation, angular velocity, torque) moved to M11.
+
+M11's ownership boundary is settled in advance and recorded in
+`docs/decisions/0007-rigid-bodies-own-their-state.md`: a dedicated
+`RigidBody2D`, not a widened `Body2D`. 2D only, so scalar angle and scalar
+inertia; quaternions and inertia tensors stay with 3D at M19.
 
 ## Track 2: the multi-domain shell
 

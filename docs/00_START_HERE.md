@@ -23,7 +23,7 @@ Gravity and colliding particles are the two finished domains. See `README.md` an
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 11. `docs/09_MISTAKES_TO_AVOID.md`
 12. `docs/10_CHANGELOG_TEMPLATE.md`
-13. `docs/decisions/` (ADRs 0001-0006)
+13. `docs/decisions/` (ADRs 0001-0007)
 
 ## Build and test
 

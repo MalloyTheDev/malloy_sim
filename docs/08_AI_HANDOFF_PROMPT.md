@@ -20,7 +20,7 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0006)
+- docs/decisions/ (ADRs 0001-0007)
 
 Current status:
 

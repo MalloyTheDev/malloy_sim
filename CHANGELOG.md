@@ -7,6 +7,13 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Added
 
+- `docs/decisions/0007-rigid-bodies-own-their-state.md`: settles the M11
+  ownership boundary before M11 starts. A dedicated `RigidBody2D` rather than a
+  widened `Body2D`, following the M10 precedent that each domain owns the state
+  its model requires. Also records the three-way split between shape geometry,
+  mass-property construction, and integration; the angle-canonicalization
+  position; and that 2D means scalar angle and scalar inertia, with quaternions
+  and inertia tensors deferred to M19.
 - `docs/decisions/0006-multi-domain-dispatch.md`: records how the all-in-one
   goal is reached without a simulation base class. Each domain is a concrete
   library selected by a scenario `type` key and a plain dispatch switch. The
