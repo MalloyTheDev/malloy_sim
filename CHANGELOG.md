@@ -159,6 +159,9 @@ All notable changes to MalloySim are recorded here. The format follows
   `FixedStep::create`.
 - `elapsed_time()` on both worlds, including that an unusable `dt` leaves it at
   zero rather than reporting a bogus time.
+- `docs/05` records the rule that produced both of the coverage gaps above:
+  prefer asymmetric test configurations, because a symmetric setup cancels the
+  very errors it is meant to catch.
 - Verified by mutation testing: six broken implementations (a+b in distance,
   y-only vector equality, a sign-flipped dot term, a strict `<` boundary, and
   accumulated elapsed time in both `FixedStep` and the worlds) each fail.
