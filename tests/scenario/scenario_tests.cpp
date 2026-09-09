@@ -2,6 +2,7 @@
 
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/particles/particles.hpp>
+#include <malloy/rigid/rigid.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <test_check.hpp>
 
@@ -156,7 +157,8 @@ int main()
 #ifdef MALLOY_SCENARIO_DIR
     {
         const char* templates[] = {"two_body.scn", "three_body_triangle.scn",
-                                   "bouncing_particles.scn"};
+                                   "bouncing_particles.scn",
+                                   "spinning_bodies.scn"};
         for (const char* name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;
@@ -177,6 +179,14 @@ int main()
                 MALLOY_CHECK_TRUE(r.scenario.bodies.size() >= 2);
                 NBodyWorld world{r.scenario.simulation, r.scenario.nbody_settings,
                                  r.scenario.bodies};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Rigid)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.rigid_bodies.size() >= 1);
+                malloy::rigid::RigidWorld world{r.scenario.simulation,
+                                                r.scenario.rigid_bodies};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
                 MALLOY_CHECK_TRUE(world.step().ok());
             }
@@ -301,6 +311,53 @@ int main()
         std::istringstream in("type particles\nbounds -1 -1 1 1 EXTRA\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_FALSE(r.ok); // trailing tokens still rejected
+    }
+
+    // --- type rigid parses into the rigid fields. Every value is distinct so a
+    //     swapped pair in the constructor changes the result. ---
+    {
+        std::istringstream in("type rigid\n"
+                              "dt 0.01\n"
+                              "steps 50\n"
+                              "rigid_body 2.5 3.75 0.6 -0.4 1.0 2.0 0.7 3.0 4.0 0.9\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid);
+        MALLOY_CHECK_EQ(r.scenario.rigid_bodies.size(), std::size_t{1});
+        const auto& b = r.scenario.rigid_bodies[0];
+        MALLOY_CHECK_NEAR(b.mass, 2.5, eps);
+        MALLOY_CHECK_NEAR(b.inertia, 3.75, eps);
+        MALLOY_CHECK_NEAR(b.local_center_of_mass.x, 0.6, eps);
+        MALLOY_CHECK_NEAR(b.local_center_of_mass.y, -0.4, eps);
+        MALLOY_CHECK_NEAR(b.position.x, 1.0, eps);
+        MALLOY_CHECK_NEAR(b.position.y, 2.0, eps);
+        MALLOY_CHECK_NEAR(b.angle, 0.7, eps);
+        MALLOY_CHECK_NEAR(b.velocity.x, 3.0, eps);
+        MALLOY_CHECK_NEAR(b.velocity.y, 4.0, eps);
+        MALLOY_CHECK_NEAR(b.angular_velocity, 0.9, eps);
+    }
+
+    // --- Domain isolation holds for the third domain too. ---
+    {
+        std::istringstream in("type rigid\nbody 1.0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type rigid\nparticle 1.0 0.5 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type nbody\nrigid_body 1 1 0 0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type particles\nrigid_body 1 1 0 0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // One field short.
+        std::istringstream in("type rigid\nrigid_body 1 1 0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 
     std::cout << "malloy_scenario_tests passed\n";

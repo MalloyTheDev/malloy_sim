@@ -1,0 +1,28 @@
+# MalloySim scenario: rigid bodies in free motion.
+#
+# Nothing acts on these bodies, so this demonstrates the M11 invariant directly:
+# with no impulses, linear momentum, angular momentum and kinetic energy are all
+# conserved exactly. Watch all four columns hold flat while the bodies drift and
+# spin.
+#
+# Each body is drawn as two points: its centre of mass and its body origin.
+# Every body here has its origin offset from its centre of mass, so the origin
+# visibly orbits the centre. That is also the configuration that makes torque
+# errors observable, which is why the tests use it too
+# (docs/decisions/0007-rigid-bodies-own-their-state.md).
+
+type rigid
+
+dt 0.004
+steps 6000
+output_every 750
+
+# rigid_body <mass> <inertia> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
+rigid_body 2.50  3.75   0.60 -0.40   -2.0  -1.5   0.70    0.35   0.22    0.90
+rigid_body 1.25  0.80  -0.30  0.50    2.0   1.0  -1.10   -0.28   0.15   -1.40
+rigid_body 4.00  6.20   0.45  0.35    0.0  -2.5   0.25   -0.07  -0.37    0.55
+
+# Expected: all four reported quantities hold at their step 0 values for the
+# whole run, since no impulse is ever applied. Linear momentum is conserved
+# here in a way it is NOT in bouncing_particles.scn, because there are no walls
+# to carry it away.

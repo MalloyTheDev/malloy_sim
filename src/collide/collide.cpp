@@ -14,6 +14,10 @@ namespace
 // chosen per call, so degenerate configurations stay repeatable (docs/04).
 const math::Vec2 fallback_normal{1.0, 0.0};
 
+// Not in <numbers> because the project targets C++20 without pulling in extras
+// it does not otherwise use, and one constant does not justify the include.
+const math::Real pi = math::Real{3.14159265358979323846};
+
 math::Real clamp_to(math::Real value, math::Real low, math::Real high)
 {
     return std::min(std::max(value, low), high);
@@ -46,6 +50,68 @@ bool Aabb::is_valid() const
     // whichever way it appears.
     return math::is_finite(min) && math::is_finite(max) && min.x <= max.x &&
            min.y <= max.y;
+}
+
+// ----------------------------------------------------------------------------
+// Area properties
+// ----------------------------------------------------------------------------
+
+math::Real area(const Circle& c)
+{
+    if (!c.is_valid())
+    {
+        return math::Real{0};
+    }
+    return pi * c.radius * c.radius;
+}
+
+math::Real area(const Aabb& box)
+{
+    if (!box.is_valid())
+    {
+        return math::Real{0};
+    }
+    return (box.max.x - box.min.x) * (box.max.y - box.min.y);
+}
+
+math::Vec2 centroid(const Circle& c)
+{
+    if (!c.is_valid())
+    {
+        return math::Vec2{};
+    }
+    return c.center;
+}
+
+math::Vec2 centroid(const Aabb& box)
+{
+    if (!box.is_valid())
+    {
+        return math::Vec2{};
+    }
+    return (box.min + box.max) / math::Real{2};
+}
+
+math::Real second_moment_of_area(const Circle& c)
+{
+    if (!c.is_valid())
+    {
+        return math::Real{0};
+    }
+    // pi*R^4/2
+    const math::Real r2 = c.radius * c.radius;
+    return pi * r2 * r2 / math::Real{2};
+}
+
+math::Real second_moment_of_area(const Aabb& box)
+{
+    if (!box.is_valid())
+    {
+        return math::Real{0};
+    }
+    const math::Real w = box.max.x - box.min.x;
+    const math::Real h = box.max.y - box.min.y;
+    return w * h * (w * w + h * h) / math::Real{12};
 }
 
 // ----------------------------------------------------------------------------

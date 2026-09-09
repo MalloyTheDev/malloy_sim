@@ -2,6 +2,7 @@
 #include <malloy/math/math.hpp>
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/particles/particles.hpp>
+#include <malloy/rigid/rigid.hpp>
 #include <malloy/scenario/scenario.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 
@@ -30,6 +31,8 @@ using malloy::nbody::NBodySettings;
 using malloy::nbody::NBodyWorld;
 using malloy::nbody::total_angular_momentum;
 using malloy::particles::Particle2D;
+using malloy::rigid::RigidBody2D;
+using malloy::rigid::RigidWorld;
 using malloy::nbody::total_energy;
 using malloy::particles::total_kinetic_energy;
 using malloy::particles::total_momentum;
@@ -37,6 +40,16 @@ using malloy::particles::ParticleSettings;
 using malloy::particles::ParticleWorld;
 using malloy::scenario::parse_scenario_file;
 using malloy::scenario::ScenarioType;
+
+namespace
+{
+// Three domains each define total_momentum / total_kinetic_energy in their
+// own namespace. Aliasing here keeps the runners readable without pulling
+// three same-named overload sets into one scope.
+constexpr auto& rigid_linear_momentum = malloy::rigid::total_linear_momentum;
+constexpr auto& rigid_angular_momentum = malloy::rigid::total_angular_momentum;
+constexpr auto& rigid_kinetic_energy = malloy::rigid::total_kinetic_energy;
+} // namespace
 using malloy::scenario::ScenarioParseResult;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
@@ -125,6 +138,69 @@ int run_particles(const char* title, const SimulationSettings& sim,
                   << total_momentum(now).y << '\n';
         std::cout << std::fixed;
         print_view(view, particle_positions(now));
+    };
+
+    report(0);
+    for (std::int64_t step = 1; step <= steps; ++step)
+    {
+        if (!world.step().ok())
+        {
+            std::cerr << title << ": step " << step << " failed\n";
+            return 1;
+        }
+        if (output_every > 0 && step % output_every == 0)
+        {
+            report(step);
+        }
+    }
+    return 0;
+}
+
+// The points the ASCII view shows for a rigid body: its centre of mass and its
+// body origin. Both are real state rather than an invented marker, and when the
+// two are offset the origin visibly orbits the centre, which is how rotation
+// becomes legible in a character grid.
+std::vector<Vec2> rigid_points(const std::vector<RigidBody2D>& bodies)
+{
+    std::vector<Vec2> points;
+    points.reserve(bodies.size() * 2);
+    for (const RigidBody2D& body : bodies)
+    {
+        points.push_back(malloy::rigid::center_of_mass(body));
+        points.push_back(body.position);
+    }
+    return points;
+}
+
+// Runs one rigid-body scenario. A third concrete runner: RigidWorld shares no
+// base class with the other two, and the dispatch switch is the whole
+// mechanism (ADR 0006).
+int run_rigid(const char* title, const SimulationSettings& sim,
+              std::vector<RigidBody2D> bodies, int steps, int output_every)
+{
+    RigidWorld world{sim, std::move(bodies)};
+
+    std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
+              << "  dt=" << sim.dt << "  steps=" << steps << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(rigid_points(world.bodies()));
+
+    const auto report = [&world, &view](std::int64_t step_index) {
+        const auto& now = world.bodies();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        std::cout << "   KE " << std::setw(16) << rigid_kinetic_energy(now)
+                  << "   L " << std::setw(16) << rigid_angular_momentum(now)
+                  << "   p " << std::setw(16) << rigid_linear_momentum(now).x
+                  << std::setw(16) << rigid_linear_momentum(now).y << '\n';
+        std::cout << std::fixed;
+        print_view(view, rigid_points(now));
     };
 
     report(0);
@@ -257,6 +333,9 @@ int main(int argc, char** argv)
         case ScenarioType::Particles:
             return run_particles(argv[1], s.simulation, s.particle_settings,
                                  s.particle_list, s.steps, s.output_every);
+        case ScenarioType::Rigid:
+            return run_rigid(argv[1], s.simulation, s.rigid_bodies, s.steps,
+                             s.output_every);
         }
         return 1;
     }

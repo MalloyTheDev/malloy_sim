@@ -8,6 +8,7 @@
 
 #include <malloy/collide/shapes.hpp>
 #include <malloy/math/vec2.hpp>
+#include <malloy/rigid/rigid_body2d.hpp>
 
 namespace malloy::scenario
 {
@@ -71,6 +72,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "particles")
             {
                 scenario.type = ScenarioType::Particles;
+            }
+            else if (value == "rigid")
+            {
+                scenario.type = ScenarioType::Rigid;
             }
             else
             {
@@ -204,6 +209,32 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             scenario.particle_list.push_back(particles::Particle2D{
                 math::Vec2{px, py}, math::Vec2{vx, vy}, mass, radius});
+        }
+        else if (key == "rigid_body")
+        {
+            if (scenario.type != ScenarioType::Rigid)
+            {
+                return make_error(line_number, "rigid_body belongs to type rigid");
+            }
+            saw_domain_key = true;
+            rigid::RigidBody2D body;
+            math::Real comx{};
+            math::Real comy{};
+            math::Real px{};
+            math::Real py{};
+            math::Real vx{};
+            math::Real vy{};
+            if (!(tokens >> body.mass >> body.inertia >> comx >> comy >> px >> py >>
+                  body.angle >> vx >> vy >> body.angular_velocity))
+            {
+                return make_error(line_number,
+                                  "rigid_body requires: mass inertia comx comy px py "
+                                  "angle vx vy omega");
+            }
+            body.local_center_of_mass = math::Vec2{comx, comy};
+            body.position = math::Vec2{px, py};
+            body.velocity = math::Vec2{vx, vy};
+            scenario.rigid_bodies.push_back(body);
         }
         else
         {

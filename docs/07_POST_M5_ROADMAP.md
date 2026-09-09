@@ -24,6 +24,7 @@ M7  - minimal scenario/config loading   [done]
 M8  - simple 2D debug visualization     [done]
 M9  - collision primitives              [done]
 M10 - colliding particles               [done]
+M11 - 2D rigid body basics              [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -37,10 +38,14 @@ does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
 collision demonstrable.
 
 ```text
-M11 - 2D rigid body basics              [scoped, not started]
 M12 - ballistics/projectiles
 M13 - springs and oscillators
 ```
+
+M11 shipped as free motion plus impulses: no persistent forces, no force or
+torque accumulators, and no rigid-body contact response. Forces belong with
+ballistics, where gravity is the point, and contact response is its own
+milestone.
 
 M10 was re-scoped from rigid bodies to colliding particles, so that collision
 became demonstrable one milestone sooner and the project gained a second real

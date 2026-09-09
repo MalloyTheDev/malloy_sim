@@ -11,6 +11,9 @@
 using malloy::collide::Aabb;
 using malloy::collide::Circle;
 using malloy::collide::Contact;
+using malloy::collide::area;
+using malloy::collide::centroid;
+using malloy::collide::second_moment_of_area;
 using malloy::collide::contact;
 using malloy::collide::overlaps;
 using malloy::math::Real;
@@ -336,6 +339,53 @@ int main()
         MALLOY_CHECK_VEC2_NEAR(first->normal, second->normal, 0.0);
         MALLOY_CHECK_NEAR(first->penetration, second->penetration, 0.0);
         MALLOY_CHECK_VEC2_NEAR(first->point, second->point, 0.0);
+    }
+
+    // --- Area properties: closed-form values, no density and no mass. ---
+    {
+        const Real pi = 3.14159265358979323846;
+
+        // Disc: A = pi R^2, J = pi R^4 / 2. R = 2 gives 4pi and 8pi, and the
+        // two differ, so a copied formula cannot pass both.
+        const Circle disc{Vec2{7.0, -3.0}, 2.0};
+        MALLOY_CHECK_NEAR(area(disc), 4.0 * pi, 1e-12);
+        MALLOY_CHECK_NEAR(second_moment_of_area(disc), 8.0 * pi, 1e-12);
+        MALLOY_CHECK_VEC2_NEAR(centroid(disc), Vec2(7.0, -3.0), eps); // not the origin
+
+        // Box 6 by 2, deliberately not square and not centred on the origin:
+        // A = 12, J = w*h*(w^2+h^2)/12 = 12*40/12 = 40.
+        const Aabb box{Vec2{1.0, 5.0}, Vec2{7.0, 7.0}};
+        MALLOY_CHECK_NEAR(area(box), 12.0, eps);
+        MALLOY_CHECK_NEAR(second_moment_of_area(box), 40.0, eps);
+        MALLOY_CHECK_VEC2_NEAR(centroid(box), Vec2(4.0, 6.0), eps);
+
+        // Swapping the box extents must change the centroid but not the area or
+        // the polar second moment, which is symmetric in w and h.
+        const Aabb rotated{Vec2{1.0, 5.0}, Vec2{3.0, 11.0}}; // 2 by 6
+        MALLOY_CHECK_NEAR(area(rotated), 12.0, eps);
+        MALLOY_CHECK_NEAR(second_moment_of_area(rotated), 40.0, eps);
+        MALLOY_CHECK_VEC2_NEAR(centroid(rotated), Vec2(2.0, 8.0), eps);
+    }
+
+    // --- Degenerate and invalid shapes give 0 rather than a stray number. ---
+    {
+        const Circle point{Vec2{1.0, 2.0}, 0.0};
+        MALLOY_CHECK_NEAR(area(point), 0.0, eps);
+        MALLOY_CHECK_NEAR(second_moment_of_area(point), 0.0, eps);
+        MALLOY_CHECK_VEC2_NEAR(centroid(point), Vec2(1.0, 2.0), eps);
+
+        const Aabb flat{Vec2{1.0, 1.0}, Vec2{5.0, 1.0}}; // zero height
+        MALLOY_CHECK_NEAR(area(flat), 0.0, eps);
+        MALLOY_CHECK_NEAR(second_moment_of_area(flat), 0.0, eps);
+
+        const Circle bad{Vec2{}, -1.0};
+        const Aabb bad_box{Vec2{1.0, 1.0}, Vec2{-1.0, -1.0}};
+        MALLOY_CHECK_NEAR(area(bad), 0.0, eps);
+        MALLOY_CHECK_NEAR(second_moment_of_area(bad), 0.0, eps);
+        MALLOY_CHECK_VEC2_NEAR(centroid(bad), Vec2(0.0, 0.0), eps);
+        MALLOY_CHECK_NEAR(area(bad_box), 0.0, eps);
+        MALLOY_CHECK_NEAR(second_moment_of_area(bad_box), 0.0, eps);
+        MALLOY_CHECK_VEC2_NEAR(centroid(bad_box), Vec2(0.0, 0.0), eps);
     }
 
     std::cout << "malloy_collide_tests passed\n";

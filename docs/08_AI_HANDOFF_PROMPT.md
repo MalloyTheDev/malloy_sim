@@ -24,10 +24,10 @@ Before doing anything, read:
 
 Current status:
 
-M1-M8 are complete: math, time, sim_core, nbody, the terminal demo, system
-diagnostics, scenario loading, and the ASCII debug view. Gravity is the first
-finished domain. The active track is classical mechanics depth
-(docs/07_POST_M5_ROADMAP.md).
+M1-M11 are complete. Gravity, colliding particles and 2D rigid bodies are the
+three finished domains, and the scenario format dispatches between them with a
+type key. The active track is classical mechanics depth
+(docs/07_POST_M5_ROADMAP.md); ballistics and springs remain.
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to

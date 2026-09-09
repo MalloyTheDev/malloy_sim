@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M10). These boundaries are in force
+> All modules below are implemented (M2-M11). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -48,15 +48,21 @@ Not responsible for physics, body types, simulation state, terminal control sequ
 
 ## `malloy_collide`
 
-Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, and contact data (normal, penetration depth, contact point), including a documented deterministic answer wherever the contact normal is geometrically undefined.
+Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid.
 
-Not responsible for bodies, mass, velocity, contact response, integration, broadphase acceleration, or scenario loading. Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
+Not responsible for density, mass, inertia, bodies, velocity, contact response, integration, broadphase acceleration, or scenario loading. The area properties stop at geometry: turning them into mass properties belongs to whichever domain owns bodies (ADR 0007). Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
 
 ## `malloy_particles`
 
 Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, and its own validation and diagnostics.
 
 Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, gravity, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
+
+## `malloy_rigid`
+
+Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
+
+Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, contact response, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle: quaternions and inertia tensors are 3D concerns deferred to M19.
 
 ## `malloy_nbody_terminal`
 

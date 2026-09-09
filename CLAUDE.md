@@ -40,17 +40,17 @@ It is still not:
 ## Current phase
 
 ```text
-M1-M10 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M11 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
-with multi-domain scenario dispatch.
+with multi-domain scenario dispatch, and 2D rigid bodies.
 ```
 
-Active track: **classical mechanics depth**. M9 (collision geometry) and M10
-(colliding particles) are done, and M10 also introduced the multi-domain
-`type` key. Rigid bodies, ballistics, and springs remain. See
+Active track: **classical mechanics depth**. M9 (collision geometry), M10
+(colliding particles, which introduced the multi-domain `type` key) and M11
+(2D rigid bodies) are done. Ballistics and springs remain. See
 `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M11 or later) unless explicitly asked, and
+Do not start any further milestone (M12 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -70,7 +70,7 @@ M5: terminal N-body demo               [done]
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
 4. Collision geometry landed in M9 and non-rotational contact response in M10. Do not add rotational (rigid-body) response until its dedicated milestone.
-5. Do not add rigid bodies, meaning orientation, angular velocity, or torque, until their dedicated milestone.
+5. Rigid bodies landed in M11 as free motion plus impulses (`malloy_rigid`). Do not add persistent forces, contact response for rigid bodies, or force/torque accumulators until their dedicated milestone.
 6. Do not add 3D until its dedicated milestone.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
@@ -97,7 +97,7 @@ Implemented in M10, once `malloy_particles` gave the format a second domain to
 dispatch to:
 
 ```text
-type nbody          # or: particles
+type nbody          # or: particles, rigid
 dt 0.001
 steps 10000
 ```

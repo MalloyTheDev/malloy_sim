@@ -185,6 +185,86 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M11] - 2026-09-09  (2D rigid bodies)
+
+### Added
+
+- `malloy_rigid` (STATIC, `malloy::rigid`): `RigidBody2D` (pose plus mass
+  distribution), `MassProperties` and `mass_properties` from a shape and a
+  density, the explicit parallel-axis `shift_inertia`, world/local conversions,
+  `velocity_at`, a concrete `RigidWorld` with pose integration and
+  `apply_impulse_at`, and total linear momentum, angular momentum and kinetic
+  energy diagnostics.
+- Area properties in `malloy_collide`: `area`, `centroid`, and
+  `second_moment_of_area` about the centroid, for `Circle` and `Aabb`. Pure
+  geometry, with no density and no mass anywhere.
+- `malloy_rigid_tests`.
+- `type rigid` in the scenario format, with a `rigid_body` key carrying mass,
+  inertia, the local centre-of-mass offset, pose, and both velocities.
+- `scenarios/spinning_bodies.scn`.
+
+### Architecture Notes
+
+- Implements ADR 0007. `RigidBody2D` is its own type rather than a widened
+  `nbody::Body2D`: the two obey different equations of motion, and gravity has
+  no use for an angle. `Body2D` and `Particle2D` are untouched.
+- The three responsibilities ADR 0007 required to stay separable are separate:
+  shape area properties live in `malloy_collide` with no density; mass-property
+  construction and the parallel-axis step live in `malloy_rigid`; integration
+  lives in `RigidWorld`. A centroid mistake therefore fails a geometry test
+  with an exact closed-form expected value, never a rotational one.
+- `inertia` is documented as being about the centre of mass, and `r` is measured
+  from the centre of mass everywhere it appears. One documented reference point
+  is what stops a parallel-axis term being applied twice or not at all.
+- `step()` translates the CENTRE OF MASS and derives the body origin from it, so
+  a body whose origin is offset orbits its centre rather than spinning about the
+  wrong point.
+- The angle is not wrapped by integration. Canonicalisation stays a separate
+  concern with one owner (ADR 0007), and a test pins that the angle keeps
+  accumulating past 2*pi.
+- Impulse-only: no persistent forces, no force or torque accumulators, and no
+  rigid-body contact response. Accumulators would introduce a determinism
+  surface (accumulation order across callers is observable, as pair order was in
+  M10) and nothing needs them yet. Forces belong with ballistics.
+- Static or infinite-mass bodies are not represented. Nothing needs them until
+  contact response does, and inventing a representation early would be
+  speculative (rule 11).
+- Third domain, third concrete runner, one more `switch` arm. `malloy_sim_core`
+  is still exactly three types.
+
+### Tests
+
+- Every rotational test uses one deliberately asymmetric body: origin away from
+  the centre of mass, nonzero angle, inertia not 1, mass not 1, both velocity
+  components nonzero, and nonzero spin. Per `docs/05`, a body missing any of
+  these hides a whole class of mistake.
+- Mass properties against closed-form values with a density that is not 1, plus
+  a cross-check against the textbook `I = mR^2/2` and `I = m(w^2+h^2)/12`
+  relations, so a formula and its cross-check cannot both be wrong the same way.
+- Parallel-axis with a nonzero distance, and a bad distance returning the input
+  rather than a plausible wrong answer.
+- Pose round-tripping, a quarter turn pinning counter-clockwise as positive, and
+  a centre of mass that is the origin plus the ROTATED offset.
+- `velocity_at` evaluated at the centre of mass, one unit away from it, and at
+  the body origin, which is the case that distinguishes an arm measured from the
+  centre of mass from one measured from the origin.
+- An offset spinning body whose centre of mass must not move while its origin
+  swings a quarter turn around it.
+- Invariants: with no impulses, linear momentum, angular momentum and kinetic
+  energy hold over a 5000-step run.
+- Impulses: through the centre of mass changes linear velocity only; off centre
+  changes angular velocity by exactly `(r x J)/I` with both components of `r`
+  and `J` nonzero; mirroring the arm mirrors the spin, so both torque signs
+  occur; and total momentum changes by exactly `J` and `p x J`.
+- Verified by mutation testing: twelve broken implementations each make the
+  suite fail. They include the torque arm measured from the body origin, a
+  flipped cross-product sign, a clockwise `rotate`, a wrong-signed `omega x r`,
+  `step` moving the origin instead of the centre of mass, angular momentum
+  missing either its spin or its orbital term, parallel-axis using `m*d`, mass
+  properties dropping density from the inertia, and both second-moment constants
+  being wrong. All twelve were caught on the first attempt, which is the
+  asymmetric-body rule from `docs/05` doing its job.
+
 ## [M10] - 2026-09-06  (colliding particles + multi-domain dispatch)
 
 ### Added

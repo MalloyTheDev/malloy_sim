@@ -96,6 +96,7 @@ target_link_libraries(malloy_scenario
     PUBLIC
         malloy::nbody
         malloy::particles
+        malloy::rigid
         malloy::sim_core
         malloy::math
         malloy::project_options
@@ -138,6 +139,23 @@ add_library(malloy_particles STATIC
 add_library(malloy::particles ALIAS malloy_particles)
 target_include_directories(malloy_particles PUBLIC include)
 target_link_libraries(malloy_particles
+    PUBLIC
+        malloy::collide
+        malloy::math
+        malloy::sim_core
+        malloy::time
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
+# malloy_rigid (M11): 2D rigid bodies, pose and mass distribution (STATIC).
+add_library(malloy_rigid STATIC
+    src/rigid/rigid.cpp
+)
+add_library(malloy::rigid ALIAS malloy_rigid)
+target_include_directories(malloy_rigid PUBLIC include)
+target_link_libraries(malloy_rigid
     PUBLIC
         malloy::collide
         malloy::math
@@ -333,4 +351,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_particles_tests COMMAND malloy_particles_tests)
+
+    add_executable(malloy_rigid_tests
+        tests/rigid/rigid_world_tests.cpp
+    )
+
+    target_include_directories(malloy_rigid_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_rigid_tests
+        PRIVATE
+            malloy::rigid
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_rigid_tests COMMAND malloy_rigid_tests)
 endif()

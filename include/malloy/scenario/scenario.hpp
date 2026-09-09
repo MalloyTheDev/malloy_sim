@@ -8,6 +8,7 @@
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/particles/particle2d.hpp>
 #include <malloy/particles/particle_settings.hpp>
+#include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 
 namespace malloy::scenario
@@ -22,6 +23,7 @@ enum class ScenarioType
 {
     NBody,
     Particles,
+    Rigid,
 };
 
 // A complete, runnable scenario for one domain.
@@ -45,6 +47,9 @@ struct Scenario
     // type == Particles
     particles::ParticleSettings particle_settings{};
     std::vector<particles::Particle2D> particle_list;
+
+    // type == Rigid
+    std::vector<rigid::RigidBody2D> rigid_bodies;
 };
 
 // The outcome of parsing. On failure `error` holds a human-readable message
@@ -62,7 +67,7 @@ struct ScenarioParseResult
 //
 // Common to every domain:
 //
-//   type <nbody|particles>  which domain            (default nbody)
+//   type <nbody|particles|rigid>  which domain      (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
@@ -79,7 +84,14 @@ struct ScenarioParseResult
 //   bounds <minx> <miny> <maxx> <maxy>             (default -1 -1 1 1)
 //   particle <mass> <radius> <px> <py> <vx> <vy>
 //
-// A key belonging to the other domain is a parse error, so a typo in `type`
+// type rigid:
+//
+//   rigid_body <mass> <inertia> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
+//
+//     mass and inertia are about the centre of mass; comx/comy is the local
+//     offset from the body origin to the centre of mass; angle is in radians.
+//
+// A key belonging to another domain is a parse error, so a typo in `type`
 // surfaces immediately rather than silently running the wrong simulation.
 //
 // Only syntax is checked here: bad numbers, too few or too many fields on a
