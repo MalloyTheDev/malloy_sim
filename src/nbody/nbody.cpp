@@ -19,7 +19,8 @@ bool Body2D::is_valid() const
 bool NBodySettings::is_valid() const
 {
     return g >= math::Real{0} && softening >= math::Real{0} &&
-           math::is_finite(g) && math::is_finite(softening);
+           math::is_finite(g) && math::is_finite(softening) &&
+           math::is_finite(softening * softening);
 }
 
 NBodyWorld::NBodyWorld(sim_core::SimulationSettings simulation_settings,

@@ -7,6 +7,71 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #17: a softening value large enough that its SQUARE overflows was
+  accepted, and silently switched the pairwise interaction off.
+
+  `softening` enters the denominator squared, so a finite value above
+  sqrt(DBL_MAX), about 1.34e154, squares to infinity. Every separation then
+  becomes infinite, every force is exactly zero and every potential is exactly
+  zero. The failure is not merely undetected, it looks BETTER than a correct
+  run, because a simulation in which nothing happens conserves everything
+  perfectly.
+
+  Both domains that have a softening now require its square to be finite, which
+  is the exact condition and needs no magic constant.
+
+  Worth recording how this was found. The issue was filed against `malloy_nbody`
+  after an audit. Checking whether M18 had inherited it showed that it had: the
+  `softening` added to `malloy_charges` one commit earlier had the identical
+  gap, and two like charges that should have flown apart sat still for 2000
+  steps while the energy column read `0.00000000e+00` against a correct 0.5. A
+  filed issue caught a fresh instance of itself.
+
+- Issue #15, both halves, in `malloy_springs`.
+
+  A spring whose endpoints are more than about 1.34e154 apart has a separation
+  whose square overflows, and the force kernel could not tell that from
+  coincident endpoints: the guard documented for the coincident case swallowed
+  it, so the spring silently ceased to exist while the bodies coasted apart
+  forever and every step still returned Ok. Measured: kinetic energy of exactly
+  `0.00000000e+00` for 2000 steps with a stiffness of 1.
+
+  And nothing bounded the timestep against a spring's stiffness. Symplectic
+  Euler on a spring pair diverges geometrically past a bounded dt, and until
+  the separation reached the range above, nothing reported that either. Just
+  under the limit the "conserved" energy of an undamped network climbed by a
+  factor of 25000 while momentum still read exactly zero; just over it, the run
+  printed `inf` for 6000 steps with every step Ok. The first defect is what
+  made the second silent: once the separation overflowed, the spring was
+  dropped, the bodies coasted, and an exponential blow-up became a permanently
+  finite and permanently wrong state.
+
+  `SpringWorld::validate()` now rejects both. The separation is checked every
+  step rather than only at load, because one that starts representable can grow
+  into that range during a run, which is exactly what a diverging network does.
+
+  The stability bound is `dt < 2(sqrt(gamma^2 + omega^2) - gamma) / omega^2`
+  with `omega^2 = k/mu` and `gamma = c/(2 mu)`, reducing to `dt < 2/omega` when
+  undamped. Damping TIGHTENS it rather than helping, which the undamped formula
+  would get wrong, so a case that is inside the undamped bound and outside the
+  real one is asserted.
+
+  The check is per spring, which is NECESSARY but not sufficient for a network:
+  a network's stiffness matrix is a sum of positive-semidefinite per-spring
+  terms, so its largest eigenvalue is at least that of any single spring, and a
+  spring unstable alone is unstable in company. The converse does not hold, and
+  the header says so rather than implying a guarantee it cannot make.
+
+  The shipped `scenarios/spring_chain.scn` runs with a 321x margin, so no
+  template is affected.
+
+  Verified by mutation: removing the overflow check, removing the stability
+  gate, and dropping damping from the bound are all caught.
+
+
+
+### Fixed
+
 - A statement-ordering bug in `apply_contact` made every contact lever arm
   `R + depth/2` instead of `R - depth/2`. The positional correction lifted the
   centre of mass by the full penetration, and only then was the arm measured

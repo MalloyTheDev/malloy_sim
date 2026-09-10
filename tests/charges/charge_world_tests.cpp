@@ -561,6 +561,48 @@ int main()
         MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
     }
 
+    // --- Issue #17: a softening large enough that its SQUARE overflows is
+    //     refused, in both domains that have one.
+    //
+    //     It has to be refused rather than tolerated, because the failure is
+    //     invisible in every diagnostic. A squared softening of infinity makes
+    //     every separation infinite, so every force is exactly zero and every
+    //     potential is exactly zero, and a simulation in which nothing happens
+    //     conserves everything perfectly. Measured before the fix: two like
+    //     charges that should fly apart sat still for 2000 steps while the
+    //     energy column read 0.00000000e+00, when the correct value was 0.5. ---
+    {
+        ChargeSettings ok;
+        ok.softening = 1.0e154; // squares to 1e308, still finite
+        MALLOY_CHECK_TRUE(ok.is_valid());
+
+        ChargeSettings over;
+        over.softening = 1.4e154; // squares to just over DBL_MAX
+        MALLOY_CHECK_FALSE(over.is_valid());
+
+        ChargeSettings absurd;
+        absurd.softening = 1.0e200;
+        MALLOY_CHECK_FALSE(absurd.is_valid());
+
+        // Still refused for the older reasons.
+        ChargeSettings negative;
+        negative.softening = -1.0;
+        MALLOY_CHECK_FALSE(negative.is_valid());
+        ChargeSettings not_finite;
+        not_finite.softening = inf;
+        MALLOY_CHECK_FALSE(not_finite.is_valid());
+    }
+    {
+        ChargeSettings over;
+        over.k = 1.0;
+        over.softening = 1.0e200;
+        ChargeWorld w{SimulationSettings{0.01}, over,
+                      {charge_at(Vec2{-1.0, 0.0}, Vec2{}, 1.0, 1.0),
+                       charge_at(Vec2{1.0, 0.0}, Vec2{}, 1.0, 1.0)}};
+        MALLOY_CHECK_TRUE(w.validate() == StepStatus::InvalidSettings);
+        MALLOY_CHECK_FALSE(w.step().ok());
+    }
+
     std::cout << "malloy_charges_tests passed\n";
     return 0;
 }

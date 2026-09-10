@@ -80,8 +80,28 @@ public:
     SpringWorld(sim_core::SimulationSettings simulation_settings,
                 SpringNetwork network, std::vector<SpringBody2D> bodies);
 
-    // Ok, or InvalidSettings (dt) / InvalidState (a body, or a spring whose
-    // endpoints are invalid or out of range).
+    // Ok, or InvalidSettings (dt, or a timestep past a spring's stability
+    // limit) / InvalidState (a body, a spring whose endpoints are invalid or
+    // out of range, or a separation too large to square).
+    //
+    // The last two are easy to violate and impossible to notice otherwise.
+    //
+    // A spring whose endpoints are more than about 1.34e154 apart has a
+    // separation whose SQUARE overflows, and the force kernel cannot tell that
+    // from coincident endpoints: it skips the spring, which then silently
+    // stops existing while the bodies coast apart forever and every step still
+    // reports Ok.
+    //
+    // Symplectic Euler on a spring pair diverges past a bounded timestep,
+    // geometrically, and until the separation reaches the range above nothing
+    // reports that either. The bound is
+    // dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2 with omega^2 = k/mu
+    // and gamma = c/(2 mu), reducing to dt < 2/omega when undamped.
+    //
+    // The stability check is per spring, which is NECESSARY but not sufficient
+    // for a network: a spring that is unstable alone is unstable in company,
+    // but a network of individually safe springs can still be too stiff as a
+    // whole.
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step, in this fixed order:

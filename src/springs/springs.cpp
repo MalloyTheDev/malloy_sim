@@ -133,6 +133,68 @@ sim_core::StepStatus SpringWorld::validate() const
     {
         return sim_core::StepStatus::InvalidState;
     }
+
+    const math::Real dt = simulation_settings_.dt;
+    for (const Spring& spring : network_.springs())
+    {
+        const SpringBody2D& a = bodies_[spring.a];
+        const SpringBody2D& b = bodies_[spring.b];
+
+        // (1) The separation must be squarable.
+        //
+        // The force kernel computes dot(delta, delta), which overflows to
+        // infinity once the separation passes sqrt(DBL_MAX), about 1.34e154,
+        // even though every position is still perfectly finite. The kernel's
+        // guard then treats that exactly like coincident endpoints and skips
+        // the spring, so the spring silently ceases to exist and the bodies
+        // coast apart forever with every step still reporting Ok.
+        //
+        // Reported here instead. This is checked every step rather than only at
+        // load, because a separation that starts representable can grow into
+        // this range during a run, which is precisely what a diverging network
+        // does.
+        const math::Vec2 delta = b.position - a.position;
+        if (!math::is_finite(math::dot(delta, delta)))
+        {
+            return sim_core::StepStatus::InvalidState;
+        }
+
+        // (2) The timestep must be inside this spring's stability limit.
+        //
+        // Symplectic Euler on a spring pair is stable only for a bounded
+        // timestep, and past that bound the amplitude grows geometrically every
+        // step. Nothing recovers from it, and until the separation overflows
+        // (see above) nothing reports it either.
+        //
+        // With reduced mass mu, omega^2 = k/mu and gamma = c/(2 mu), the bound
+        // is dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2, which reduces
+        // to the familiar dt < 2/omega when the damping is zero.
+        //
+        // This is a NECESSARY condition, not a sufficient one. A network's
+        // stiffness matrix is a sum of positive-semidefinite per-spring terms,
+        // so its largest eigenvalue is at least that of any single spring, and
+        // a spring that is unstable alone is unstable in company. The converse
+        // does not hold: a network of individually safe springs can still be
+        // too stiff as a whole.
+        const math::Real reduced = (a.mass * b.mass) / (a.mass + b.mass);
+        if (!(reduced > math::Real{0}) || !math::is_finite(reduced))
+        {
+            return sim_core::StepStatus::InvalidState;
+        }
+        const math::Real omega_squared = spring.stiffness / reduced;
+        if (omega_squared > math::Real{0})
+        {
+            const math::Real gamma = spring.damping / (math::Real{2} * reduced);
+            const math::Real limit =
+                math::Real{2} *
+                (std::sqrt(gamma * gamma + omega_squared) - gamma) / omega_squared;
+            if (!(dt < limit))
+            {
+                return sim_core::StepStatus::InvalidSettings;
+            }
+        }
+    }
+
     return sim_core::StepStatus::Ok;
 }
 

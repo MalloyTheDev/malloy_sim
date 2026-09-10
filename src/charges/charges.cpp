@@ -36,7 +36,7 @@ bool ChargeSettings::is_valid() const
 {
     return math::is_finite(k) && math::is_finite(electric) &&
            math::is_finite(magnetic) && softening >= math::Real{0} &&
-           math::is_finite(softening);
+           math::is_finite(softening) && math::is_finite(softening * softening);
 }
 
 ChargeWorld::ChargeWorld(sim_core::SimulationSettings simulation_settings,

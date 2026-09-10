@@ -464,6 +464,38 @@ int main()
         MALLOY_CHECK_NEAR(total_potential_energy(b, 1.5, 0.0), -3.0, eps);
     }
 
+    // --- Issue #17: a softening large enough that its SQUARE overflows is
+    //     refused, in both domains that have one.
+    //
+    //     It has to be refused rather than tolerated, because the failure is
+    //     invisible in every diagnostic. A squared softening of infinity makes
+    //     every separation infinite, so every force is exactly zero and every
+    //     potential is exactly zero, and a simulation in which nothing happens
+    //     conserves everything perfectly. Measured before the fix: two like
+    //     charges that should fly apart sat still for 2000 steps while the
+    //     energy column read 0.00000000e+00, when the correct value was 0.5. ---
+    {
+        NBodySettings ok;
+        ok.softening = 1.0e154; // squares to 1e308, still finite
+        MALLOY_CHECK_TRUE(ok.is_valid());
+
+        NBodySettings over;
+        over.softening = 1.4e154; // squares to just over DBL_MAX
+        MALLOY_CHECK_FALSE(over.is_valid());
+
+        NBodySettings absurd;
+        absurd.softening = 1.0e200;
+        MALLOY_CHECK_FALSE(absurd.is_valid());
+
+        // Still refused for the older reasons.
+        NBodySettings negative;
+        negative.softening = -1.0;
+        MALLOY_CHECK_FALSE(negative.is_valid());
+        NBodySettings not_finite;
+        not_finite.softening = inf;
+        MALLOY_CHECK_FALSE(not_finite.is_valid());
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

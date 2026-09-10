@@ -533,6 +533,87 @@ int main()
         MALLOY_CHECK_VEC2_NEAR(forces[1], Vec2(0.0, -10.0), eps);
     }
 
+    // --- Issue #15, first half: a separation whose SQUARE overflows is refused
+    //     rather than silently deleting the spring.
+    //
+    //     The force kernel computes dot(delta, delta), which reaches infinity
+    //     once the endpoints are more than sqrt(DBL_MAX) apart, about 1.34e154,
+    //     while both positions are still perfectly finite. The kernel's guard
+    //     then cannot distinguish that from coincident endpoints and skips the
+    //     spring, so the spring stops existing and the bodies coast apart
+    //     forever with every step reporting Ok. Measured before the fix: two
+    //     bodies 2e154 apart with stiffness 1 reported kinetic energy of
+    //     exactly 0.00000000e+00 for 2000 steps. ---
+    {
+        SpringNetwork n;
+        n.add(make_spring(0, 1, 1.0, 1.0, 0.0));
+
+        // 2e150 apart: the square is 4e300, still representable, so this runs.
+        SpringWorld near{SimulationSettings{0.001}, n,
+                         {body_at(Vec2{0.0, 0.0}, Vec2{}, 1.0),
+                          body_at(Vec2{2.0e150, 0.0}, Vec2{}, 1.0)}};
+        MALLOY_CHECK_TRUE(near.validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(near.step().ok());
+        // It really did feel the spring rather than being skipped.
+        MALLOY_CHECK_TRUE(near.bodies()[0].velocity.x > 0.0);
+
+        // 2e154 apart: the square overflows, and that is now reported.
+        SpringWorld far{SimulationSettings{0.001}, n,
+                        {body_at(Vec2{0.0, 0.0}, Vec2{}, 1.0),
+                         body_at(Vec2{2.0e154, 0.0}, Vec2{}, 1.0)}};
+        MALLOY_CHECK_TRUE(far.validate() == StepStatus::InvalidState);
+        MALLOY_CHECK_FALSE(far.step().ok());
+        // And the state is untouched by the refusal.
+        MALLOY_CHECK_NEAR(far.bodies()[1].position.x, 2.0e154, 0.0);
+    }
+
+    // --- Issue #15, second half: a timestep past a spring's stability limit is
+    //     refused. Symplectic Euler on a spring pair diverges geometrically
+    //     past it, and until the separation reaches the range above, nothing
+    //     reports that.
+    //
+    //     For two unit masses the reduced mass is 0.5, so omega^2 = 2k and the
+    //     undamped bound dt < 2/omega becomes k < 2/dt^2. At dt = 5e-4 that is
+    //     exactly k = 8.0e6, and the boundary is checked from both sides. ---
+    {
+        const Real dt = 5.0e-4;
+        const auto pair_world = [&](Real stiffness, Real damping) {
+            SpringNetwork n;
+            n.add(make_spring(0, 1, 1.0, stiffness, damping));
+            return SpringWorld{SimulationSettings{dt}, n,
+                               {body_at(Vec2{0.0, 0.0}, Vec2{}, 1.0),
+                                body_at(Vec2{1.0, 0.0}, Vec2{}, 1.0)}};
+        };
+
+        MALLOY_CHECK_TRUE(pair_world(7.9e6, 0.0).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair_world(8.1e6, 0.0).validate() ==
+                          StepStatus::InvalidSettings);
+
+        // Zero stiffness has no limit at all: there is no oscillation to be
+        // unstable.
+        MALLOY_CHECK_TRUE(pair_world(0.0, 0.0).validate() == StepStatus::Ok);
+
+        // Damping TIGHTENS the bound rather than helping, which is the part
+        // that would be got wrong by using the undamped formula. With
+        // k = 2e6, omega is 2000 and the undamped limit is dt < 1e-3. Adding
+        // c = 1000 gives gamma = 1000 and a limit of
+        // 2 (sqrt(1e6 + 4e6) - 1000) / 4e6 = 6.180e-4, so a timestep of 8e-4
+        // is inside the undamped bound and outside the real one.
+        SpringNetwork damped;
+        damped.add(make_spring(0, 1, 1.0, 2.0e6, 1000.0));
+        SpringWorld w{SimulationSettings{8.0e-4}, damped,
+                      {body_at(Vec2{0.0, 0.0}, Vec2{}, 1.0),
+                       body_at(Vec2{1.0, 0.0}, Vec2{}, 1.0)}};
+        MALLOY_CHECK_TRUE(w.validate() == StepStatus::InvalidSettings);
+
+        SpringNetwork undamped;
+        undamped.add(make_spring(0, 1, 1.0, 2.0e6, 0.0));
+        SpringWorld u{SimulationSettings{8.0e-4}, undamped,
+                      {body_at(Vec2{0.0, 0.0}, Vec2{}, 1.0),
+                       body_at(Vec2{1.0, 0.0}, Vec2{}, 1.0)}};
+        MALLOY_CHECK_TRUE(u.validate() == StepStatus::Ok);
+    }
+
     std::cout << "malloy_springs_tests passed\n";
     return 0;
 }

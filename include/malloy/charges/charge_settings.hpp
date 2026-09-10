@@ -44,8 +44,16 @@ struct ChargeSettings
     math::Real softening{0.0};
 
     // Valid when k, the electric field, the magnetic field and the softening
-    // are all finite, and the softening is non-negative. k may be zero, which
-    // switches the pairwise interaction off and leaves only the fields.
+    // are all finite, the softening is non-negative, and the SQUARE of the
+    // softening is finite. k may be zero, which switches the pairwise
+    // interaction off and leaves only the fields.
+    //
+    // The squared test is not redundant with the finiteness test. Softening
+    // enters the denominator SQUARED, and a finite value above sqrt(DBL_MAX),
+    // about 1.34e154, squares to infinity. The consequences are silent and
+    // look like success: every separation becomes infinite, so every force is
+    // exactly zero and every potential is exactly zero, and a simulation in
+    // which nothing happens conserves everything perfectly.
     bool is_valid() const;
 };
 } // namespace malloy::charges

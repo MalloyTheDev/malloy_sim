@@ -138,6 +138,8 @@ struct ScenarioParseResult
 //   efield <ex> <ey>      uniform electric field   (default 0 0)
 //   bfield <b>            uniform magnetic field, out of plane (default 0)
 //   softening <value>     enters the denominator SQUARED       (default 0)
+//                         rejected above about 1.34e154, where the square
+//                         would overflow
 //   charge <mass> <q> <px> <py> <vx> <vy>
 //
 //     q is SIGNED, and may be zero: a neutral particle is carried by the
