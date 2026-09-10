@@ -5,6 +5,49 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Issue #20: `malloy_particles` gains `total_angular_momentum`, which it had no
+  way to report. It runs the same position-only correction `malloy_rigid` does,
+  so it carries the same `c x (v_b - v_a)` artefact, and the quantity that
+  artefact perturbs was not measurable in that domain at all.
+
+- The wall clamp's energy contribution is derived and asserted rather than
+  merely observed.
+
+  Clamping a particle back to a wall changes its position without changing its
+  velocity, and against gravity that ADDS potential energy: `m |g| delta` once
+  per event, with `delta` bounded by how far it overshot in one step, so
+  `0 <= delta < |v| dt`.
+
+  The project had characterized exactly one integrator error term, the
+  `(1/2) m |g|^2 dt^2` free-flight loss. This one is comparable and opposite in
+  sign: at dt = 4e-3 an elastic ball on a floor gains +0.94 from clamping
+  against a free-flight loss of -1.6.
+
+  The new test puts a whole step in closed form, with restitution 1 so the
+  impulse changes no kinetic energy:
+
+  ```text
+  gravity    v1 = -6 - 1   = -7
+  position   y1 = 1 - 0.7  =  0.3
+  clamp      surface 0.5, so delta = 0.2
+
+  E0 = 56,  E1 = 59,  change = +3
+     = free flight -1  +  clamp +4
+  ```
+
+  Both terms are asserted, and so is the fact that the clamp dominates the
+  characterized one by a factor of four here. It is not a rounding-level
+  correction.
+
+  The rigid domain's version of the same term is `m |g| pen` per event, by the
+  same derivation, and the header for `ParticleWorld::step` now states the
+  contract rather than leaving it implied.
+
+  Three mutations, all caught.
+
+
 ### Fixed
 
 - Issue #16: `is_valid` accepted state that every diagnostic then reported as

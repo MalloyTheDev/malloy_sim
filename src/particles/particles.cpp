@@ -219,6 +219,17 @@ math::Vec2 total_momentum(const std::vector<Particle2D>& particles)
     return momentum;
 }
 
+math::Real total_angular_momentum(const std::vector<Particle2D>& particles)
+{
+    math::Real angular = 0.0;
+    for (const Particle2D& particle : particles)
+    {
+        angular += particle.mass * (particle.position.x * particle.velocity.y -
+                                    particle.position.y * particle.velocity.x);
+    }
+    return angular;
+}
+
 math::Real total_kinetic_energy(const std::vector<Particle2D>& particles)
 {
     math::Real kinetic = 0.0;

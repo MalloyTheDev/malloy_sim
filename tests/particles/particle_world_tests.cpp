@@ -616,6 +616,82 @@ int main()
         MALLOY_CHECK_FALSE((Particle2D{Vec2{}, Vec2{0.0, too_big}, 1.0, 0.5}.is_valid()));
     }
 
+    // --- Issue #20: the wall clamp MOVES ENERGY, and this is the derivation.
+    //
+    //     Clamping a particle back to a wall changes its position without
+    //     changing its velocity. Against gravity that adds potential energy:
+    //     m |g| delta, once per clamping event, where delta is how far it had
+    //     overshot. The project had characterized exactly one integrator error
+    //     term, the (1/2) m |g|^2 dt^2 free-flight loss, and this one is
+    //     comparable in size and opposite in sign.
+    //
+    //     The whole step is in closed form here, with restitution 1 so the
+    //     impulse changes no kinetic energy at all:
+    //
+    //       gravity     v1 = v0 - g dt = -6 - 1  = -7
+    //       position    y1 = y0 + v1 dt = 1 - 0.7 = 0.3
+    //       clamp       surface is 0.5, so delta  = 0.2
+    //
+    //       E0 = 0.5*2*36 + 2*10*1.0 = 56
+    //       E1 = 0.5*2*49 + 2*10*0.5 = 59
+    //
+    //     and the change of +3 is exactly the sum of the two terms:
+    //     free flight -(1/2)*2*100*0.01 = -1, plus clamp 2*10*0.2 = +4. ---
+    {
+        const Real mass = 2.0;
+        const Real radius = 0.5;
+        const Real gravity = 10.0;
+        const Real dt = 0.1;
+
+        // Wide in x and tall above, so the floor is the only wall in play.
+        const Aabb box{Vec2{-100.0, 0.0}, Vec2{100.0, 100.0}};
+        ParticleSettings settings;
+        settings.restitution = 1.0;
+        settings.bounds = box;
+        settings.gravity = Vec2{0.0, -gravity};
+
+        const std::vector<Particle2D> start = {
+            Particle2D{Vec2{0.0, 1.0}, Vec2{0.0, -6.0}, mass, radius}};
+
+        const Real energy_before = total_energy(start, settings.gravity);
+        MALLOY_CHECK_NEAR(energy_before, 56.0, eps);
+
+        ParticleWorld w{SimulationSettings{dt}, settings, start};
+        MALLOY_CHECK_TRUE(w.step().ok());
+
+        // It really was clamped, and to the surface rather than somewhere else.
+        MALLOY_CHECK_NEAR(w.particles()[0].position.y, radius, eps);
+        // Restitution 1, so the speed is untouched and only the sign flipped.
+        MALLOY_CHECK_NEAR(w.particles()[0].velocity.y, 7.0, eps);
+
+        const Real energy_after = total_energy(w.particles(), settings.gravity);
+        MALLOY_CHECK_NEAR(energy_after, 59.0, eps);
+
+        const Real free_flight = -0.5 * mass * gravity * gravity * dt * dt;
+        const Real clamp = mass * gravity * 0.2;
+        MALLOY_CHECK_NEAR(energy_after - energy_before, free_flight + clamp, eps);
+
+        // And the clamp term dominates by a factor of four here, which is the
+        // point: it is not a rounding-level correction.
+        MALLOY_CHECK_TRUE(std::abs(clamp) > 3.0 * std::abs(free_flight));
+    }
+
+    // --- Issue #20: angular momentum, which this domain had no way to report.
+    //     A hand sum, and then the reason it is not conserved. ---
+    {
+        const std::vector<Particle2D> p = {
+            Particle2D{Vec2{2.0, 0.0}, Vec2{0.0, 3.0}, 1.5, 0.1},
+            Particle2D{Vec2{0.0, -4.0}, Vec2{5.0, 0.0}, 2.0, 0.1}};
+        // 1.5*(2*3 - 0*0) + 2.0*(0*0 - (-4)*5) = 9 + 40 = 49
+        MALLOY_CHECK_NEAR(total_angular_momentum(p), 49.0, eps);
+
+        // Zero for a particle heading straight at the origin, whatever its
+        // speed: the position and velocity are parallel.
+        const std::vector<Particle2D> radial = {
+            Particle2D{Vec2{3.0, 4.0}, Vec2{-6.0, -8.0}, 1.0, 0.1}};
+        MALLOY_CHECK_NEAR(total_angular_momentum(radial), 0.0, eps);
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }
