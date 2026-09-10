@@ -494,6 +494,45 @@ int main()
         MALLOY_CHECK_NEAR(total_elastic_energy(SpringNetwork{}, {}), 0.0, eps);
     }
 
+    // --- Every force-value assertion above uses a HORIZONTAL spring, so the
+    //     y component of the separation is never exercised: replacing
+    //     dot(delta, delta) with delta.x * delta.x passes all of them. That is
+    //     the asymmetric-configuration rule in docs/05, and this is the case
+    //     that enforces it.
+    //
+    //     Off-axis and off-origin. delta = (3, 4), so length is exactly 5 and
+    //     the axis is exactly (0.6, 0.8) with no rounding. ---
+    {
+        const std::vector<SpringBody2D> bodies = {
+            body_at(Vec2{1.0, 2.0}, Vec2{-1.0, 1.0}, 1.0),
+            body_at(Vec2{4.0, 6.0}, Vec2{1.0, 2.0}, 1.0)};
+        SpringNetwork n;
+        n.add(make_spring(0, 1, 3.0, 10.0, 3.0));
+
+        // extension = 5 - 3 = 2, so the spring term is 10 * 2 = 20.
+        // relative velocity = (2, 1), axial speed = dot((2,1),(0.6,0.8)) = 2,
+        // so the damper term is 3 * 2 = 6. Total 26 along (0.6, 0.8).
+        std::vector<Vec2> forces = {Vec2{}, Vec2{}};
+        accumulate_spring_forces(n, bodies, forces);
+        MALLOY_CHECK_VEC2_NEAR(forces[0], Vec2(15.6, 20.8), eps);
+        MALLOY_CHECK_VEC2_NEAR(forces[1], Vec2(-15.6, -20.8), eps);
+    }
+    {
+        // A purely VERTICAL spring, where delta.x is zero. Under the horizontal
+        // -only mistake this hits the coincident-endpoint guard and produces
+        // exactly nothing, which is the failure that would be silent.
+        const std::vector<SpringBody2D> bodies = {
+            body_at(Vec2{-2.0, 1.0}, Vec2{}, 1.0),
+            body_at(Vec2{-2.0, 4.0}, Vec2{}, 1.0)};
+        SpringNetwork n;
+        n.add(make_spring(0, 1, 1.0, 5.0, 0.0));
+
+        std::vector<Vec2> forces = {Vec2{}, Vec2{}};
+        accumulate_spring_forces(n, bodies, forces);
+        MALLOY_CHECK_VEC2_NEAR(forces[0], Vec2(0.0, 10.0), eps); // 5 * (3 - 1)
+        MALLOY_CHECK_VEC2_NEAR(forces[1], Vec2(0.0, -10.0), eps);
+    }
+
     std::cout << "malloy_springs_tests passed\n";
     return 0;
 }

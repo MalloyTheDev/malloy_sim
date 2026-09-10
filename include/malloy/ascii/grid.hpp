@@ -19,6 +19,12 @@ struct Viewport
 // A viewport that contains every finite point with a margin on each side.
 // For empty/all-non-finite input, or a zero-width/height extent, it falls back
 // to a non-degenerate rectangle so points still render at the center.
+//
+// It also falls back when the extent or the margin OVERFLOWS to infinity even
+// though every input was finite, which happens near the limits of double. An
+// infinite viewport would make render's normalized coordinates inf/inf = NaN.
+// The consequence is worth knowing: the fallback box does not contain the
+// points it was built from, so they are not drawn at all.
 Viewport fit_viewport(const std::vector<math::Vec2>& points,
                       math::Real margin_fraction = 0.1);
 

@@ -430,6 +430,24 @@ int main()
         MALLOY_CHECK_NEAR(w.nbody_settings().softening, 0.125, eps);
     }
 
+    // --- The FORCE side of the softening contract is pinned above. The
+    //     ENERGY side was not: every existing call uses either softening 0 or a
+    //     softening so much smaller than the separation that dropping it shifts
+    //     the result by about 3e-7, under tolerances of 0.02.
+    //
+    //     diagnostics.hpp states the point of this function: it uses the same
+    //     softening as the integrator so that total_energy is a quantity the
+    //     dynamics conserve. Here softening is comparable to the separation, so
+    //     dropping it is unmissable: r = sqrt(9 + 16) = 5 exactly, not 3. ---
+    {
+        const std::vector<Body2D> b = {Body2D{Vec2{1.0, -1.0}, Vec2{}, 2.0},
+                                       Body2D{Vec2{4.0, -1.0}, Vec2{}, 3.0}};
+        // U = -g m1 m2 / r = -(1.5)(2)(3)/5
+        MALLOY_CHECK_NEAR(total_potential_energy(b, 1.5, 4.0), -1.8, eps);
+        // Unsoftened the same pair would give -(1.5)(2)(3)/3 = -3.
+        MALLOY_CHECK_NEAR(total_potential_energy(b, 1.5, 0.0), -3.0, eps);
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

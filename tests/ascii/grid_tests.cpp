@@ -2,6 +2,7 @@
 
 #include <test_check.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -170,15 +171,30 @@ int main()
     //     double make the extent, and then the margin, overflow. ---
     {
         const Viewport view = fit_viewport({Vec2{-1e308, 0.0}, Vec2{1e308, 0.0}}, 0.1);
-        MALLOY_CHECK_TRUE(std::isfinite(view.min_x));
-        MALLOY_CHECK_TRUE(std::isfinite(view.max_x));
-        MALLOY_CHECK_TRUE(std::isfinite(view.min_y));
-        MALLOY_CHECK_TRUE(std::isfinite(view.max_y));
+        // Finite is the weak claim. The actual contract is that the extent
+        // overflowed to infinity, so fit_viewport abandoned the fit and
+        // returned the documented default box rather than an infinite one.
+        MALLOY_CHECK_NEAR(view.min_x, -1.0, eps);
+        MALLOY_CHECK_NEAR(view.max_x, 1.0, eps);
+        MALLOY_CHECK_NEAR(view.min_y, -1.0, eps);
+        MALLOY_CHECK_NEAR(view.max_y, 1.0, eps);
 
         // And the pair renders without indexing out of range.
+        //
+        // Asserting only that the string is non-empty cannot fail: render()
+        // always emits a border, so every possible implementation passes it.
+        // The frame is checked exactly instead: one border line, then three
+        // rows, then a border, each of width 5 plus two edge characters and a
+        // newline, so 5 lines of 8 characters.
         const std::string grid =
             render({Vec2{-1e308, 0.0}, Vec2{1e308, 0.0}}, view, 5, 3);
-        MALLOY_CHECK_TRUE(grid.size() > 0);
+        MALLOY_CHECK_EQ(grid.size(), std::size_t{40});
+        MALLOY_CHECK_TRUE(grid.compare(0, 8, "+-----+" "\n") == 0);
+        MALLOY_CHECK_TRUE(grid.compare(32, 8, "+-----+" "\n") == 0);
+        // And NOTHING is plotted: the fallback box is [-1, 1] and both points
+        // are far outside it, so they are skipped rather than clamped to an
+        // edge, which would draw a body where no body is.
+        MALLOY_CHECK_EQ(std::count(grid.begin(), grid.end(), '*'), std::ptrdiff_t{0});
     }
 
     std::cout << "malloy_ascii_tests passed\n";

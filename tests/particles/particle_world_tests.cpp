@@ -570,6 +570,40 @@ int main()
         MALLOY_CHECK_VEC2_NEAR(w.particle_settings().bounds.max, Vec2(5.0, 6.0), eps);
     }
 
+    // --- The four-wall table above runs at restitution 1, where the
+    //     multiplier is a no-op: deleting `* restitution` from the left or top
+    //     branch changes nothing there. Only the right wall was ever pinned at
+    //     a value other than 1. This runs all four at 0.4, with a different
+    //     tangential speed in each case so a swapped component shows too. ---
+    {
+        const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+        struct WallCase
+        {
+            Vec2 position;
+            Vec2 velocity;
+            Vec2 expected_position;
+            Vec2 expected_velocity;
+        };
+        const WallCase cases[] = {
+            // left: -1.0 in becomes +0.4 out, and the tangential 0.25 survives
+            {Vec2{-0.4, 0.0}, Vec2{-1.0, 0.25}, Vec2{-0.5, 0.125}, Vec2{0.4, 0.25}},
+            // right
+            {Vec2{0.4, 0.0}, Vec2{1.0, -0.75}, Vec2{0.5, -0.375}, Vec2{-0.4, -0.75}},
+            // bottom
+            {Vec2{0.0, -0.4}, Vec2{0.6, -1.0}, Vec2{0.3, -0.5}, Vec2{0.6, 0.4}},
+            // top
+            {Vec2{0.0, 0.4}, Vec2{-0.3, 1.0}, Vec2{-0.15, 0.5}, Vec2{-0.3, -0.4}},
+        };
+        for (const WallCase& c : cases)
+        {
+            const std::vector<Particle2D> p = {Particle2D{c.position, c.velocity, 1.0, 0.5}};
+            ParticleWorld w{SimulationSettings{0.5}, ParticleSettings{0.4, box}, p};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            MALLOY_CHECK_VEC2_NEAR(w.particles()[0].position, c.expected_position, eps);
+            MALLOY_CHECK_VEC2_NEAR(w.particles()[0].velocity, c.expected_velocity, eps);
+        }
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }

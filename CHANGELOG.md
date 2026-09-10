@@ -217,6 +217,48 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+### Fixed
+
+- Six coverage gaps found by auditing the test suite for assertions that cannot
+  fail. Each was confirmed by applying the mutation and watching the whole suite
+  stay green, then confirmed closed by watching the new assertion catch it.
+
+  - The spring force kernel was only ever tested with a horizontal spring. Every
+    assertion that depended on the value or direction of a spring force used
+    endpoints like (0,0) and (3,0), so replacing `dot(delta, delta)` with
+    `delta.x * delta.x` passed the entire suite. The two genuinely 2D tests
+    could not see it: momentum conservation is structural, since the code writes
+    `forces[a] += force; forces[b] -= force;`, and the determinism test compares
+    two worlds carrying the same defect. Under that mistake every VERTICAL
+    spring would hit the coincident-endpoint guard and produce exactly zero
+    force forever. Now covered by an off-axis, off-origin spring with an exact
+    3-4-5 separation, and by a purely vertical one.
+  - Wall restitution was unpinned on the left and top walls. The four-wall table
+    ran at restitution 1, where the multiplier is a no-op, so deleting
+    `* restitution` from either branch changed nothing. Only the right wall was
+    ever checked at a value other than 1. Now all four run at 0.4, each with a
+    different tangential speed so a swapped component shows as well.
+  - The softening term in the N-body POTENTIAL energy was never pinned, though
+    the force side was. Every call used either softening 0 or a softening so
+    much smaller than the separation that dropping it moved the result by about
+    3e-7 under tolerances of 0.02. Now checked with softening comparable to the
+    separation, where the answer is exactly 5 rather than 3.
+  - Two of the four circle-in-box faces, left and top, were never reached with a
+    distinguishing configuration, so their normals were unconstrained.
+  - Box against box picks a sign from the relative centres, and every existing
+    case put the second box to the +x or -y of the first, leaving two of the
+    four sign branches unasserted.
+  - `MALLOY_CHECK_TRUE(grid.size() > 0)` in the ASCII tests could not fail:
+    `render` always emits a border. Replaced with the exact frame geometry.
+
+- `fit_viewport`'s header contract omitted its overflow fallback. Points near
+  the limits of double make the extent overflow to infinity even though every
+  input is finite, and the function abandons the fit and returns the default
+  box. The consequence was undocumented and untested: that box does NOT contain
+  the points it was built from, so they are not drawn at all. Both are now
+  stated in the header and pinned by the test, which previously asserted only
+  that the viewport was finite.
+
 ## [M15] - 2026-09-10  (gravity for rigid bodies)
 
 ### Added

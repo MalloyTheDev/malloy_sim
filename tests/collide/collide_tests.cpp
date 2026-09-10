@@ -388,6 +388,61 @@ int main()
         MALLOY_CHECK_VEC2_NEAR(centroid(bad_box), Vec2(0.0, 0.0), eps);
     }
 
+    // --- Two of the four circle-in-box faces were never reached with a
+    //     distinguishing configuration: right and bottom were covered, left and
+    //     top were not, so their normals could be anything. ---
+    {
+        // Centre at (-0.7, 0), nearest face is the left one at x = -1.
+        const Circle c{Vec2{-0.7, 0.0}, 0.3};
+        const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+        const auto k = contact(c, box);
+        MALLOY_CHECK_TRUE(k.has_value());
+        // To push the circle out to the left, the box normal is +x.
+        MALLOY_CHECK_VEC2_NEAR(k->normal, Vec2(1.0, 0.0), eps);
+        MALLOY_CHECK_NEAR(k->penetration, 0.6, eps); // 0.3 to the face + 0.3 radius
+    }
+    {
+        // Centre at (0, 0.85), nearest face is the top one at y = 1.
+        const Circle c{Vec2{0.0, 0.85}, 0.2};
+        const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+        const auto k = contact(c, box);
+        MALLOY_CHECK_TRUE(k.has_value());
+        MALLOY_CHECK_VEC2_NEAR(k->normal, Vec2(0.0, -1.0), eps);
+        MALLOY_CHECK_NEAR(k->penetration, 0.35, eps); // 0.15 + 0.2
+    }
+
+    // --- Box against box picks the axis of least penetration and then a SIGN
+    //     from the relative centres. Every existing case put b to the +x or -y
+    //     of a, so two of the four sign branches were never asserted. Each
+    //     penetration below is different, so a case cannot pass on another's
+    //     expected value. ---
+    {
+        const Aabb a{Vec2{0.0, 0.0}, Vec2{2.0, 2.0}};
+        struct DirCase
+        {
+            Aabb b;
+            Vec2 normal;
+            Real penetration;
+        };
+        const DirCase cases[] = {
+            // b to the +x: x overlaps least, b centre is to the right
+            {Aabb{Vec2{1.5, 0.0}, Vec2{3.5, 2.0}}, Vec2{1.0, 0.0}, 0.5},
+            // b to the -x
+            {Aabb{Vec2{-1.6, 0.0}, Vec2{0.4, 2.0}}, Vec2{-1.0, 0.0}, 0.4},
+            // b below: y overlaps least, b centre is lower
+            {Aabb{Vec2{0.0, -1.7}, Vec2{2.0, 0.3}}, Vec2{0.0, -1.0}, 0.3},
+            // b above
+            {Aabb{Vec2{0.0, 1.4}, Vec2{2.0, 3.4}}, Vec2{0.0, 1.0}, 0.6},
+        };
+        for (const DirCase& c : cases)
+        {
+            const auto k = contact(a, c.b);
+            MALLOY_CHECK_TRUE(k.has_value());
+            MALLOY_CHECK_VEC2_NEAR(k->normal, c.normal, eps);
+            MALLOY_CHECK_NEAR(k->penetration, c.penetration, eps);
+        }
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }
