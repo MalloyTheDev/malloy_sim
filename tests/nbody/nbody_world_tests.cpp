@@ -418,6 +418,18 @@ int main()
         MALLOY_CHECK_NEAR(w.elapsed_time(), 0.0, 0.0);
     }
 
+    // --- The settings accessors are public API and were untested. Trivial, but
+    //     a getter returning the wrong member is exactly the kind of thing only
+    //     a test catches. ---
+    {
+        const SimulationSettings sim{0.0025};
+        const NBodySettings nb{2.5, 0.125};
+        NBodyWorld w{sim, nb, two_unit_bodies()};
+        MALLOY_CHECK_NEAR(w.simulation_settings().dt, 0.0025, eps);
+        MALLOY_CHECK_NEAR(w.nbody_settings().g, 2.5, eps);
+        MALLOY_CHECK_NEAR(w.nbody_settings().softening, 0.125, eps);
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

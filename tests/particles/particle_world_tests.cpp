@@ -557,6 +557,19 @@ int main()
         MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
     }
 
+    // --- Settings accessors, previously untested public API. Every field is a
+    //     different value so a getter returning the wrong member shows. ---
+    {
+        ParticleSettings s{0.375, Aabb{Vec2{-3.0, -4.0}, Vec2{5.0, 6.0}}};
+        s.gravity = Vec2{0.25, -1.5};
+        ParticleWorld w{SimulationSettings{0.0025}, s, {}};
+        MALLOY_CHECK_NEAR(w.simulation_settings().dt, 0.0025, eps);
+        MALLOY_CHECK_NEAR(w.particle_settings().restitution, 0.375, eps);
+        MALLOY_CHECK_VEC2_NEAR(w.particle_settings().gravity, Vec2(0.25, -1.5), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.particle_settings().bounds.min, Vec2(-3.0, -4.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.particle_settings().bounds.max, Vec2(5.0, 6.0), eps);
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }

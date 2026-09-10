@@ -390,6 +390,12 @@ int main()
         MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{1});
     }
 
+    // --- Settings accessor, previously untested public API. ---
+    {
+        RigidWorld w{SimulationSettings{0.0025}, {awkward_body()}};
+        MALLOY_CHECK_NEAR(w.simulation_settings().dt, 0.0025, eps);
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

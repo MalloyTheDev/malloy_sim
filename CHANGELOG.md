@@ -126,6 +126,10 @@ All notable changes to MalloySim are recorded here. The format follows
   equivalent mutant on the strength of reasoning. Measuring it disproved that,
   and the M10 entry has been corrected.
 
+- Three stale milestone claims corrected: `README.md` and
+  `docs/07_POST_M5_ROADMAP.md` both still said M1-M8 were the completed set, and
+  `docs/08_AI_HANDOFF_PROMPT.md` said M1-M11 and omitted ballistics. A handoff
+  prompt that understates what exists is worse than no prompt.
 ### Removed
 
 ### Tests
@@ -173,6 +177,10 @@ All notable changes to MalloySim are recorded here. The format follows
   y-only vector equality, a sign-flipped dot term, a strict `<` boundary, and
   accumulated elapsed time in both `FixedStep` and the worlds) each fail.
 
+- The `simulation_settings()`, `nbody_settings()` and `particle_settings()`
+  accessors were public API with no test at all. Now covered on all three
+  worlds, with every field a distinct value so a getter returning the wrong
+  member shows, and confirmed by a mutation that makes one return a default.
 ### Architecture Notes
 
 - The all-in-one goal raises rather than retires the engine-kernel risk named

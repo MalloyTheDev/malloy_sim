@@ -12,7 +12,8 @@ It is not a Unity, Godot, Unreal, ECS, editor, rendering, plugin, or scripting
 project.
 
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
-complete and shipping (milestones M1-M8).
+complete and shipping, along with colliding particles, ballistics, and 2D rigid
+bodies (milestones M1-M12).
 
 ## Locked baseline
 
