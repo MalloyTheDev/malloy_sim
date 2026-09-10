@@ -217,6 +217,17 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+- Scenario templates are now run for their FULL documented number of steps by
+  the test suite, not one step. A single step cannot tell a template that runs
+  from one that diverges on step 900, and `step()` reports `InvalidState` as
+  soon as any body stops being finite, so running to the end is also the NaN
+  check. Costs about 0.2 seconds across all eight in a Debug build.
+
+  Verified by inverting the sign of the rigid positional correction, so contacts
+  push bodies together instead of apart: the template run fails, where a
+  single-step check passed. Comparing the documented FIGURES against a run is a
+  separate and larger job, filed as issue #14.
+
 ### Fixed
 
 - Documentation claims contradicted by the code, all confirmed against the

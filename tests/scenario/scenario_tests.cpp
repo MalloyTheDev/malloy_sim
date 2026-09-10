@@ -370,13 +370,28 @@ int main()
 
             // Same dispatch the app performs, so a template is validated by the
             // domain it actually declares.
+            //
+            // Each world is run for the FULL documented number of steps, not
+            // one. A single step cannot tell a template that runs from one that
+            // diverges on step 900, and step() reports InvalidState when any
+            // body stops being finite, so running to the end is also the NaN
+            // check. This does not yet compare the documented FIGURES against
+            // the run; that is issue #14.
             if (r.scenario.type == malloy::scenario::ScenarioType::NBody)
             {
                 MALLOY_CHECK_TRUE(r.scenario.bodies.size() >= 2);
                 NBodyWorld world{r.scenario.simulation, r.scenario.nbody_settings,
                                  r.scenario.bodies};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                MALLOY_CHECK_TRUE(world.step().ok());
+                for (int i = 0; i < r.scenario.steps; ++i)
+                {
+                    if (!world.step().ok())
+                    {
+                        std::cerr << "template " << name << " failed at step "
+                                  << i << '\n';
+                        return 1;
+                    }
+                }
             }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Springs)
             {
@@ -386,7 +401,15 @@ int main()
                                                    r.scenario.spring_network,
                                                    r.scenario.spring_bodies};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                MALLOY_CHECK_TRUE(world.step().ok());
+                for (int i = 0; i < r.scenario.steps; ++i)
+                {
+                    if (!world.step().ok())
+                    {
+                        std::cerr << "template " << name << " failed at step "
+                                  << i << '\n';
+                        return 1;
+                    }
+                }
             }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Rigid)
             {
@@ -395,7 +418,15 @@ int main()
                                                 r.scenario.rigid_bodies,
                                                 r.scenario.rigid_settings};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                MALLOY_CHECK_TRUE(world.step().ok());
+                for (int i = 0; i < r.scenario.steps; ++i)
+                {
+                    if (!world.step().ok())
+                    {
+                        std::cerr << "template " << name << " failed at step "
+                                  << i << '\n';
+                        return 1;
+                    }
+                }
             }
             else
             {
@@ -404,7 +435,15 @@ int main()
                                                       r.scenario.particle_settings,
                                                       r.scenario.particle_list};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                MALLOY_CHECK_TRUE(world.step().ok());
+                for (int i = 0; i < r.scenario.steps; ++i)
+                {
+                    if (!world.step().ok())
+                    {
+                        std::cerr << "template " << name << " failed at step "
+                                  << i << '\n';
+                        return 1;
+                    }
+                }
             }
         }
     }
