@@ -219,6 +219,49 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Documentation claims contradicted by the code, all confirmed against the
+  source rather than by review:
+  - README.md listed "rigid bodies" and "rigid-body contact response" under
+    **Out of scope (gated)**, a section headed "never added speculatively",
+    while the same file's milestone table marks both Done. They shipped in M11
+    and M14. Replaced with what is genuinely still out of scope: oriented-box
+    contacts and SAT, and friction, since every contact in the project is
+    normal-only and bodies therefore slide forever.
+  - docs/00_START_HERE.md said the app "runs all three domains" and named
+    three, omitting springs. It contradicted its own line 44. There are four.
+  - docs/07_POST_M5_ROADMAP.md still headed "M1-M14 are complete" while its own
+    Complete block listed M15 as done.
+  - docs/07 numbered its unscheduled candidates M14 through M18, colliding with
+    the real M14 and M15. Those blocks are now unnumbered, because a number
+    assigned before the work starts is a number that collides with whatever
+    actually ships.
+  - docs/03_MODULE_BOUNDARIES.md and the matching comment in scenario.hpp both
+    said semantic validation "stays in NBodyWorld". Since M10 to M13 there are
+    four domains, each with its own validate().
+  - ADR 0007 said M11 "has not started" with no date on the claim, unlike ADR
+    0002 which dates the identical kind of statement.
+  - CMakeLists.txt still described the project as "a simulation-first C++20
+    engine project" although the CHANGELOG records that identity being amended.
+  - The parse error for a bare `type` key named two of the four accepted
+    domains.
+
+### Added
+
+- A milestone-status guard in the scenario tests. The "M1-M<n> complete" line
+  has gone stale three times: corrected once in the pre-M13 audit, again
+  through M13 and M14, and again through M15. Correcting it a fourth time would
+  only reset the clock, so it is now derived. CHANGELOG.md is the source of
+  truth, since a milestone is complete exactly when it has an entry, and every
+  such claim across CLAUDE.md, README.md and docs 00, 07 and 08 is checked
+  against it. M1-M5 is exempt, being the locked original roadmap and a fixed
+  historical range. A document that stops stating the range at all also fails,
+  so the check cannot go vacuous.
+
+  Verified three ways: a doc left at the old number fails, a doc that drops the
+  claim fails, and adding a new milestone entry without updating the docs fails.
+
+### Fixed
+
 - Six coverage gaps found by auditing the test suite for assertions that cannot
   fail. Each was confirmed by applying the mutation and watching the whole suite
   stay green, then confirmed closed by watching the new assertion catch it.

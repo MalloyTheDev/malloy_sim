@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M14 are complete, so this is the live roadmap for what comes next.
+M1-M15 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -97,9 +97,10 @@ inertia; quaternions and inertia tensors stay with 3D at M19.
 The scenario `type` key and the dispatch switch landed in M10, because that is
 when a genuine second world type first existed. What remains is hardening.
 
-```text
-M14 - template library hardening        (dispatch itself shipped in M10)
-```
+Template library hardening is what remains, and it is deliberately not
+numbered: nothing here is scheduled, and a number written down before the
+work is assigned is a number that collides with whatever actually ships.
+This block used to read `M14`, which M14 then became something else.
 
 ## Track 3: wider domains (direction, not commitment)
 
@@ -107,11 +108,15 @@ Candidates, roughly in order of how well they fit the existing foundation.
 None of these is scheduled; the order will be revisited after Track 2.
 
 ```text
-M15 - fluids (SPH, 2D)
-M16 - thermodynamics / ideal gas
-M17 - electromagnetism (charged particles)
-M18 - vehicles, as an application of rigid bodies
+fluids (SPH, 2D)
+thermodynamics / ideal gas
+electromagnetism (charged particles)
+vehicles, as an application of rigid bodies
 ```
+
+Unnumbered on purpose. These were once written as M15 to M18, and M15 then
+shipped as gravity for rigid bodies, so the labels pointed at the wrong
+work. A candidate gets a number when it is started, not before.
 
 ## Track 4: dimension and presentation
 

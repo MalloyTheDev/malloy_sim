@@ -6,8 +6,9 @@ time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
 M1-M15 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
-particles and rigid libraries are built, and the terminal app runs all three
-domains. Gravity, colliding particles and rigid bodies are the finished domains. See `README.md` and `CHANGELOG.md`.
+particles, rigid and springs libraries are built, and the terminal app runs all
+four domains. Gravity, colliding particles, rigid bodies and spring networks are
+the finished domains. See `README.md` and `CHANGELOG.md`.
 
 ## Read order
 

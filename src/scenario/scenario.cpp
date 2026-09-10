@@ -65,7 +65,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
             std::string value;
             if (!(tokens >> value))
             {
-                return make_error(line_number, "type requires nbody or particles");
+                return make_error(line_number, "type requires nbody, particles, rigid or springs");
             }
             if (value == "nbody")
             {

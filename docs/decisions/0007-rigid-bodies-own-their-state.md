@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Recorded ahead of M11, which has not started.
+Accepted. Recorded ahead of M11, which had not started as of this writing.
 
 ## Context
 

@@ -234,6 +234,94 @@ int main()
 #endif
             };
 
+            // The milestone-status line is the other thing that goes stale, and
+            // it has done so three times: corrected in the pre-M13 audit,
+            // drifted again through M13 and M14, and drifted again through M15.
+            // Correcting it a fourth time would just reset the clock, so it is
+            // derived instead. CHANGELOG.md is the source of truth, because a
+            // milestone is complete exactly when it has an entry there.
+            {
+                const auto digits_at = [](const std::string& text,
+                                          std::size_t at) -> std::string {
+                    std::size_t last = at;
+                    while (last < text.size() &&
+                           std::isdigit(static_cast<unsigned char>(text[last])) != 0)
+                    {
+                        ++last;
+                    }
+                    return (last == at) ? std::string() : text.substr(at, last - at);
+                };
+                const auto read_all = [](const std::string& path) {
+                    std::ifstream in(path);
+                    return std::string((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+                };
+
+                const std::string changelog = read_all(root + "/CHANGELOG.md");
+                MALLOY_CHECK_TRUE(!changelog.empty());
+
+                std::size_t newest = 0;
+                for (std::size_t at = changelog.find("## [M");
+                     at != std::string::npos; at = changelog.find("## [M", at + 1))
+                {
+                    const std::string found = digits_at(changelog, at + 5);
+                    if (!found.empty())
+                    {
+                        newest = std::max(
+                            newest, static_cast<std::size_t>(std::stoul(found)));
+                    }
+                }
+                MALLOY_CHECK_TRUE(newest >= 15);
+
+                const char* status_docs[] = {"/CLAUDE.md", "/README.md",
+                                             "/docs/00_START_HERE.md",
+                                             "/docs/07_POST_M5_ROADMAP.md",
+                                             "/docs/08_AI_HANDOFF_PROMPT.md"};
+                for (const char* relative : status_docs)
+                {
+                    const std::string path = root + relative;
+                    const std::string text = read_all(path);
+                    MALLOY_CHECK_TRUE(!text.empty());
+
+                    std::size_t stated = 0;
+                    for (std::size_t at = text.find("M1-M"); at != std::string::npos;
+                         at = text.find("M1-M", at + 1))
+                    {
+                        const std::string found = digits_at(text, at + 4);
+                        if (found.empty())
+                        {
+                            continue;
+                        }
+                        const std::size_t claimed_end =
+                            static_cast<std::size_t>(std::stoul(found));
+                        // "M1-M5" is the locked original roadmap, a fixed
+                        // historical range that is permanently correct. Only a
+                        // range beyond it is a claim about the CURRENT state.
+                        if (claimed_end <= 5)
+                        {
+                            continue;
+                        }
+                        ++stated;
+                        if (claimed_end != newest)
+                        {
+                            std::cerr << path << " claims M1-M" << claimed_end
+                                      << " but the newest milestone in CHANGELOG.md is M"
+                                      << newest << '\n';
+                            return 1;
+                        }
+                    }
+                    // Each of these states the range at least once. One that
+                    // stopped would otherwise pass this check vacuously.
+                    if (stated == 0)
+                    {
+                        std::cerr << path
+                                  << " no longer states a milestone range, so nothing "
+                                     "here checks it" << '\n';
+                        return 1;
+                    }
+                }
+            }
+
             for (const Claim& claim : claims)
             {
                 const std::optional<std::size_t> claimed =

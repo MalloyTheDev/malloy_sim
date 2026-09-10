@@ -38,7 +38,7 @@ Not responsible for printing, rendering, app loop policy, config files, input, o
 
 Responsible for parsing a scenario/config text file into a `Scenario` for whichever domain its `type` key names, and for reporting syntax errors with a line number. It knows every domain's key set, which is the price of a plain dispatch switch and is cheaper than the abstraction it replaces.
 
-Not responsible for semantic validation (that stays in `NBodyWorld`), physics, printing, rendering, or CLI argument handling.
+Not responsible for semantic validation (that stays in each domain's own `World::validate()`), physics, printing, rendering, or CLI argument handling.
 
 ## `malloy_ascii`
 

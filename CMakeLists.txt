@@ -6,7 +6,7 @@ endif()
 
 project(MalloySim
     VERSION 0.1.0
-    DESCRIPTION "MalloySim: a simulation-first C++20 engine project"
+    DESCRIPTION "MalloySim: an all-in-one science physics simulation in C++20"
     LANGUAGES CXX
 )
 

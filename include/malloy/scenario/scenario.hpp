@@ -128,8 +128,8 @@ struct ScenarioParseResult
 // `steps` or `output_every`). Trailing tokens are an error rather than being
 // ignored, so a body line written with 3D fields is rejected instead of
 // silently running a different simulation.
-// Semantic validity (dt > 0, mass > 0, ...) is left to NBodyWorld::validate so
-// that rule lives in exactly one place.
+// Semantic validity (dt > 0, mass > 0, ...) is left to the target domain's own
+// World::validate, so each rule lives in exactly one place.
 ScenarioParseResult parse_scenario(std::istream& input);
 
 // Convenience: open a file and parse it. A missing or unreadable file is

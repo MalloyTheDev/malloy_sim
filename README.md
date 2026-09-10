@@ -234,9 +234,9 @@ milestone (`docs/07_POST_M5_ROADMAP.md`) -- never added speculatively:
 
 - graphical rendering (the M8 debug view is ASCII text only)
 - Raylib / SDL / GLFW / SFML
-- rigid-body contact response (M9 shipped the geometry, M10 resolves particle contacts, rigid contacts have not)
-- persistent forces and force/torque accumulators (M11 is impulse-only)
-- rigid bodies
+- oriented-box contacts and SAT (M9 shipped circle and AABB geometry; M14 resolves disc against disc only)
+- friction: every contact in the project is normal-only, so bodies slide forever
+- persistent forces and force/torque accumulators (gravity is a setting applied as an acceleration, not a registered force producer)
 - vehicles
 - 3D
 - quantum
