@@ -9,6 +9,7 @@
 #include <malloy/collide/shapes.hpp>
 #include <malloy/math/vec2.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
+#include <malloy/springs/springs.hpp>
 
 namespace malloy::scenario
 {
@@ -76,6 +77,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "rigid")
             {
                 scenario.type = ScenarioType::Rigid;
+            }
+            else if (value == "springs")
+            {
+                scenario.type = ScenarioType::Springs;
             }
             else
             {
@@ -250,6 +255,43 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.position = math::Vec2{px, py};
             body.velocity = math::Vec2{vx, vy};
             scenario.rigid_bodies.push_back(body);
+        }
+        else if (key == "spring_body")
+        {
+            if (scenario.type != ScenarioType::Springs)
+            {
+                return make_error(line_number, "spring_body belongs to type springs");
+            }
+            saw_domain_key = true;
+            springs::SpringBody2D body;
+            math::Real px{};
+            math::Real py{};
+            math::Real vx{};
+            math::Real vy{};
+            if (!(tokens >> body.mass >> px >> py >> vx >> vy))
+            {
+                return make_error(line_number,
+                                  "spring_body requires: mass px py vx vy");
+            }
+            body.position = math::Vec2{px, py};
+            body.velocity = math::Vec2{vx, vy};
+            scenario.spring_bodies.push_back(body);
+        }
+        else if (key == "spring")
+        {
+            if (scenario.type != ScenarioType::Springs)
+            {
+                return make_error(line_number, "spring belongs to type springs");
+            }
+            saw_domain_key = true;
+            springs::Spring spring;
+            if (!(tokens >> spring.a >> spring.b >> spring.rest_length >>
+                  spring.stiffness >> spring.damping))
+            {
+                return make_error(
+                    line_number, "spring requires: a b rest_length stiffness damping");
+            }
+            scenario.spring_network.add(spring);
         }
         else
         {

@@ -97,6 +97,7 @@ target_link_libraries(malloy_scenario
         malloy::nbody
         malloy::particles
         malloy::rigid
+        malloy::springs
         malloy::sim_core
         malloy::math
         malloy::project_options
@@ -158,6 +159,22 @@ target_include_directories(malloy_rigid PUBLIC include)
 target_link_libraries(malloy_rigid
     PUBLIC
         malloy::collide
+        malloy::math
+        malloy::sim_core
+        malloy::time
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
+# malloy_springs (M13): spring networks and deterministic force accumulation.
+add_library(malloy_springs STATIC
+    src/springs/springs.cpp
+)
+add_library(malloy::springs ALIAS malloy_springs)
+target_include_directories(malloy_springs PUBLIC include)
+target_link_libraries(malloy_springs
+    PUBLIC
         malloy::math
         malloy::sim_core
         malloy::time
@@ -369,4 +386,22 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_rigid_tests COMMAND malloy_rigid_tests)
+
+    add_executable(malloy_springs_tests
+        tests/springs/spring_world_tests.cpp
+    )
+
+    target_include_directories(malloy_springs_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_springs_tests
+        PRIVATE
+            malloy::springs
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_springs_tests COMMAND malloy_springs_tests)
 endif()

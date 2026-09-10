@@ -5,7 +5,7 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M12 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M13 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles and rigid libraries are built, and the terminal app runs all three
 domains. Gravity, colliding particles and rigid bodies are the finished domains. See `README.md` and `CHANGELOG.md`.
 
@@ -23,7 +23,7 @@ domains. Gravity, colliding particles and rigid bodies are the finished domains.
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 11. `docs/09_MISTAKES_TO_AVOID.md`
 12. `docs/10_CHANGELOG_TEMPLATE.md`
-13. `docs/decisions/` (ADRs 0001-0007)
+13. `docs/decisions/` (ADRs 0001-0008)
 
 ## Build and test
 
@@ -33,15 +33,15 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-All ten test executables should pass, and
+All eleven test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
 completion.
 
 ## What's next
 
-M1-M12 are done, with three finished domains and multi-domain dispatch in place.
-Springs remain on the classical mechanics track, and rigid-body contact response
-still has no milestone number. Work stays gated one milestone at a time; see
+M1-M13 are done. The classical mechanics track is complete, with four finished
+domains behind multi-domain dispatch. Rigid-body contact response is promised
+but still has no milestone number. Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 
 The all-in-one goal is not a license to build ahead. Breadth is earned by

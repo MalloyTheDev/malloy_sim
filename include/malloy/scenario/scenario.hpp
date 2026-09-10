@@ -10,6 +10,7 @@
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/sim_core/sim_core.hpp>
+#include <malloy/springs/springs.hpp>
 
 namespace malloy::scenario
 {
@@ -24,6 +25,7 @@ enum class ScenarioType
     NBody,
     Particles,
     Rigid,
+    Springs,
 };
 
 // A complete, runnable scenario for one domain.
@@ -50,6 +52,10 @@ struct Scenario
 
     // type == Rigid
     std::vector<rigid::RigidBody2D> rigid_bodies;
+
+    // type == Springs
+    std::vector<springs::SpringBody2D> spring_bodies;
+    springs::SpringNetwork spring_network;
 };
 
 // The outcome of parsing. On failure `error` holds a human-readable message
@@ -67,7 +73,7 @@ struct ScenarioParseResult
 //
 // Common to every domain:
 //
-//   type <nbody|particles|rigid>  which domain      (default nbody)
+//   type <nbody|particles|rigid|springs>  which domain  (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
@@ -91,6 +97,15 @@ struct ScenarioParseResult
 //
 //     mass and inertia are about the centre of mass; comx/comy is the local
 //     offset from the body origin to the centre of mass; angle is in radians.
+//
+// type springs:
+//
+//   spring_body <mass> <px> <py> <vx> <vy>
+//   spring <a> <b> <rest_length> <stiffness> <damping>
+//
+//     a and b are indices into the spring_body list, in the order they appear.
+//     Springs are evaluated in the order they are declared, which is part of
+//     the observable behaviour (ADR 0008).
 //
 // A key belonging to another domain is a parse error, so a typo in `type`
 // surfaces immediately rather than silently running the wrong simulation.

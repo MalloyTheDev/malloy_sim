@@ -3,6 +3,7 @@
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/particles/particles.hpp>
 #include <malloy/rigid/rigid.hpp>
+#include <malloy/springs/springs.hpp>
 #include <malloy/scenario/scenario.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 
@@ -33,6 +34,9 @@ using malloy::nbody::total_angular_momentum;
 using malloy::particles::Particle2D;
 using malloy::rigid::RigidBody2D;
 using malloy::rigid::RigidWorld;
+using malloy::springs::SpringBody2D;
+using malloy::springs::SpringNetwork;
+using malloy::springs::SpringWorld;
 using malloy::nbody::total_energy;
 using malloy::particles::total_energy;
 using malloy::particles::total_momentum;
@@ -49,6 +53,9 @@ namespace
 constexpr auto& rigid_linear_momentum = malloy::rigid::total_linear_momentum;
 constexpr auto& rigid_angular_momentum = malloy::rigid::total_angular_momentum;
 constexpr auto& rigid_kinetic_energy = malloy::rigid::total_kinetic_energy;
+constexpr auto& spring_momentum = malloy::springs::total_momentum;
+constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
+constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
 } // namespace
 using malloy::scenario::ScenarioParseResult;
 using malloy::sim_core::SimulationSettings;
@@ -219,6 +226,66 @@ int run_rigid(const char* title, const SimulationSettings& sim,
     return 0;
 }
 
+std::vector<Vec2> spring_points(const std::vector<SpringBody2D>& bodies)
+{
+    std::vector<Vec2> points;
+    points.reserve(bodies.size());
+    for (const SpringBody2D& body : bodies)
+    {
+        points.push_back(body.position);
+    }
+    return points;
+}
+
+// Runs one spring scenario. A fourth concrete runner: SpringWorld shares no
+// base class with the other three (ADR 0006, ADR 0008).
+int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork network,
+                std::vector<SpringBody2D> bodies, int steps, int output_every)
+{
+    SpringWorld world{sim, std::move(network), std::move(bodies)};
+
+    std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
+              << "  springs=" << world.network().size() << "  dt=" << sim.dt
+              << "  steps=" << steps << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(spring_points(world.bodies()));
+
+    const auto report = [&world, &view](std::int64_t step_index) {
+        const auto& now = world.bodies();
+        const auto kinetic = spring_kinetic_energy(now);
+        const auto elastic = spring_elastic_energy(world.network(), now);
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        std::cout << "   KE " << std::setw(15) << kinetic << "   PE " << std::setw(15)
+                  << elastic << "   E " << std::setw(15) << kinetic + elastic
+                  << "   p " << std::setw(15) << spring_momentum(now).x << std::setw(15)
+                  << spring_momentum(now).y << '\n';
+        std::cout << std::fixed;
+        print_view(view, spring_points(now));
+    };
+
+    report(0);
+    for (std::int64_t step = 1; step <= steps; ++step)
+    {
+        if (!world.step().ok())
+        {
+            std::cerr << title << ": step " << step << " failed\n";
+            return 1;
+        }
+        if (output_every > 0 && step % output_every == 0)
+        {
+            report(step);
+        }
+    }
+    return 0;
+}
+
 // Runs one scenario to completion, printing system diagnostics every
 // output_every steps. Returns 0 on success, 1 on validation/step failure.
 int run_scenario(const char* title, const SimulationSettings& sim,
@@ -336,6 +403,9 @@ int main(int argc, char** argv)
         case ScenarioType::Rigid:
             return run_rigid(argv[1], s.simulation, s.rigid_bodies, s.steps,
                              s.output_every);
+        case ScenarioType::Springs:
+            return run_springs(argv[1], s.simulation, s.spring_network,
+                               s.spring_bodies, s.steps, s.output_every);
         }
         return 1;
     }

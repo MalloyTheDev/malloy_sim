@@ -26,6 +26,7 @@ M9  - collision primitives              [done]
 M10 - colliding particles               [done]
 M11 - 2D rigid body basics              [done]
 M12 - ballistics/projectiles            [done]
+M13 - springs and oscillators           [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -38,10 +39,19 @@ shapes, not bodies, so it has no world and no scenario template, and rule 16
 does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
 collision demonstrable.
 
+Track 1 is complete. What remains from it is one thing that was promised and
+never numbered:
+
 ```text
-M13 - springs and oscillators
 M?? - rigid-body contact response       (promised, never numbered)
 ```
+
+M13 shipped as a separate `malloy_springs` domain rather than as springs inside
+`ParticleWorld`, because a spring network is interaction topology rather than
+environmental configuration. It also introduced the first many-to-one force
+pipeline here. `SpringWorld` is deliberately a local composition boundary and
+not the engine-wide force architecture
+(`docs/decisions/0008-spring-world-is-a-local-composition-boundary.md`).
 
 M12 shipped as uniform gravity in `malloy_particles` rather than a separate
 library. A 2D projectile is a colliding particle under gravity, and a dedicated

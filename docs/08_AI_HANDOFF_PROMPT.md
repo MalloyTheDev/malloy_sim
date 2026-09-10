@@ -20,15 +20,15 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0007)
+- docs/decisions/ (ADRs 0001-0008)
 
 Current status:
 
-M1-M12 are complete. Gravity, colliding particles (with ballistics as uniform
-gravity in that domain) and 2D rigid bodies are the three finished domains, and
-the scenario format dispatches between them with a type key. The active track is
-classical mechanics depth (docs/07_POST_M5_ROADMAP.md); springs remain, and
-rigid-body contact response is promised but was never given a milestone number.
+M1-M13 are complete. Gravity, colliding particles (with ballistics as uniform
+gravity in that domain), 2D rigid bodies and spring networks are the four
+finished domains, and the scenario format dispatches between them with a type
+key. The classical mechanics track is complete (docs/07_POST_M5_ROADMAP.md).
+Rigid-body contact response is promised but was never given a milestone number.
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to

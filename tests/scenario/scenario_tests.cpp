@@ -3,6 +3,7 @@
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/particles/particles.hpp>
 #include <malloy/rigid/rigid.hpp>
+#include <malloy/springs/springs.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <test_check.hpp>
 
@@ -159,7 +160,8 @@ int main()
         const char* templates[] = {"two_body.scn", "three_body_triangle.scn",
                                    "bouncing_particles.scn",
                                    "spinning_bodies.scn",
-                                   "projectile_arc.scn"};
+                                   "projectile_arc.scn",
+                                   "spring_chain.scn"};
         for (const char* name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;
@@ -180,6 +182,16 @@ int main()
                 MALLOY_CHECK_TRUE(r.scenario.bodies.size() >= 2);
                 NBodyWorld world{r.scenario.simulation, r.scenario.nbody_settings,
                                  r.scenario.bodies};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Springs)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.spring_bodies.size() >= 2);
+                MALLOY_CHECK_TRUE(r.scenario.spring_network.size() >= 1);
+                malloy::springs::SpringWorld world{r.scenario.simulation,
+                                                   r.scenario.spring_network,
+                                                   r.scenario.spring_bodies};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
                 MALLOY_CHECK_TRUE(world.step().ok());
             }
@@ -358,6 +370,64 @@ int main()
     {
         // One field short.
         std::istringstream in("type rigid\nrigid_body 1 1 0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+
+    // --- type springs parses bodies and topology, and declaration order is
+    //     preserved because it decides accumulation order. ---
+    {
+        std::istringstream in("type springs\n"
+                              "dt 0.01\n"
+                              "steps 50\n"
+                              "spring_body 1.5 1.0 2.0 3.0 4.0\n"
+                              "spring_body 2.5 5.0 6.0 7.0 8.0\n"
+                              "spring_body 0.5 9.0 1.5 2.5 3.5\n"
+                              "spring 0 1 1.25 30.0 0.5\n"
+                              "spring 1 2 2.75 12.0 0.25\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Springs);
+        MALLOY_CHECK_EQ(r.scenario.spring_bodies.size(), std::size_t{3});
+        MALLOY_CHECK_EQ(r.scenario.spring_network.size(), std::size_t{2});
+
+        const auto& b = r.scenario.spring_bodies[0];
+        MALLOY_CHECK_NEAR(b.mass, 1.5, eps);
+        MALLOY_CHECK_NEAR(b.position.x, 1.0, eps);
+        MALLOY_CHECK_NEAR(b.position.y, 2.0, eps);
+        MALLOY_CHECK_NEAR(b.velocity.x, 3.0, eps);
+        MALLOY_CHECK_NEAR(b.velocity.y, 4.0, eps);
+
+        // Declared order preserved, and every field distinct.
+        const auto& s0 = r.scenario.spring_network.springs()[0];
+        MALLOY_CHECK_EQ(s0.a, std::size_t{0});
+        MALLOY_CHECK_EQ(s0.b, std::size_t{1});
+        MALLOY_CHECK_NEAR(s0.rest_length, 1.25, eps);
+        MALLOY_CHECK_NEAR(s0.stiffness, 30.0, eps);
+        MALLOY_CHECK_NEAR(s0.damping, 0.5, eps);
+        const auto& s1 = r.scenario.spring_network.springs()[1];
+        MALLOY_CHECK_NEAR(s1.rest_length, 2.75, eps);
+        MALLOY_CHECK_NEAR(s1.stiffness, 12.0, eps);
+    }
+
+    // --- Domain isolation holds for the fourth domain. ---
+    {
+        std::istringstream in("type springs\nbody 1.0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type nbody\nspring 0 1 1 1 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type particles\nspring_body 1 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type rigid\nspring 0 1 1 1 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type springs\nspring 0 1 1 1\n"); // one short
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 

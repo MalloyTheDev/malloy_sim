@@ -193,6 +193,107 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M13] - 2026-09-09  (spring networks and deterministic force accumulation)
+
+### Added
+
+- `malloy_springs` (STATIC, `malloy::springs`): `Spring`, `SpringNetwork`,
+  `SpringBody2D`, the pure `accumulate_spring_forces` kernel, and `SpringWorld`,
+  plus momentum, kinetic and elastic-energy diagnostics.
+- `malloy_springs_tests`.
+- `type springs` in the scenario format, with `spring_body` and `spring` keys.
+- `scenarios/spring_chain.scn`.
+- `docs/decisions/0008-spring-world-is-a-local-composition-boundary.md`.
+- `CLAUDE.md` rule 17, so the ADR 0008 boundary is enforced by the rule list and
+  not only by the ADR.
+
+### Architecture Notes
+
+- Springs got their own domain rather than going into `ParticleWorld`. Gravity
+  was environmental configuration, one setting applying to everything, so M12
+  folded it in. A spring network is interaction topology, which is new state.
+  Admitting it into `ParticleWorld` would have admitted cloth, rods, distance
+  constraints, cables and breakable joints by the same argument, until the
+  particle domain became the general physics engine.
+- This is the first many-to-one force pipeline here: a body may be an endpoint
+  of several springs and must receive every contribution.
+- `accumulate_spring_forces` is a pure kernel. It reads body state, adds into a
+  force buffer, and neither integrates nor mutates a body, so a later force
+  producer can reuse the pipeline. `SpringWorld` composes it with integration.
+- The step contract is fixed and documented: clear the accumulator, evaluate
+  springs in stable network order, accumulate equal and opposite endpoint
+  forces, integrate bodies in stable index order. Both orders are observable
+  rather than incidental, because floating-point addition is not associative
+  (docs/04).
+- `SpringWorld` is a LOCAL composition boundary, not the engine-wide force
+  architecture (ADR 0008). Generalising it into a shared force-provider API is
+  deferred until several genuinely different producers exist, because designing
+  that interface from one example would be choosing between `step(dt, forces)`,
+  `apply_forces`, `accumulator()`, `ForceGenerator` and similar on no evidence.
+- The five lines of translational integration duplicated from `ParticleWorld`
+  are intentional, with an explicit trigger: if a third domain independently
+  needs the same path, reassess extracting a shared integrator. Two copies can
+  be coincidence, three are evidence.
+- `SpringBody2D` is its own type rather than a reused `Body2D` or `Particle2D`,
+  so `malloy_springs` depends on no other domain.
+- Rigid-body spring attachment points and the torque they generate stay
+  deferred. They would add attachment transforms, torque accumulation and
+  angular integration on top of spring topology and damping, which is too many
+  concepts for one milestone.
+
+### The spring-damper formulation
+
+For a spring from body a to body b:
+
+```text
+d   = x_b - x_a
+L   = |d|
+n   = d / L                 unit vector, a toward b
+e   = L - rest_length       positive when stretched
+v_r = (v_b - v_a) . n       positive when separating
+
+F   = (stiffness * e + damping * v_r) * n
+F_a = +F
+F_b = -F
+```
+
+Signs check on both cases. Stretched puts F along +n so the pair contracts;
+compressed puts it along -n so they push apart; separating gives a force that
+opposes the separation. `F_a + F_b` is exactly zero by construction, which is
+why a spring network cannot change total momentum at any stiffness or damping.
+
+Damping uses the AXIAL relative velocity, not the full relative speed. A damper
+resists motion along its own axis, and the full magnitude would lose the sign
+that makes it oppose rather than drive the motion.
+
+A spring whose endpoints are coincident has no axis and contributes nothing; any
+direction would be equally arbitrary.
+
+### Tests
+
+- Hooke's law with exact hand-computed values, in extension and in compression,
+  and zero force at rest length with no relative motion.
+- Damping opposing relative axial motion in both directions, and a case where
+  the relative velocity has a perpendicular component that must not contribute:
+  axial 3 of a relative (3,4), so a full-magnitude implementation gives 10
+  instead of 6 and a perpendicular leak shows as a nonzero y.
+- Many-to-one accumulation, with two springs of DIFFERENT stiffness on one body
+  so neither contribution can be mistaken for the total, and the whole-network
+  sum being zero whatever the topology.
+- That the kernel adds rather than assigns, by pre-filling the buffer.
+- Removing one spring changing only that spring's contribution.
+- A self-spring, out-of-range endpoints, coincident endpoints, a mismatched
+  force buffer, and non-finite values, each handled explicitly.
+- End-to-end behaviour a force-only library could not test: a stretched spring
+  actually contracts, an undamped network holds kinetic plus elastic within the
+  integrator's drift, and a damped one loses more than half.
+- Verified by mutation testing: eleven broken implementations each make the
+  suite fail, including the four called for by name (accumulation replaced with
+  assignment, only the first incident spring processed, the same sign applied to
+  both endpoints, and damping using the full relative speed) plus a flipped
+  axis, a flipped damping sign, an ignored rest length, an uncleared
+  accumulator, and each of the three validation guards removed.
+
 ## [M12] - 2026-09-09  (ballistics)
 
 ### Added

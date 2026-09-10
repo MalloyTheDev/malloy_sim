@@ -40,18 +40,20 @@ It is still not:
 ## Current phase
 
 ```text
-M1-M12 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M13 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
-with multi-domain scenario dispatch, 2D rigid bodies, and ballistics.
+with multi-domain scenario dispatch, 2D rigid bodies, ballistics, and spring
+networks with deterministic force accumulation.
 ```
 
-Active track: **classical mechanics depth**. M9 (collision geometry), M10
-(colliding particles, which introduced the multi-domain `type` key), M11
-(2D rigid bodies) and M12 (ballistics, as uniform gravity in the particle
-domain) are done. Springs remain, and rigid-body contact response still has no
-milestone number. See `docs/07_POST_M5_ROADMAP.md`.
+Active track: **classical mechanics depth**, now complete. M9 (collision
+geometry), M10 (colliding particles, which introduced the multi-domain `type`
+key), M11 (2D rigid bodies), M12 (ballistics, as uniform gravity in the particle
+domain) and M13 (spring networks and deterministic force accumulation) are all
+done. Rigid-body contact response is promised but still has no milestone number.
+See `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M13 or later) unless explicitly asked, and
+Do not start any further milestone (M14 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -83,6 +85,7 @@ M5: terminal N-body demo               [done]
 14. Keep the terminal app dumb.
 15. Put reusable physics logic in libraries, not in `main.cpp`.
 16. A domain is not done until it has validation, an invariant checked by tests, malformed-input tests, and at least one scenario template.
+17. `SpringWorld` is a local composition boundary, not the engine-wide force architecture (`docs/decisions/0008-spring-world-is-a-local-composition-boundary.md`). Do not generalise it into a shared force-provider API until several genuinely different force producers exist. If a third domain independently needs the same translational integration path, reassess extracting a shared integrator.
 
 ## Multi-domain architecture
 
@@ -98,7 +101,7 @@ Implemented in M10, once `malloy_particles` gave the format a second domain to
 dispatch to:
 
 ```text
-type nbody          # or: particles, rigid
+type nbody          # or: particles, rigid, springs
 dt 0.001
 steps 10000
 ```

@@ -1,0 +1,47 @@
+# MalloySim scenario: a chain of masses on springs.
+#
+# Five bodies in a row, each linked to the next by a lightly damped spring, with
+# the chain pulled taut at the start. It demonstrates the M13 capability: a
+# many-to-one force pipeline, where the three interior bodies are each an
+# endpoint of two springs and receive both contributions.
+#
+# The invariant to watch is the momentum columns. Every spring contributes equal
+# and opposite endpoint forces, so a spring network cannot change total
+# momentum, at any stiffness and any damping. Both columns hold flat for the
+# whole run while the chain oscillates.
+#
+# Energy is a different story, and the columns show why it is split. KE and PE
+# trade back and forth as the chain oscillates, while their sum decays because
+# the springs are damped. Set every damping to 0.0 and the sum instead holds
+# steady, bounded by the integrator's own drift rather than exactly constant.
+#
+# Springs are evaluated in the order declared here, which is part of the
+# observable behaviour: floating-point addition is not associative, so a
+# different order gives different low-order digits
+# (docs/decisions/0008-spring-world-is-a-local-composition-boundary.md).
+
+type springs
+
+dt 0.0005
+steps 20000
+output_every 2500
+
+# spring_body <mass> <px> <py> <vx> <vy>
+spring_body 1.00  -3.00   0.00    0.00   0.35
+spring_body 1.50  -1.40   0.20    0.00  -0.20
+spring_body 0.75   0.30  -0.15    0.00   0.30
+spring_body 2.00   1.90   0.25    0.00  -0.15
+spring_body 1.25   3.40  -0.10    0.00   0.10
+
+# spring <a> <b> <rest_length> <stiffness> <damping>
+spring 0 1  1.20  45.0  0.30
+spring 1 2  1.20  45.0  0.30
+spring 2 3  1.20  45.0  0.30
+spring 3 4  1.20  45.0  0.30
+
+# Expected: momentum y holds at exactly 1.00000000e-01 for every report. Momentum
+# x starts at exactly zero and stays at rounding level, around 1e-14, rather than
+# printing a clean zero: the bodies are not symmetric, so the equal and opposite
+# contributions cancel to within floating-point rounding rather than bit
+# exactly. KE and PE trade back and forth while their sum decays from about
+# 1.76e+01 to 6.9e+00 over the run, which is the damping doing its job.

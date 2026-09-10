@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M12). These boundaries are in force
+> All modules below are implemented (M2-M13). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -63,6 +63,12 @@ Not responsible for collision geometry (that is `malloy_collide`), orientation, 
 Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
 
 Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, contact response, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle: quaternions and inertia tensors are 3D concerns deferred to M19.
+
+## `malloy_springs`
+
+Responsible for `Spring`, `SpringNetwork`, `SpringBody2D`, the pure `accumulate_spring_forces` kernel, and `SpringWorld`, which composes that kernel with the minimal translational integration needed to make the domain runnable.
+
+Not responsible for rigid-body attachment points or torque, collision, gravity, or a generic engine-wide force-provider API. `accumulate_spring_forces` neither integrates nor mutates a body, so a later force producer can reuse the pipeline (ADR 0008).
 
 ## `malloy_nbody_terminal`
 
