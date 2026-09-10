@@ -95,3 +95,11 @@ charge 1.0  -2.0   0.0  0.0   3.0  0.0
 # On the ASCII view: three nested circles, of radius 3, 6 and 1.5, which is
 # m|v|/(|q| b) for each. The smallest one belongs to the negative charge and it
 # goes round the other way.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests (issue #14). `step 0` is the state before any step, matching the column
+# the app prints, and the tolerance is absolute.
+# check step 0    energy      1.80000000e+01   tol 1e-9
+# check step 4000 energy      1.80000000e+01   tol 1e-9
+# check step 4000 speed       3.00000000e+00   tol 1e-10
+# check step 4000 momentum_x  1.20000000e+01   tol 1e-9

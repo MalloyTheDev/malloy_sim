@@ -135,7 +135,25 @@ wrong simulation.
 
 - states in a header comment what it demonstrates;
 - runs to completion with the shipped binary;
-- has a test or a documented expected result.
+- has a documented expected result;
+- carries at least one machine-checkable `# check` line.
+
+The last one is not the same as the third, and both are required. Prose can go
+stale silently and has done so twice here. A `# check` line is compared against
+a real run by the scenario tests:
+
+```text
+# check step <n> <quantity> <value> tol <t>
+```
+
+`step 0` is the state before any step, matching the column the app prints. The
+tolerance is ABSOLUTE and required rather than defaulted, so a template states
+the precision it claims instead of inheriting one.
+
+Quantities available in every domain: `energy`, `kinetic`, `momentum_x`,
+`momentum_y`. Also `angular` in nbody and rigid, `elastic` in springs, and
+`speed` in charges. Naming a quantity a domain does not have FAILS rather than
+being skipped, so a check cannot quietly stop checking.
 
 ## Testing policy
 

@@ -9,6 +9,7 @@
 #include <test_check.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -23,7 +24,118 @@
 using malloy::nbody::NBodyWorld;
 using malloy::scenario::parse_scenario;
 using malloy::scenario::ScenarioParseResult;
+using malloy::math::Real;
 using malloy::sim_core::StepStatus;
+
+namespace
+{
+// One `# check` line from a scenario template, which is issue #14: the
+// documented figures are a deliverable, and until now nothing compared them
+// against a run.
+//
+// The form is
+//
+//     # check step <n> <quantity> <value> tol <t>
+//
+// with `step 0` meaning the state before any step is taken, matching the
+// column the app prints. The tolerance is ABSOLUTE and is required rather than
+// defaulted, so a template states the precision it is claiming instead of
+// inheriting one.
+struct TemplateCheck
+{
+    int step{0};
+    std::string quantity;
+    malloy::math::Real value{0.0};
+    malloy::math::Real tolerance{0.0};
+};
+
+std::vector<TemplateCheck> parse_checks(const std::string& text)
+{
+    std::vector<TemplateCheck> checks;
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line))
+    {
+        std::istringstream tokens(line);
+        std::string hash;
+        std::string word;
+        if (!(tokens >> hash >> word) || hash != "#" || word != "check")
+        {
+            continue;
+        }
+        TemplateCheck check;
+        std::string step_word;
+        std::string tol_word;
+        if (!(tokens >> step_word >> check.step >> check.quantity >> check.value >>
+              tol_word >> check.tolerance) ||
+            step_word != "step" || tol_word != "tol")
+        {
+            checks.clear();
+            checks.push_back(TemplateCheck{-1, "malformed", 0.0, 0.0});
+            return checks;
+        }
+        checks.push_back(check);
+    }
+    return checks;
+}
+
+// Evaluates one check. `value_of` maps a quantity name to its current value, or
+// nothing if this domain has no such quantity: `angular` exists only for nbody
+// and rigid, and asking for it elsewhere must FAIL rather than pass silently.
+template <typename ValueOf>
+bool check_passes(const std::string& name, const TemplateCheck& check, ValueOf value_of)
+{
+    const std::optional<malloy::math::Real> actual = value_of(check.quantity);
+    if (!actual)
+    {
+        std::cerr << "template " << name << ": unknown or unavailable quantity '"
+                  << check.quantity << "' at step " << check.step << '\n';
+        return false;
+    }
+    if (!(std::abs(*actual - check.value) <= check.tolerance))
+    {
+        std::cerr << "template " << name << ": " << check.quantity << " at step "
+                  << check.step << " is " << *actual << ", documented as "
+                  << check.value << " (tolerance " << check.tolerance << ")" << '\n';
+        return false;
+    }
+    return true;
+}
+
+// Runs a world to `steps`, evaluating checks at the step they name.
+//
+// A function template over the world type rather than a base class: the five
+// worlds share no ancestor (ADR 0006), only the shape of step(). The same
+// approach the terminal app uses for drive().
+template <typename World, typename ValueOf>
+bool run_checked(World& world, const std::string& name, int steps,
+                 const std::vector<TemplateCheck>& checks, ValueOf value_of)
+{
+    for (const TemplateCheck& check : checks)
+    {
+        if (check.step == 0 && !check_passes(name, check, value_of))
+        {
+            return false;
+        }
+    }
+    for (int i = 1; i <= steps; ++i)
+    {
+        if (!world.step().ok())
+        {
+            std::cerr << "template " << name << " failed at step " << i << '\n';
+            return false;
+        }
+        for (const TemplateCheck& check : checks)
+        {
+            if (check.step == i && !check_passes(name, check, value_of))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+} // namespace
 
 int main()
 {
@@ -408,31 +520,61 @@ int main()
                 return 1;
             }
 
+            // Issue #14: prose is not enough. Every template must also carry at
+            // least one machine-checkable `# check` line, compared against a
+            // real run below. Documented figures have gone stale twice in this
+            // repository and were corrected by hand both times.
+            const std::vector<TemplateCheck> checks = parse_checks(text);
+            if (checks.size() == 1 && checks.front().step < 0)
+            {
+                std::cerr << "template " << name << " has a malformed # check line\n";
+                return 1;
+            }
+            if (checks.empty())
+            {
+                std::cerr << "template " << name << " has no # check line\n";
+                return 1;
+            }
+            for (const TemplateCheck& check : checks)
+            {
+                if (check.step > r.scenario.steps)
+                {
+                    std::cerr << "template " << name << ": # check names step "
+                              << check.step << ", past the run's " << r.scenario.steps
+                              << '\n';
+                    return 1;
+                }
+            }
+
             MALLOY_CHECK_TRUE(r.scenario.steps > 0);
 
             // Same dispatch the app performs, so a template is validated by the
             // domain it actually declares.
             //
-            // Each world is run for the FULL documented number of steps, not
-            // one. A single step cannot tell a template that runs from one that
-            // diverges on step 900, and step() reports InvalidState when any
-            // body stops being finite, so running to the end is also the NaN
-            // check. This does not yet compare the documented FIGURES against
-            // the run; that is issue #14.
+            // Each world is run for the FULL documented number of steps, and
+            // every check is evaluated at the step it names. A step that fails
+            // validation reports InvalidState, so running to the end is also
+            // the NaN check.
             if (r.scenario.type == malloy::scenario::ScenarioType::NBody)
             {
                 MALLOY_CHECK_TRUE(r.scenario.bodies.size() >= 2);
                 NBodyWorld world{r.scenario.simulation, r.scenario.nbody_settings,
                                  r.scenario.bodies};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                for (int i = 0; i < r.scenario.steps; ++i)
+                const auto& settings = r.scenario.nbody_settings;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.bodies();
+                    if (q == "energy")
+                        return malloy::nbody::total_energy(b, settings.g, settings.softening);
+                    if (q == "kinetic") return malloy::nbody::total_kinetic_energy(b);
+                    if (q == "momentum_x") return malloy::nbody::total_momentum(b).x;
+                    if (q == "momentum_y") return malloy::nbody::total_momentum(b).y;
+                    if (q == "angular") return malloy::nbody::total_angular_momentum(b);
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
                 {
-                    if (!world.step().ok())
-                    {
-                        std::cerr << "template " << name << " failed at step "
-                                  << i << '\n';
-                        return 1;
-                    }
+                    return 1;
                 }
             }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Springs)
@@ -443,14 +585,21 @@ int main()
                                                    r.scenario.spring_network,
                                                    r.scenario.spring_bodies};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                for (int i = 0; i < r.scenario.steps; ++i)
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.bodies();
+                    const Real kinetic = malloy::springs::total_kinetic_energy(b);
+                    const Real elastic =
+                        malloy::springs::total_elastic_energy(world.network(), b);
+                    if (q == "energy") return kinetic + elastic;
+                    if (q == "kinetic") return kinetic;
+                    if (q == "elastic") return elastic;
+                    if (q == "momentum_x") return malloy::springs::total_momentum(b).x;
+                    if (q == "momentum_y") return malloy::springs::total_momentum(b).y;
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
                 {
-                    if (!world.step().ok())
-                    {
-                        std::cerr << "template " << name << " failed at step "
-                                  << i << '\n';
-                        return 1;
-                    }
+                    return 1;
                 }
             }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Rigid)
@@ -460,14 +609,19 @@ int main()
                                                 r.scenario.rigid_bodies,
                                                 r.scenario.rigid_settings};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                for (int i = 0; i < r.scenario.steps; ++i)
+                const auto gravity = r.scenario.rigid_settings.gravity;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.bodies();
+                    if (q == "energy") return malloy::rigid::total_energy(b, gravity);
+                    if (q == "kinetic") return malloy::rigid::total_kinetic_energy(b);
+                    if (q == "momentum_x") return malloy::rigid::total_linear_momentum(b).x;
+                    if (q == "momentum_y") return malloy::rigid::total_linear_momentum(b).y;
+                    if (q == "angular") return malloy::rigid::total_angular_momentum(b);
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
                 {
-                    if (!world.step().ok())
-                    {
-                        std::cerr << "template " << name << " failed at step "
-                                  << i << '\n';
-                        return 1;
-                    }
+                    return 1;
                 }
             }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Charges)
@@ -477,14 +631,19 @@ int main()
                                                    r.scenario.charge_settings,
                                                    r.scenario.charge_list};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                for (int i = 0; i < r.scenario.steps; ++i)
+                const auto& settings = r.scenario.charge_settings;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.particles();
+                    if (q == "energy") return malloy::charges::total_energy(b, settings);
+                    if (q == "kinetic") return malloy::charges::total_kinetic_energy(b);
+                    if (q == "momentum_x") return malloy::charges::total_momentum(b).x;
+                    if (q == "momentum_y") return malloy::charges::total_momentum(b).y;
+                    if (q == "speed") return malloy::math::length(b.front().velocity);
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
                 {
-                    if (!world.step().ok())
-                    {
-                        std::cerr << "template " << name << " failed at step "
-                                  << i << '\n';
-                        return 1;
-                    }
+                    return 1;
                 }
             }
             else
@@ -494,14 +653,19 @@ int main()
                                                       r.scenario.particle_settings,
                                                       r.scenario.particle_list};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
-                for (int i = 0; i < r.scenario.steps; ++i)
+                const auto& settings = r.scenario.particle_settings;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.particles();
+                    if (q == "energy")
+                        return malloy::particles::total_energy(b, settings.gravity);
+                    if (q == "kinetic") return malloy::particles::total_kinetic_energy(b);
+                    if (q == "momentum_x") return malloy::particles::total_momentum(b).x;
+                    if (q == "momentum_y") return malloy::particles::total_momentum(b).y;
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
                 {
-                    if (!world.step().ok())
-                    {
-                        std::cerr << "template " << name << " failed at step "
-                                  << i << '\n';
-                        return 1;
-                    }
+                    return 1;
                 }
             }
         }

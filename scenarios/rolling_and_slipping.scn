@@ -119,3 +119,11 @@ rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.
 #
 # The big fall in E over the first 3000 steps is the slipping phase, and it is
 # the only place energy goes anywhere. Sliding dissipates; rolling does not.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests (issue #14). `step 0` is the state before any step, matching the column
+# the app prints, and the tolerance is absolute.
+# check step 0    energy      1.23930000e+02   tol 1e-9
+# check step 0    angular    -8.50000000e+00   tol 1e-12
+# check step 6000 momentum_x  1.13333099e+01   tol 1e-7
+# check step 6000 energy      5.69300114e+01   tol 1e-6

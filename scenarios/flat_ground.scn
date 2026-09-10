@@ -109,3 +109,9 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 # The planes themselves do not appear in the ASCII view, which plots bodies.
 # The view is better for it: it fits the bodies, where a floor built from discs
 # drags the viewport down to the floor discs' centres.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests (issue #14). `step 0` is the state before any step, matching the column
+# the app prints, and the tolerance is absolute.
+# check step 0    energy      9.31950000e+01   tol 1e-9
+# check step 1000 momentum_x  4.71002080e+00   tol 1e-7

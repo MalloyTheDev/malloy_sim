@@ -81,9 +81,14 @@ struct ScenarioParseResult
 // Parse a scenario from a text stream. One directive per line; '#' starts a
 // comment; blank lines are ignored:
 //
+// One comment form is given meaning elsewhere: a line starting `# check` is a
+// machine-checkable assertion, evaluated by the scenario tests against a real
+// run (CLAUDE.md, Template library). The parser ignores it like any other
+// comment.
+//
 // Common to every domain:
 //
-//   type <nbody|particles|rigid|springs>  which domain  (default nbody)
+//   type <nbody|particles|rigid|springs|charges>  which domain (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)

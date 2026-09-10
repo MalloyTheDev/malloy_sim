@@ -25,3 +25,9 @@ particle 1.5  0.38   1.5   0.5  -0.85  -1.35
 # Expected: E holds at 6.82500000e+00 for every report, because restitution
 # is exactly 1. Momentum is NOT conserved here: the walls are immovable and
 # carry it away on every bounce.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests (issue #14). `step 0` is the state before any step, matching the column
+# the app prints, and the tolerance is absolute.
+# check step 0    energy      6.82500000e+00   tol 1e-8
+# check step 6000 energy      6.82500000e+00   tol 1e-6
