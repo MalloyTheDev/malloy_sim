@@ -236,9 +236,13 @@ All notable changes to MalloySim are recorded here. The format follows
   only the settings does not have to include the whole world class. This follows
   the `malloy/particles/particle_settings.hpp` precedent, and `scenario.hpp`
   now includes the smaller header.
-- A README template-count guard in the scenario tests. The stated count has gone
-  stale twice, so it is now read out of README.md and compared against the
-  directory, and a wrong number fails the suite.
+- Documentation count guards in the scenario tests. Counts stated in prose go
+  stale, and this one had twice, so the numbers are now read back out of the
+  documents and compared against reality: the template count in README.md
+  against the `scenarios/` directory, and the test-executable count in both
+  README.md and docs/00_START_HERE.md against the number CMake actually
+  registered, which it passes in as `MALLOY_TEST_EXECUTABLE_COUNT`. A wrong
+  number, or a missing one, fails the suite.
 
 ### Changed
 

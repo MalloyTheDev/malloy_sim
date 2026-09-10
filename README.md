@@ -34,11 +34,11 @@ bodies (milestones M1-M15).
 The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 (**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
 **M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
-bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact response**).
-The project builds clean under MSVC (`/W4 /permissive-`), all eleven test
-executables pass via CTest, and the terminal app runs N-body scenarios --
-built-in, or loaded from a text file -- reporting conserved system diagnostics
-alongside an ASCII view of the bodies.
+bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
+response**, **M15: gravity for rigid bodies**). The project builds clean under
+MSVC (`/W4 /permissive-`), and all 11 test executables pass via CTest. The
+terminal app runs N-body scenarios -- built-in, or loaded from a text file --
+reporting conserved system diagnostics alongside an ASCII view of the bodies.
 
 | Module | Type | Provides |
 |---|---|---|

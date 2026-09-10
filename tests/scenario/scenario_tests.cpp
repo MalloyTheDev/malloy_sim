@@ -16,6 +16,8 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <optional>
 
 using malloy::nbody::NBodyWorld;
 using malloy::scenario::parse_scenario;
@@ -181,36 +183,77 @@ int main()
         // whole block silently vacuous.
         MALLOY_CHECK_TRUE(templates.size() >= 5);
 
-        // README states how many templates ship. That number has gone stale
-        // twice, so it is checked here rather than trusted to review: the
-        // README is the file a reader believes, and a wrong count there is a
-        // documentation defect even when every template works.
+        // Counts stated in prose go stale. These are read back out of the
+        // documents and checked against reality, because a wrong number in the
+        // file a reader believes is a defect even when the code is correct.
         {
-            std::ifstream readme(std::string(MALLOY_SCENARIO_DIR) + "/../README.md");
-            MALLOY_CHECK_TRUE(readme.good());
-            const std::string text((std::istreambuf_iterator<char>(readme)),
-                                   std::istreambuf_iterator<char>());
-            const std::string marker = " templates ship across";
-            const std::size_t at = text.find(marker);
-            MALLOY_CHECK_TRUE(at != std::string::npos);
+            const auto claimed_before =
+                [](const std::string& path,
+                   const std::string& marker) -> std::optional<std::size_t> {
+                std::ifstream document(path);
+                if (!document.good())
+                {
+                    return std::nullopt;
+                }
+                const std::string text((std::istreambuf_iterator<char>(document)),
+                                       std::istreambuf_iterator<char>());
+                const std::size_t at = text.find(marker);
+                if (at == std::string::npos)
+                {
+                    return std::nullopt;
+                }
+                // Walk back over the digits immediately before the marker.
+                std::size_t first = at;
+                while (first > 0 &&
+                       std::isdigit(static_cast<unsigned char>(text[first - 1])) != 0)
+                {
+                    --first;
+                }
+                if (first == at)
+                {
+                    return std::nullopt;
+                }
+                return static_cast<std::size_t>(
+                    std::stoul(text.substr(first, at - first)));
+            };
 
-            // Walk back over the digits immediately before the marker.
-            std::size_t first = at;
-            while (first > 0 &&
-                   std::isdigit(static_cast<unsigned char>(text[first - 1])) != 0)
+            const std::string root = std::string(MALLOY_SCENARIO_DIR) + "/..";
+            struct Claim
             {
-                --first;
-            }
-            MALLOY_CHECK_TRUE(first < at);
-            const std::size_t claimed =
-                static_cast<std::size_t>(std::stoul(text.substr(first, at - first)));
-            if (claimed != templates.size())
+                std::string path;
+                std::string marker;
+                std::size_t actual;
+            };
+            const std::vector<Claim> claims = {
+                {root + "/README.md", " templates ship across", templates.size()},
+#ifdef MALLOY_TEST_EXECUTABLE_COUNT
+                {root + "/README.md", " test executables",
+                 static_cast<std::size_t>(MALLOY_TEST_EXECUTABLE_COUNT)},
+                {root + "/docs/00_START_HERE.md", " test executables",
+                 static_cast<std::size_t>(MALLOY_TEST_EXECUTABLE_COUNT)},
+#endif
+            };
+
+            for (const Claim& claim : claims)
             {
-                std::cerr << "README claims " << claimed << " templates but "
-                          << templates.size() << " are present" << '\n';
-                return 1;
+                const std::optional<std::size_t> claimed =
+                    claimed_before(claim.path, claim.marker);
+                if (!claimed)
+                {
+                    std::cerr << "no parseable count before \"" << claim.marker
+                              << "\" in " << claim.path << '\n';
+                    return 1;
+                }
+                if (*claimed != claim.actual)
+                {
+                    std::cerr << claim.path << " claims " << *claimed << " for \""
+                              << claim.marker << "\" but " << claim.actual
+                              << " are present" << '\n';
+                    return 1;
+                }
             }
         }
+
         for (const std::string& name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;

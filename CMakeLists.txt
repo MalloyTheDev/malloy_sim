@@ -404,4 +404,15 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_springs_tests COMMAND malloy_springs_tests)
+
+    # The number of test executables is stated in README.md and
+    # docs/00_START_HERE.md, and such counts go stale. This is the only
+    # place that knows the real number, so it is handed to the scenario
+    # tests, which check the documents against it.
+    get_property(malloy_registered_tests DIRECTORY PROPERTY TESTS)
+    list(LENGTH malloy_registered_tests malloy_test_count)
+    target_compile_definitions(malloy_scenario_tests
+        PRIVATE
+            MALLOY_TEST_EXECUTABLE_COUNT=${malloy_test_count}
+    )
 endif()
