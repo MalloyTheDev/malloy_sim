@@ -8,8 +8,13 @@ immediately. It is terminal-first, and it is built as many concrete domain
 simulations behind a thin shared shell rather than as one generic engine
 (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-It is not a Unity, Godot, Unreal, ECS, editor, rendering, plugin, or scripting
-project.
+It is not a Unity, Godot, Unreal, editor, rendering, plugin, or scripting
+project, and it is not trying to become one.
+
+**It is intended to become a 3D simulator.** Everything shipped so far is 2D,
+and 3D has not started, but it is the destination rather than a possibility
+left open: see `docs/decisions/0009-three-dimensions-are-the-destination.md`
+for what that means for the code as it stands today.
 
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
@@ -229,23 +234,40 @@ built-in scenarios shown above.
 | M15 | gravity for rigid bodies: uniform field, potential energy | ✅ Done |
 | M16 | halfplanes: true flat ground, floors, walls and ramps | ✅ Done |
 
-## Out of scope (gated)
+## What is planned, and what is not
 
-These remain out of scope until taken up as their own dedicated post-M5
-milestone (`docs/07_POST_M5_ROADMAP.md`) -- never added speculatively:
+Two different kinds of "not here yet" are separated below, because a reader has
+no way to tell them apart otherwise. The first list is a roadmap. The second is
+a set of decisions.
 
-- graphical rendering (the M8 debug view is ASCII text only)
-- Raylib / SDL / GLFW / SFML
-- oriented-box contacts and SAT (M9 shipped circle and AABB geometry, M16 added halfplanes; body-against-body contact is still disc against disc only)
+### Planned, and gated behind its own milestone
+
+Intended, not yet built, and never added speculatively
+(`docs/07_POST_M5_ROADMAP.md`):
+
+- **3D**, which is the project's stated destination
+  (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
+- **quantum**, further out still
+- graphical rendering, and the library that would carry it (the M8 debug view is
+  ASCII text only, and terminal-first holds until then)
 - friction: every contact in the project is normal-only, so bodies slide forever
-- persistent forces and force/torque accumulators (gravity is a setting applied as an acceleration, not a registered force producer)
-- vehicles
-- 3D
-- quantum
-- ECS
-- plugins
-- editor
-- scripting
+- oriented-box contacts and SAT (M9 shipped circle and AABB geometry, M16 added
+  halfplanes; body against body is still disc against disc only)
+- persistent forces and force/torque accumulators (gravity is a setting applied
+  as an acceleration, not a registered force producer)
+- vehicles, fluids, thermodynamics, electromagnetism
+
+### Not planned at all
+
+Rejected rather than deferred, because adopting them would change what the
+project is:
+
+- plugins, an editor, a scripting layer
+- a simulation base class, engine kernel, scheduler, event bus or service
+  locator (rule 12)
+
+ECS sits between the two: not rejected, but not adopted until real
+access-pattern pressure exists rather than an expectation of it.
 - asset manager
 - threading
 - package manager

@@ -25,17 +25,30 @@ Terminal-first. Depth over breadth: a domain is not finished because it runs,
 it is finished when it validates its input, conserves what it should, holds
 determinism, and ships tested templates.
 
-It is still not:
+### What it will never be
 
 - a game engine clone
 - a Unity/Godot/Unreal replacement
 - a render-first project
-- an ECS experiment
 - an editor project
 - a plugin framework
 - a scripting framework
-- a 3D project yet
-- a quantum project yet
+
+Those are rejected on purpose, not deferred. ECS is a separate case: not
+rejected, but not adopted until real access-pattern pressure exists (rule 3).
+
+### Where it is going
+
+**MalloySim is intended to become a 3D simulator.** It is 2D today and every
+milestone so far is 2D, but three dimensions are the destination rather than a
+door left open, and quantum is a further one
+(`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+
+Neither has started, and rules 6 and 7 below still gate them: 3D arrives as its
+own milestone, once the 2D mechanics it rests on are finished. The point of
+saying it here is that several decisions already made only make sense as
+preparation for it, and someone reading the rules should know which of today's
+2D choices are stepping stones and which would have to change.
 
 ## Current phase
 

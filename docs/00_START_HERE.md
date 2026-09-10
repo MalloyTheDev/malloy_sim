@@ -10,6 +10,15 @@ particles, rigid and springs libraries are built, and the terminal app runs all
 four domains. Gravity, colliding particles, rigid bodies and spring networks are
 the finished domains. See `README.md` and `CHANGELOG.md`.
 
+## Where this is going
+
+MalloySim is 2D today and is intended to become a 3D simulator. That has not
+started and is gated behind its own milestone, but it is the destination, and
+it is why some of the current code looks the way it does: scalar angles and
+scalar inertia are 2D specializations of quaternions and inertia tensors, not
+an alternative to them. See
+`docs/decisions/0009-three-dimensions-are-the-destination.md`.
+
 ## Read order
 
 1. `README.md`
@@ -24,7 +33,7 @@ the finished domains. See `README.md` and `CHANGELOG.md`.
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 11. `docs/09_MISTAKES_TO_AVOID.md`
 12. `docs/10_CHANGELOG_TEMPLATE.md`
-13. `docs/decisions/` (ADRs 0001-0008)
+13. `docs/decisions/` (ADRs 0001-0009)
 
 ## Build and test
 

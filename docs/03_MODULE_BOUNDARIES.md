@@ -68,7 +68,7 @@ Since M16 a world also owns immovable ground planes, carried in `RigidSettings`.
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 
-Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, oriented-box contacts, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle: quaternions and inertia tensors are 3D concerns deferred to M19.
+Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, oriented-box contacts, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle. Those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them, and replacing them is part of the planned 3D milestone (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
 
 ## `malloy_springs`
 

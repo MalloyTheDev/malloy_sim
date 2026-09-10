@@ -7,6 +7,57 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Added
 
+- `docs/decisions/0009-three-dimensions-are-the-destination.md`. Every mention
+  of 3D in the documentation was a prohibition, and it sat in the same list as
+  plugins, an editor and a scripting layer, which are rejected rather than
+  deferred. A reader had no way to tell the two apart, and the natural reading
+  of README.md was that MalloySim will always be 2D. It will not: 3D is the
+  destination.
+
+  The ADR records what that means for the code as it stands, so a 2D decision
+  can be checked against it instead of guessed at. The fixed timestep, the
+  sim_core status and validation model, semi-implicit Euler, the multi-domain
+  dispatch of ADR 0006, the determinism policy and the testing approach carry
+  over. Vec2, the scalar angle, the scalar inertia, the scalar cross product and
+  the impulse formulas SPECIALIZE, meaning the 2D form is the 3D one with a
+  dimension removed, which is the justification ADR 0007 already relied on when
+  it chose a scalar angle. `malloy_ascii` and the area-based collision
+  properties do not carry over at all.
+
+  It also records the part that is genuinely new, and is why 3D is a milestone
+  rather than a widening: in 2D the inertia is a scalar and the angular velocity
+  lies along a fixed axis, so a body's inertia never changes in world space and
+  there is no gyroscopic term. In 3D the tensor rotates with the body and
+  Euler's equations carry omega x (I omega), so a spinning body precesses and
+  can tumble about its intermediate axis under no torque at all. That is physics
+  the current code does not contain in any form.
+
+  Three things are deliberately left undecided: whether 3D types are separate or
+  the existing ones become templates, whether 3D domains sit beside the 2D ones
+  or replace them, and whether 2D stays supported.
+
+- An ADR-range guard in the scenario tests, since docs/00_START_HERE.md states
+  which ADRs exist and that number went stale the moment 0009 was written. The
+  highest number in `docs/decisions/` is now the truth, and a stale claim fails
+  the suite. This is the fourth documented count derived rather than maintained,
+  after the template count, the test-executable count and the milestone range.
+
+### Changed
+
+- README.md and CLAUDE.md now separate what is PLANNED and gated from what is
+  REJECTED. 3D and quantum were listed among plugins, editors and scripting
+  layers, which made a roadmap item look like a refusal. Nothing about the
+  gates changed: 3D still arrives as its own milestone and nothing 3D is added
+  before then (rules 6 and 7).
+- docs/03, docs/07 and ADR 0007 no longer defer 3D work "to M19". That number
+  was assigned before M14, M15 and M16 shipped into the sequence below it, and
+  Track 4 is now unnumbered like Tracks 2 and 3.
+- docs/08_AI_HANDOFF_PROMPT.md no longer instructs a reader not to add collision
+  or rigid bodies, both of which shipped in M9 and M11.
+
+
+### Added
+
 - `docs/decisions/0007-rigid-bodies-own-their-state.md`: settles the M11
   ownership boundary before M11 starts. A dedicated `RigidBody2D` rather than a
   widened `Body2D`, following the M10 precedent that each domain owns the state

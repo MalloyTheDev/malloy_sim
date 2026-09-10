@@ -41,7 +41,7 @@ with its own concrete world type. There is no simulation base class, no virtual
 step(), no registry, and no engine kernel. Adding a domain must leave
 malloy_sim_core unchanged (ADR 0006).
 
-Do not add rendering, ECS, collision, rigid bodies, 3D, quantum, package
+Do not add rendering, ECS, 3D, quantum, package
 managers, Catch2, plugins, scripting, or editor systems unless the milestone I
 asked for explicitly requires it.
 

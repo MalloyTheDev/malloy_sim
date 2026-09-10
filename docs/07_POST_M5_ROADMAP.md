@@ -102,7 +102,7 @@ domain. Rigid bodies (orientation, angular velocity, torque) moved to M11.
 M11's ownership boundary is settled in advance and recorded in
 `docs/decisions/0007-rigid-bodies-own-their-state.md`: a dedicated
 `RigidBody2D`, not a widened `Body2D`. 2D only, so scalar angle and scalar
-inertia; quaternions and inertia tensors stay with 3D at M19.
+inertia; quaternions and inertia tensors stay with the 3D milestone.
 
 ## Track 2: the multi-domain shell
 
@@ -132,15 +132,32 @@ work. A candidate gets a number when it is started, not before.
 
 ## Track 4: dimension and presentation
 
+This is where the project is ultimately headed, and the reason it is worth
+saying so is that it changes how the current code should be read.
+
 ```text
-M19 - 3D math
-M20 - 3D simulation experiments
-M21 - rendering
+3D math                (Vec3, quaternions, inertia tensors)
+3D simulation          (the existing domains, in three dimensions)
+rendering              (terminal-first holds until then, ADR 0002)
 ```
 
-Terminal-first still holds until M21 (ADR 0002). Raylib remains the likely first
-visualization choice because it gets pixels on screen quickly without turning
-this into a graphics project.
+Unnumbered, like Tracks 2 and 3, for the same reason: a milestone gets a number
+when it starts. These were once M19 to M21, and other work has since shipped
+into the numbers below them.
+
+**3D is the destination, not a possibility left open.**
+`docs/decisions/0009-three-dimensions-are-the-destination.md` records what that
+means for the code today: which 2D decisions are deliberate specializations of
+their 3D forms and which would have to be replaced. In short, the scalar angle
+and scalar inertia in `malloy_rigid` are the 2D cases of a quaternion and an
+inertia tensor, and the integrator, the fixed timestep, the validation and
+status model, the scenario dispatch and the impulse formulas carry over almost
+unchanged. `malloy_ascii` and the disc-only collision geometry do not.
+
+It is still gated. Nothing 3D is added before its milestone, and the 2D
+mechanics it rests on are finished first (`CLAUDE.md` rule 6). Raylib remains
+the likely first visualization choice because it gets pixels on screen quickly
+without turning this into a graphics project.
 
 ## Track 5: separate
 

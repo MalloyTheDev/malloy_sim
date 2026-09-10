@@ -71,7 +71,10 @@ convenient.
 2D only. Orientation is a scalar angle and inertia is a scalar that is
 rotation-invariant, so there are no quaternions and no inertia tensors at M11.
 Quaternion normalization and inertia tensor transforms are 3D concerns and stay
-deferred to M19 with the rest of 3D (`docs/04`, `CLAUDE.md` rule 6).
+deferred to the 3D milestone (`docs/04`, `CLAUDE.md` rule 6,
+`docs/decisions/0009-three-dimensions-are-the-destination.md`). The scalar forms
+here are those quantities in two dimensions, not a different model, which is why
+this is a deferral rather than a decision to be undone later.
 
 ## Testing consequence
 

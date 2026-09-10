@@ -320,6 +320,47 @@ int main()
                         return 1;
                     }
                 }
+
+                // The ADR range in docs/00 is the same kind of claim, and it
+                // went stale the moment ADR 0009 was written. The highest
+                // number on disk is the truth.
+                {
+                    std::size_t highest = 0;
+                    for (const auto& entry : std::filesystem::directory_iterator(
+                             root + "/docs/decisions"))
+                    {
+                        if (!entry.is_regular_file() ||
+                            entry.path().extension() != ".md")
+                        {
+                            continue;
+                        }
+                        const std::string name = entry.path().filename().string();
+                        const std::string leading = digits_at(name, 0);
+                        if (!leading.empty())
+                        {
+                            highest = std::max(
+                                highest,
+                                static_cast<std::size_t>(std::stoul(leading)));
+                        }
+                    }
+                    MALLOY_CHECK_TRUE(highest >= 9);
+
+                    const std::string start_here =
+                        read_all(root + "/docs/00_START_HERE.md");
+                    const std::string marker = "ADRs 0001-";
+                    const std::size_t at = start_here.find(marker);
+                    MALLOY_CHECK_TRUE(at != std::string::npos);
+                    const std::string claimed_adr =
+                        digits_at(start_here, at + marker.size());
+                    MALLOY_CHECK_TRUE(!claimed_adr.empty());
+                    if (static_cast<std::size_t>(std::stoul(claimed_adr)) != highest)
+                    {
+                        std::cerr << "docs/00_START_HERE.md claims ADRs up to "
+                                  << claimed_adr << " but " << highest
+                                  << " exist" << '\n';
+                        return 1;
+                    }
+                }
             }
 
             for (const Claim& claim : claims)
