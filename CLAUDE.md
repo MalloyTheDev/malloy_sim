@@ -40,21 +40,21 @@ It is still not:
 ## Current phase
 
 ```text
-M1-M14 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M15 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
-networks with deterministic force accumulation, and rigid-body contact
-response.
+networks with deterministic force accumulation, rigid-body contact
+response, and uniform gravity for rigid bodies.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
 geometry), M10 (colliding particles, which introduced the multi-domain `type`
 key), M11 (2D rigid bodies), M12 (ballistics, as uniform gravity in the particle
-domain) and M13 (spring networks and deterministic force accumulation) are all
-done. Rigid-body contact response is promised but still has no milestone number.
-See `docs/07_POST_M5_ROADMAP.md`.
+domain), M13 (spring networks and deterministic force accumulation), M14
+(rigid-body contact response) and M15 (uniform gravity in the rigid domain)
+are all done. See `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M15 or later) unless explicitly asked, and
+Do not start any further milestone (M16 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -74,7 +74,7 @@ M5: terminal N-body demo               [done]
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
 4. Collision geometry landed in M9, non-rotational contact response in M10, and rotational (rigid-body) contact response in M14. Contacts are disc against disc; oriented boxes and SAT are not implemented.
-5. Rigid bodies landed in M11 and gained contact response in M14. Do not add persistent forces or force/torque accumulators to `malloy_rigid` until their dedicated milestone.
+5. Rigid bodies landed in M11, gained contact response in M14, and gained a uniform gravity field in M15. Gravity is a setting applied as an acceleration, not a force: do not add persistent forces or force/torque accumulators to `malloy_rigid` until their dedicated milestone.
 6. Do not add 3D until its dedicated milestone.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.

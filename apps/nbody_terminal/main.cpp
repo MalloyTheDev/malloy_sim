@@ -33,6 +33,7 @@ using malloy::nbody::NBodyWorld;
 using malloy::nbody::total_angular_momentum;
 using malloy::particles::Particle2D;
 using malloy::rigid::RigidBody2D;
+using malloy::rigid::RigidSettings;
 using malloy::rigid::RigidWorld;
 using malloy::springs::SpringBody2D;
 using malloy::springs::SpringNetwork;
@@ -52,7 +53,7 @@ namespace
 // three same-named overload sets into one scope.
 constexpr auto& rigid_linear_momentum = malloy::rigid::total_linear_momentum;
 constexpr auto& rigid_angular_momentum = malloy::rigid::total_angular_momentum;
-constexpr auto& rigid_kinetic_energy = malloy::rigid::total_kinetic_energy;
+constexpr auto& rigid_total_energy = malloy::rigid::total_energy;
 constexpr auto& spring_momentum = malloy::springs::total_momentum;
 constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
 constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
@@ -202,10 +203,10 @@ std::vector<Vec2> rigid_points(const std::vector<RigidBody2D>& bodies)
 // base class with the other two, and the dispatch switch is the whole
 // mechanism (ADR 0006).
 int run_rigid(const char* title, const SimulationSettings& sim,
-              std::vector<RigidBody2D> bodies, Real restitution, int steps,
+              std::vector<RigidBody2D> bodies, RigidSettings settings, int steps,
               int output_every)
 {
-    RigidWorld world{sim, std::move(bodies), restitution};
+    RigidWorld world{sim, std::move(bodies), settings};
 
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
               << "  dt=" << sim.dt << "  steps=" << steps << '\n';
@@ -218,11 +219,11 @@ int run_rigid(const char* title, const SimulationSettings& sim,
 
     Viewport view = fit_viewport(rigid_points(world.bodies()));
 
-    const auto report = [&world, &view](std::int64_t step_index) {
+    const auto report = [&world, &view, &settings](std::int64_t step_index) {
         const auto& now = world.bodies();
         std::cout << "step " << std::setw(6) << step_index;
         std::cout << std::scientific;
-        std::cout << "   KE " << std::setw(16) << rigid_kinetic_energy(now)
+        std::cout << "   E " << std::setw(16) << rigid_total_energy(now, settings.gravity)
                   << "   L " << std::setw(16) << rigid_angular_momentum(now)
                   << "   p " << std::setw(16) << rigid_linear_momentum(now).x
                   << std::setw(16) << rigid_linear_momentum(now).y << '\n';
@@ -369,7 +370,7 @@ int main(int argc, char** argv)
                                  s.particle_list, s.steps, s.output_every);
         case ScenarioType::Rigid:
             return run_rigid(argv[1], s.simulation, s.rigid_bodies,
-                             s.rigid_restitution, s.steps, s.output_every);
+                             s.rigid_settings, s.steps, s.output_every);
         case ScenarioType::Springs:
             return run_springs(argv[1], s.simulation, s.spring_network,
                                s.spring_bodies, s.steps, s.output_every);

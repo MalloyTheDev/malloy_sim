@@ -218,10 +218,16 @@ math::Real shift_inertia(math::Real inertia_about_com, math::Real mass,
 // World
 // ----------------------------------------------------------------------------
 
+bool RigidSettings::is_valid() const
+{
+    return restitution >= math::Real{0} && restitution <= math::Real{1} &&
+           math::is_finite(restitution) && math::is_finite(gravity);
+}
+
 RigidWorld::RigidWorld(sim_core::SimulationSettings simulation_settings,
-                       std::vector<RigidBody2D> bodies, math::Real restitution)
+                       std::vector<RigidBody2D> bodies, RigidSettings settings)
     : simulation_settings_{simulation_settings},
-      restitution_{restitution},
+      settings_{settings},
       bodies_{std::move(bodies)},
       step_{time::FixedStep::create(simulation_settings.dt)}
 {
@@ -233,8 +239,7 @@ sim_core::StepStatus RigidWorld::validate() const
     {
         return sim_core::StepStatus::InvalidSettings;
     }
-    if (!(restitution_ >= math::Real{0}) || !(restitution_ <= math::Real{1}) ||
-        !math::is_finite(restitution_))
+    if (!settings_.is_valid())
     {
         return sim_core::StepStatus::InvalidSettings;
     }
@@ -284,6 +289,21 @@ sim_core::StepResult RigidWorld::step()
 
     const math::Real dt = simulation_settings_.dt;
 
+    // (1) gravity, before the position update, which keeps this semi-implicit
+    //     (symplectic) Euler and matches every other world here. It is an
+    //     acceleration, so it does NOT scale with mass; a static body is
+    //     skipped explicitly, because otherwise an immovable wall would start
+    //     falling.
+    const math::Vec2 gravity = settings_.gravity;
+    for (RigidBody2D& body : bodies_)
+    {
+        if (!body.is_static())
+        {
+            body.velocity += gravity * dt;
+        }
+    }
+
+    // (2) integrate the pose with the UPDATED velocities.
     for (RigidBody2D& body : bodies_)
     {
         // The centre of mass is what translates; the body origin follows from
@@ -302,7 +322,7 @@ sim_core::StepResult RigidWorld::step()
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
-            resolve_contact(bodies_[i], bodies_[j], restitution_);
+            resolve_contact(bodies_[i], bodies_[j], settings_.restitution);
         }
     }
 
@@ -372,5 +392,28 @@ math::Real total_kinetic_energy(const std::vector<RigidBody2D>& bodies)
                    body.angular_velocity;
     }
     return kinetic;
+}
+
+math::Real total_potential_energy(const std::vector<RigidBody2D>& bodies,
+                                  const math::Vec2& gravity)
+{
+    math::Real potential = 0.0;
+    for (const RigidBody2D& body : bodies)
+    {
+        if (body.is_static())
+        {
+            continue; // infinite mass times a position is not a number
+        }
+        // U = -m (g . r) with r the centre of mass, so with g pointing down a
+        // higher body has more.
+        potential -= body.mass * math::dot(gravity, center_of_mass(body));
+    }
+    return potential;
+}
+
+math::Real total_energy(const std::vector<RigidBody2D>& bodies,
+                        const math::Vec2& gravity)
+{
+    return total_kinetic_energy(bodies) + total_potential_energy(bodies, gravity);
 }
 } // namespace malloy::rigid

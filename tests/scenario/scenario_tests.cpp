@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <cctype>
 #include <iterator>
 #include <iostream>
 #include <sstream>
@@ -179,6 +180,37 @@ int main()
         // The directory must not be empty: an empty enumeration would make this
         // whole block silently vacuous.
         MALLOY_CHECK_TRUE(templates.size() >= 5);
+
+        // README states how many templates ship. That number has gone stale
+        // twice, so it is checked here rather than trusted to review: the
+        // README is the file a reader believes, and a wrong count there is a
+        // documentation defect even when every template works.
+        {
+            std::ifstream readme(std::string(MALLOY_SCENARIO_DIR) + "/../README.md");
+            MALLOY_CHECK_TRUE(readme.good());
+            const std::string text((std::istreambuf_iterator<char>(readme)),
+                                   std::istreambuf_iterator<char>());
+            const std::string marker = " templates ship across";
+            const std::size_t at = text.find(marker);
+            MALLOY_CHECK_TRUE(at != std::string::npos);
+
+            // Walk back over the digits immediately before the marker.
+            std::size_t first = at;
+            while (first > 0 &&
+                   std::isdigit(static_cast<unsigned char>(text[first - 1])) != 0)
+            {
+                --first;
+            }
+            MALLOY_CHECK_TRUE(first < at);
+            const std::size_t claimed =
+                static_cast<std::size_t>(std::stoul(text.substr(first, at - first)));
+            if (claimed != templates.size())
+            {
+                std::cerr << "README claims " << claimed << " templates but "
+                          << templates.size() << " are present" << '\n';
+                return 1;
+            }
+        }
         for (const std::string& name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;
@@ -230,7 +262,7 @@ int main()
                 MALLOY_CHECK_TRUE(r.scenario.rigid_bodies.size() >= 1);
                 malloy::rigid::RigidWorld world{r.scenario.simulation,
                                                 r.scenario.rigid_bodies,
-                                                r.scenario.rigid_restitution};
+                                                r.scenario.rigid_settings};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
                 MALLOY_CHECK_TRUE(world.step().ok());
             }
@@ -475,7 +507,7 @@ int main()
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_TRUE(r.ok);
         MALLOY_CHECK_EQ(r.scenario.rigid_bodies.size(), std::size_t{2});
-        MALLOY_CHECK_NEAR(r.scenario.rigid_restitution, 0.25, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.restitution, 0.25, eps);
 
         const auto& moving = r.scenario.rigid_bodies[0];
         MALLOY_CHECK_NEAR(moving.radius, 0.8, eps);
@@ -496,6 +528,44 @@ int main()
     {
         // restitution now serves two domains, but not a third.
         std::istringstream in("type springs\nrestitution 0.5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+
+    // --- M15: gravity reaches the rigid domain. The two components differ in
+    //     sign and magnitude, so a transposed pair would show, and the particle
+    //     field is checked to stay at zero, so a branch routing the value to
+    //     the wrong domain would show too. ---
+    {
+        std::istringstream in("type rigid\n"
+                              "gravity 1.5 -9.81\n"
+                              "rigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.gravity.x, 1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.gravity.y, -9.81, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.gravity.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.gravity.y, 0.0, 0.0);
+    }
+    {
+        // The same key still serves the particle domain it was written for.
+        std::istringstream in("type particles\n"
+                              "gravity -2.0 0.25\n"
+                              "particle 1.0 0.5 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.gravity.x, -2.0, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.gravity.y, 0.25, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.gravity.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.gravity.y, 0.0, 0.0);
+    }
+    {
+        // Two components are required, not one.
+        std::istringstream in("type rigid\ngravity 1.0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // gravity now serves two domains, but not a third.
+        std::istringstream in("type springs\ngravity 0.0 -9.81\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 

@@ -19,11 +19,14 @@ using malloy::rigid::center_of_mass;
 using malloy::rigid::mass_properties;
 using malloy::rigid::MassProperties;
 using malloy::rigid::RigidBody2D;
+using malloy::rigid::RigidSettings;
 using malloy::rigid::RigidWorld;
 using malloy::rigid::shift_inertia;
 using malloy::rigid::to_local;
 using malloy::rigid::to_world;
 using malloy::rigid::total_angular_momentum;
+using malloy::rigid::total_potential_energy;
+using malloy::rigid::total_energy;
 using malloy::rigid::total_kinetic_energy;
 using malloy::rigid::total_linear_momentum;
 using malloy::rigid::velocity_at;
@@ -458,7 +461,7 @@ int main()
         b.position = Vec2{1.0, 0.0};
         b.velocity = Vec2{-1.0, 0.0};
 
-        RigidWorld w{SimulationSettings{0.5}, {a, b}, 1.0};
+        RigidWorld w{SimulationSettings{0.5}, {a, b}, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok()); // brings them to +-0.5, exactly touching
         // Equal masses, elastic, head on: they exchange velocities.
         MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(-1.0, 0.0), 1e-12);
@@ -491,7 +494,7 @@ int main()
         wall.inertia = inf;
         wall.radius = 0.5;
 
-        RigidWorld w{SimulationSettings{0.5}, {ball, wall}, 1.0};
+        RigidWorld w{SimulationSettings{0.5}, {ball, wall}, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok());
 
         // It bounced back off the immovable body...
@@ -523,8 +526,8 @@ int main()
         RigidBody2D down = ball;
         down.local_center_of_mass = Vec2{0.0, -0.4};
 
-        RigidWorld a{SimulationSettings{0.5}, {up, wall}, 1.0};
-        RigidWorld b{SimulationSettings{0.5}, {down, wall}, 1.0};
+        RigidWorld a{SimulationSettings{0.5}, {up, wall}, RigidSettings{1.0}};
+        RigidWorld b{SimulationSettings{0.5}, {down, wall}, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(a.step().ok());
         MALLOY_CHECK_TRUE(b.step().ok());
         const Real spin_a = a.bodies()[0].angular_velocity;
@@ -546,7 +549,7 @@ int main()
         b.velocity = Vec2{-1.0, 0.0};
         b.radius = 0.5;
 
-        RigidWorld w{SimulationSettings{0.001}, {a, b}, 1.0};
+        RigidWorld w{SimulationSettings{0.001}, {a, b}, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok());
         // They pass straight through each other: velocities unchanged.
         MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(1.0, 0.0), eps);
@@ -581,7 +584,7 @@ int main()
             const Vec2 p0 = total_linear_momentum(start);
             const Real l0 = total_angular_momentum(start);
 
-            RigidWorld w{SimulationSettings{0.002}, start, restitution};
+            RigidWorld w{SimulationSettings{0.002}, start, RigidSettings{restitution}};
             for (int i = 0; i < 600; ++i)
             {
                 MALLOY_CHECK_TRUE(w.step().ok());
@@ -637,7 +640,7 @@ int main()
         // about 5e-4 with ordinary penetrations; here, with penetration nine
         // orders smaller, the drift is around 5e-9. The correction is the
         // cause, and the impulse is exact.
-        RigidWorld w{SimulationSettings{1e-9}, start, 1.0};
+        RigidWorld w{SimulationSettings{1e-9}, start, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok());
         MALLOY_CHECK_VEC2_NEAR(total_linear_momentum(w.bodies()), p0, 1e-12);
         MALLOY_CHECK_NEAR(total_angular_momentum(w.bodies()), l0, 1e-7);
@@ -665,8 +668,8 @@ int main()
         const std::vector<RigidBody2D> start = {a, b};
         const Real k0 = total_kinetic_energy(start);
 
-        RigidWorld elastic{SimulationSettings{0.002}, start, 1.0};
-        RigidWorld lossy{SimulationSettings{0.002}, start, 0.3};
+        RigidWorld elastic{SimulationSettings{0.002}, start, RigidSettings{1.0}};
+        RigidWorld lossy{SimulationSettings{0.002}, start, RigidSettings{0.3}};
         for (int i = 0; i < 600; ++i)
         {
             MALLOY_CHECK_TRUE(elastic.step().ok());
@@ -697,7 +700,7 @@ int main()
         wall.radius = 0.5;
 
         // Exactly touching, so the contact exists with zero penetration.
-        RigidWorld w{SimulationSettings{1e-9}, {spinner, wall}, 1.0};
+        RigidWorld w{SimulationSettings{1e-9}, {spinner, wall}, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok());
 
         // Comparing only centre-of-mass velocities would give a closing speed of
@@ -724,7 +727,7 @@ int main()
         b.radius = 0.5;
 
         // Overlapping by 0.2, so a contact is found, but they are separating.
-        RigidWorld w{SimulationSettings{1e-9}, {a, b}, 1.0};
+        RigidWorld w{SimulationSettings{1e-9}, {a, b}, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok());
         // Only the positional correction should have acted.
         MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(-1.0, 0.0), 1e-9);
@@ -754,13 +757,305 @@ int main()
 
     // --- Restitution is validated. ---
     {
-        RigidWorld too_bouncy{SimulationSettings{0.01}, {awkward_body()}, 1.5};
+        RigidWorld too_bouncy{SimulationSettings{0.01}, {awkward_body()}, RigidSettings{1.5}};
         MALLOY_CHECK_TRUE(too_bouncy.validate() == StepStatus::InvalidSettings);
-        RigidWorld negative{SimulationSettings{0.01}, {awkward_body()}, -0.1};
+        RigidWorld negative{SimulationSettings{0.01}, {awkward_body()}, RigidSettings{-0.1}};
         MALLOY_CHECK_TRUE(negative.validate() == StepStatus::InvalidSettings);
-        RigidWorld ok{SimulationSettings{0.01}, {awkward_body()}, 0.5};
+        RigidWorld ok{SimulationSettings{0.01}, {awkward_body()}, RigidSettings{0.5}};
         MALLOY_CHECK_TRUE(ok.validate() == StepStatus::Ok);
-        MALLOY_CHECK_NEAR(ok.restitution(), 0.5, eps);
+        MALLOY_CHECK_NEAR(ok.settings().restitution, 0.5, eps);
+    }
+
+    // --- M15: settings validation. ---
+    {
+        MALLOY_CHECK_TRUE(RigidSettings{}.is_valid());
+        MALLOY_CHECK_TRUE((RigidSettings{0.0, Vec2{0.0, -9.81}}.is_valid()));
+        RigidSettings bouncy;
+        bouncy.restitution = 1.5;
+        MALLOY_CHECK_FALSE(bouncy.is_valid());
+        RigidSettings bad_gravity;
+        bad_gravity.gravity = Vec2{0.0, nan};
+        MALLOY_CHECK_FALSE(bad_gravity.is_valid());
+        RigidSettings inf_gravity;
+        inf_gravity.gravity = Vec2{inf, 0.0};
+        MALLOY_CHECK_FALSE(inf_gravity.is_valid());
+    }
+
+    // --- Zero gravity reproduces the pre-M15 behaviour EXACTLY, which is the
+    //     guard for every scenario written before the setting existed. ---
+    {
+        const std::vector<RigidBody2D> start = {awkward_body()};
+        RigidWorld unset{SimulationSettings{0.002}, start, RigidSettings{0.9}};
+        RigidSettings explicit_zero;
+        explicit_zero.restitution = 0.9;
+        explicit_zero.gravity = Vec2{0.0, 0.0};
+        RigidWorld zero{SimulationSettings{0.002}, start, explicit_zero};
+        for (int i = 0; i < 300; ++i)
+        {
+            MALLOY_CHECK_TRUE(unset.step().ok());
+            MALLOY_CHECK_TRUE(zero.step().ok());
+        }
+        MALLOY_CHECK_VEC2_NEAR(unset.bodies()[0].position, zero.bodies()[0].position, 0.0);
+        MALLOY_CHECK_NEAR(unset.bodies()[0].angle, zero.bodies()[0].angle, 0.0);
+        MALLOY_CHECK_NEAR(total_potential_energy(unset.bodies(), Vec2{}), 0.0, eps);
+    }
+
+    // --- Gravity is applied BEFORE the position update, which is what keeps
+    //     this semi-implicit Euler. With g = (0,-10) and dt = 0.5 the velocity
+    //     becomes -5 and the centre of mass moves by -2.5, not 0 (explicit
+    //     Euler) and not -1.25 (the exact solution). ---
+    {
+        RigidBody2D b;
+        b.mass = 2.0;
+        b.inertia = 1.0;
+        RigidSettings g;
+        g.gravity = Vec2{0.0, -10.0};
+        RigidWorld w{SimulationSettings{0.5}, {b}, g};
+        const Vec2 com0 = center_of_mass(b);
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(0.0, -5.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(center_of_mass(w.bodies()[0]), com0 + Vec2(0.0, -2.5), eps);
+        // Gravity acts through the centre of mass, so it alone cannot spin a
+        // body however long it falls.
+        MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 0.0);
+    }
+
+    // --- Gravity accelerates every body equally regardless of mass, and does
+    //     NOT move a static one: it is an acceleration, so without an explicit
+    //     skip an immovable wall would start falling. ---
+    {
+        RigidBody2D light;
+        light.mass = 0.5;
+        light.inertia = 1.0;
+        RigidBody2D heavy;
+        heavy.position = Vec2{50.0, 0.0};
+        heavy.mass = 500.0;
+        heavy.inertia = 1.0;
+        RigidBody2D wall;
+        wall.position = Vec2{-50.0, 0.0};
+        wall.mass = inf;
+        wall.inertia = inf;
+
+        RigidSettings g;
+        g.gravity = Vec2{3.0, -4.0};
+        RigidWorld w{SimulationSettings{0.25}, {light, heavy, wall}, g};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(0.75, -1.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(0.75, -1.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[2].velocity, Vec2(0.0, 0.0), 0.0); // the wall
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[2].position, Vec2(-50.0, 0.0), 0.0);
+    }
+
+    // --- INVARIANT: in free fall the energy loss per step is exactly
+    //     (1/2)(sum m)|g|^2 dt^2, the same figure derived for the particle
+    //     domain in M12, because it is the same integrator on the same field. ---
+    {
+        RigidBody2D b;
+        b.position = Vec2{0.0, 10.0};
+        b.velocity = Vec2{1.0, 0.0};
+        b.mass = 2.0;
+        b.inertia = 1.0;
+        RigidSettings g;
+        g.gravity = Vec2{0.0, -3.0};
+        const Real dt = 0.01;
+        const int steps = 300;
+
+        const std::vector<RigidBody2D> start = {b};
+        const Real e0 = total_energy(start, g.gravity);
+        RigidWorld w{SimulationSettings{dt}, start, g};
+        for (int i = 0; i < steps; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const Real per_step = 0.5 * 2.0 * 9.0 * dt * dt;
+        MALLOY_CHECK_NEAR(total_energy(w.bodies(), g.gravity),
+                          e0 - per_step * static_cast<Real>(steps), 1e-10);
+        MALLOY_CHECK_TRUE(per_step * static_cast<Real>(steps) > 1e-6);
+    }
+
+    // --- Potential energy: higher is more with gravity pointing down, measured
+    //     at the CENTRE OF MASS rather than the body origin, and statics are
+    //     excluded because infinite mass times a position is not a number. ---
+    {
+        const Vec2 g{0.0, -10.0};
+        RigidBody2D high;
+        high.position = Vec2{0.0, 3.0};
+        high.mass = 2.0;
+        high.inertia = 1.0;
+        RigidBody2D low = high;
+        low.position = Vec2{0.0, 1.0};
+        MALLOY_CHECK_NEAR(total_potential_energy({high}, g), 60.0, eps);
+        MALLOY_CHECK_NEAR(total_potential_energy({low}, g), 20.0, eps);
+
+        // The offset centre of mass is what counts, not the origin.
+        RigidBody2D offset = high;
+        offset.local_center_of_mass = Vec2{0.0, 1.0}; // centre of mass at y = 4
+        MALLOY_CHECK_NEAR(total_potential_energy({offset}, g), 80.0, eps);
+
+        RigidBody2D wall;
+        wall.mass = inf;
+        wall.inertia = inf;
+        MALLOY_CHECK_NEAR(total_potential_energy({wall}, g), 0.0, 0.0);
+    }
+
+    // --- A body dropped onto an immovable floor lands and stays there. ---
+    {
+        RigidBody2D ball;
+        ball.position = Vec2{0.0, 6.0};
+        ball.mass = 1.0;
+        ball.inertia = 0.5;
+        ball.radius = 0.5;
+        RigidBody2D floor;
+        floor.position = Vec2{0.0, -5.0};
+        floor.mass = inf;
+        floor.inertia = inf;
+        floor.radius = 5.0;
+
+        RigidSettings g;
+        g.restitution = 0.4;
+        g.gravity = Vec2{0.0, -9.81};
+        RigidWorld w{SimulationSettings{0.001}, {ball, floor}, g};
+        for (int i = 0; i < 20000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const RigidBody2D& b = w.bodies()[0];
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(b.position));
+        // Resting on the floor disc: centres about 5.5 apart, and not sunk in.
+        const Real gap = malloy::math::distance(b.position, Vec2{0.0, -5.0});
+        MALLOY_CHECK_TRUE(gap > 5.0);
+        MALLOY_CHECK_TRUE(gap < 5.7);
+        MALLOY_CHECK_TRUE(std::abs(b.velocity.y) < 0.5);
+    }
+
+    // --- EMERGENT: a body whose centre of mass is offset from its disc centre,
+    //     resting on a floor, ROCKS. Gravity acts through the centre of mass
+    //     while the contact acts at the rim, so the two are not collinear and
+    //     the pair generates torque. Nothing in M15 implements this: it falls
+    //     out of M14's contact arm once there is a field to act against. ---
+    {
+        RigidBody2D wobbler;
+        wobbler.position = Vec2{0.0, 1.0};
+        wobbler.angle = 0.0;
+        wobbler.mass = 1.0;
+        wobbler.inertia = 0.05; // small, so the torque shows quickly
+        wobbler.radius = 0.5;
+        wobbler.local_center_of_mass = Vec2{0.35, 0.0}; // offset sideways
+
+        RigidBody2D floor;
+        floor.position = Vec2{0.0, -5.0};
+        floor.mass = inf;
+        floor.inertia = inf;
+        floor.radius = 5.0;
+
+        RigidSettings g;
+        g.restitution = 0.1;
+        g.gravity = Vec2{0.0, -9.81};
+        RigidWorld w{SimulationSettings{0.0005}, {wobbler, floor}, g};
+        for (int i = 0; i < 8000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        // It turned. With the centre of mass at the disc centre this would stay
+        // at exactly zero however long it sat there.
+        MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angle) > 1e-3);
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(w.bodies()[0].position));
+    }
+
+    // --- The claim scenarios/dropped_bodies.scn is built on: two bodies that
+    //     differ only in mass fall identically, land on the same step, and
+    //     bounce identically.
+    //
+    //     The FALL matches because gravity is an acceleration and never divides
+    //     by a mass. The BOUNCE matches for a separate reason: the contact
+    //     impulse divides by (1/m + (r x n)^2 / I), so the resulting change in
+    //     velocity is -(1+e)(v.n) / (1 + (m/I)(r x n)^2). It depends on the
+    //     RATIO m/I, not on m, and these two share it (0.5/0.08 = 5.0/0.80).
+    //     Change one inertia and only the free fall would still agree.
+    //
+    //     The pair is translated rather than mirrored, so identical means
+    //     identical here and not sign flipped. ---
+    {
+        const auto falling = [](Real mass, Real inertia, Real x) {
+            RigidBody2D b;
+            b.mass = mass;
+            b.inertia = inertia;
+            b.radius = 0.40;
+            b.local_center_of_mass = Vec2{0.15, 0.0};
+            b.position = Vec2{x, 3.0};
+            return b;
+        };
+        const auto floor_at = [inf](Real x) {
+            RigidBody2D f;
+            f.mass = inf;
+            f.inertia = inf;
+            f.radius = 0.60;
+            f.position = Vec2{x, -1.20};
+            return f;
+        };
+
+        RigidSettings g;
+        g.restitution = 0.45;
+        g.gravity = Vec2{0.0, -9.81};
+        RigidWorld w{SimulationSettings{0.001},
+                     {falling(0.5, 0.08, -1.60), falling(5.0, 0.80, 1.40),
+                      floor_at(-1.50), floor_at(1.50)},
+                     g};
+        for (int i = 0; i < 1200; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+
+        const RigidBody2D& light = w.bodies()[0];
+        const RigidBody2D& heavy = w.bodies()[1];
+        MALLOY_CHECK_NEAR(light.position.y, heavy.position.y, 1e-12);
+        MALLOY_CHECK_NEAR(light.position.x + 3.0, heavy.position.x, 1e-12);
+        MALLOY_CHECK_NEAR(light.angle, heavy.angle, 1e-12);
+        MALLOY_CHECK_NEAR(light.velocity.y, heavy.velocity.y, 1e-12);
+
+        // And the run really did include a landing, so the agreement above is
+        // about a contact and not merely about two bodies still in free fall.
+        MALLOY_CHECK_TRUE(light.position.y < 0.0);
+        MALLOY_CHECK_TRUE(std::abs(light.angle) > 1e-6);
+        MALLOY_CHECK_TRUE(light.velocity.y > 0.0); // rebounding
+
+        // The mass genuinely differs, so this is not two copies of one body.
+        MALLOY_CHECK_NEAR(heavy.mass, 10.0 * light.mass, eps);
+    }
+
+    // --- Break the shared ratio and the bounce stops agreeing, which is what
+    //     shows the agreement above is the ratio and not the mass. ---
+    {
+        const auto falling = [](Real mass, Real inertia, Real x) {
+            RigidBody2D b;
+            b.mass = mass;
+            b.inertia = inertia;
+            b.radius = 0.40;
+            b.local_center_of_mass = Vec2{0.15, 0.0};
+            b.position = Vec2{x, 3.0};
+            return b;
+        };
+        const auto floor_at = [inf](Real x) {
+            RigidBody2D f;
+            f.mass = inf;
+            f.inertia = inf;
+            f.radius = 0.60;
+            f.position = Vec2{x, -1.20};
+            return f;
+        };
+
+        RigidSettings g;
+        g.restitution = 0.45;
+        g.gravity = Vec2{0.0, -9.81};
+        RigidWorld w{SimulationSettings{0.001},
+                     {falling(0.5, 0.08, -1.60), falling(5.0, 0.20, 1.40),
+                      floor_at(-1.50), floor_at(1.50)},
+                     g};
+        for (int i = 0; i < 1200; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angle - w.bodies()[1].angle) > 1e-6);
     }
 
     std::cout << "malloy_rigid_tests passed\n";

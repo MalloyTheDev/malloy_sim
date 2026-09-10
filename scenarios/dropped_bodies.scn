@@ -1,0 +1,104 @@
+# MalloySim scenario: rigid bodies falling onto an immovable floor.
+#
+# This is what M15 adds. M14 gave rigid bodies contacts, but nothing pulled them
+# together: every collision had to be arranged by hand with an initial velocity.
+# A uniform field means a scene can simply be dropped and left to run.
+#
+# Three things are on show.
+#
+# 1. Gravity is an ACCELERATION, so it does not scale with mass. The two bodies
+#    starting at y = 3 are identical apart from mass and inertia: one is ten
+#    times heavier than the other, and they are placed at the same offset from
+#    their nearest floor disc, so their geometry is mirror-identical and they
+#    touch down on the same step. That is not a coincidence of the numbers, it
+#    is the integrator adding g * dt to a velocity rather than a force divided
+#    by a mass.
+#
+# 2. The floor does not fall. Every floor disc has infinite mass and inertia,
+#    and the gravity pass skips such bodies explicitly. Without that skip an
+#    immovable wall would accelerate downwards forever while still refusing to
+#    be pushed by anything.
+#
+# 3. Spin appears from nowhere. Gravity acts through the centre of mass, so it
+#    generates no torque on its own however long a body falls. Every falling
+#    body here has its centre of mass offset from its collision disc, so the
+#    CONTACT has a moment arm and the bodies rock and tumble on landing. That is
+#    M14's arm being driven by M15's field; neither part does it alone.
+#
+# On the floor: contacts in this project are disc against disc, so a flat floor
+# has to be built out of overlapping discs. The surface is scalloped rather than
+# flat, by about 0.05 between disc tops, and a body sliding along it hops. That
+# is a real limitation of disc-only collision, not a modelling choice, and
+# oriented boxes with SAT would be their own milestone.
+#
+# On the diagnostics: E is now kinetic PLUS gravitational potential, so it stays
+# near flat during free fall instead of climbing as the bodies speed up. Linear
+# momentum is NOT conserved, because gravity and the floor are both external to
+# the bodies. Angular momentum is not conserved either, for the same reason.
+
+type rigid
+
+dt 0.001
+steps 5000
+output_every 500
+
+gravity 0.0 -9.81
+restitution 0.45
+
+# rigid_body <mass> <inertia> <radius> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
+
+# The mass pair: same size, same shape, same height, same zero velocity, and the
+# same 0.10 offset from the nearest floor disc. Only mass and inertia differ.
+rigid_body 0.50  0.08  0.40   0.15  0.00   -1.60  3.00  0.00    0.00  0.00  0.00
+rigid_body 5.00  0.80  0.40   0.15  0.00    1.40  3.00  0.00    0.00  0.00  0.00
+
+# A third body thrown in sideways, so it arrives already moving and skips along.
+rigid_body 1.00  0.05  0.35  -0.25  0.10   -3.50  4.50  0.00    1.20  0.00  0.00
+
+# The floor: overlapping immovable discs. Its own key, because MSVC stream
+# extraction does not accept the token "inf".
+# rigid_static <radius> <px> <py> <angle>
+rigid_static 0.60  -4.00 -1.20  0.00
+rigid_static 0.60  -3.50 -1.20  0.00
+rigid_static 0.60  -3.00 -1.20  0.00
+rigid_static 0.60  -2.50 -1.20  0.00
+rigid_static 0.60  -2.00 -1.20  0.00
+rigid_static 0.60  -1.50 -1.20  0.00
+rigid_static 0.60  -1.00 -1.20  0.00
+rigid_static 0.60  -0.50 -1.20  0.00
+rigid_static 0.60   0.00 -1.20  0.00
+rigid_static 0.60   0.50 -1.20  0.00
+rigid_static 0.60   1.00 -1.20  0.00
+rigid_static 0.60   1.50 -1.20  0.00
+rigid_static 0.60   2.00 -1.20  0.00
+rigid_static 0.60   2.50 -1.20  0.00
+rigid_static 0.60   3.00 -1.20  0.00
+rigid_static 0.60   3.50 -1.20  0.00
+rigid_static 0.60   4.00 -1.20  0.00
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   2.07711000e+02   L  -5.52000000e+00
+#   step    500   E   2.07554616e+02   L  -2.30524320e+01
+#   step   1000   E   7.08361176e+01   L   4.11211687e+00
+#   step   5000   E   1.01970995e+01   L  -1.55706588e+01
+#
+# Everything is still falling at step 500, and E has moved by only 1.5638e-01,
+# or 0.075 per cent. That figure is not approximate. Semi-implicit Euler under a
+# constant field loses exactly (1/2)(sum of m)|g|^2 dt^2 per free-flight step,
+# which for these three bodies over 500 steps is 1.563837e-01 against a measured
+# 1.563840e-01. The same constant was derived for the particle domain in M12,
+# because it is the same integrator on the same kind of field.
+#
+# Between steps 500 and 1000 the bodies land, and E drops by two thirds: that is
+# restitution 0.45, not integrator drift. It keeps falling afterwards as they
+# bounce, rock and skip along the scalloped floor.
+#
+# The starting angular momentum is exactly -5.52. Only the third body is moving,
+# and its centre of mass starts at (-3.75, 4.60) with velocity (1.20, 0.00), so
+# L = m(rx*vy - ry*vx) = 1.0 * (-4.60 * 1.20) = -5.52.
+#
+# The two bodies released at y = 3 touch down on the same step and hold the same
+# height, angle and vertical velocity for the whole run despite a tenfold mass
+# difference. That is asserted directly in tests/rigid/rigid_world_tests.cpp
+# rather than left as a claim here.

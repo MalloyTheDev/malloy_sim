@@ -10,6 +10,7 @@
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/math/real.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
+#include <malloy/rigid/rigid_settings.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/springs/springs.hpp>
 
@@ -53,7 +54,7 @@ struct Scenario
 
     // type == Rigid
     std::vector<rigid::RigidBody2D> rigid_bodies;
-    math::Real rigid_restitution{1.0};
+    rigid::RigidSettings rigid_settings{};
 
     // type == Springs
     std::vector<springs::SpringBody2D> spring_bodies;
@@ -96,6 +97,7 @@ struct ScenarioParseResult
 // type rigid:
 //
 //   restitution <value>   bounciness in [0, 1]     (default 1.0)
+//   gravity <gx> <gy>     uniform acceleration     (default 0 0)
 //   rigid_body <mass> <inertia> <radius> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
 //
 //     mass and inertia are about the centre of mass; radius is the collision

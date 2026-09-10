@@ -16,9 +16,11 @@
 # mass times zero velocity would be NaN.
 #
 # On the diagnostics: linear momentum is NOT conserved here, because the wall is
-# immovable and absorbs whatever it likes. Watch KE instead. With restitution
-# 0.85 it falls at every impact, and some of what remains has moved from
-# translation into spin.
+# immovable and absorbs whatever it likes. Watch E instead. Since M15 that
+# column is kinetic PLUS gravitational potential energy, and this scenario sets
+# no gravity, so here it is exactly the kinetic energy it was before. With
+# restitution 0.85 it falls at every impact, and some of what remains has moved
+# from translation into spin.
 
 type rigid
 
@@ -38,7 +40,7 @@ rigid_body 0.70  0.18  0.35   0.20 -0.22   -2.60   1.60  -0.60    2.40  -0.80   
 # rigid_static <radius> <px> <py> <angle>
 rigid_static 1.20   2.60  0.00  0.00
 
-# Expected: KE falls from 7.44e+00 to about 5.12e+00 over the first 2000 steps
+# Expected: E falls from 7.44e+00 to about 5.12e+00 over the first 2000 steps
 # as the three bodies strike the wall and restitution takes its cut, then holds
 # flat once they have all bounced clear and nothing is in contact any more.
 #

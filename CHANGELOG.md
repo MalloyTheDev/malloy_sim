@@ -217,6 +217,130 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M15] - 2026-09-10  (gravity for rigid bodies)
+
+### Added
+
+- A uniform gravity field in `malloy_rigid`, carried in the new `RigidSettings`
+  and applied to every non-static body before the position update, which keeps
+  the integration semi-implicit (symplectic) Euler.
+- `RigidSettings`, holding restitution and gravity with an `is_valid()` that
+  rejects a restitution outside [0, 1] and a non-finite gravity.
+- `total_potential_energy(bodies, gravity)` and `total_energy(bodies, gravity)`
+  in `malloy::rigid`. The diagnostics line now reports kinetic plus potential,
+  so it stays near flat during free fall instead of climbing.
+- `gravity <gx> <gy>` is accepted for `type rigid`, alongside the `type
+  particles` use it was written for in M12.
+- `scenarios/dropped_bodies.scn`.
+- `include/malloy/rigid/rigid_settings.hpp`, so a translation unit that needs
+  only the settings does not have to include the whole world class. This follows
+  the `malloy/particles/particle_settings.hpp` precedent, and `scenario.hpp`
+  now includes the smaller header.
+- A README template-count guard in the scenario tests. The stated count has gone
+  stale twice, so it is now read out of README.md and compared against the
+  directory, and a wrong number fails the suite.
+
+### Changed
+
+- BREAKING, C++ API: `RigidWorld` takes a `RigidSettings` where it took a bare
+  `math::Real restitution`. M14 added restitution positionally and M15 would
+  have added gravity beside it, which is exactly where a transposed pair of
+  reals stops being a compile error and starts being a wrong simulation. The
+  default is unchanged, so `RigidWorld{sim, bodies}` still means restitution 1
+  and no gravity. The `restitution()` accessor is replaced by `settings()`.
+- The rigid diagnostics column is labelled `E` rather than `KE`, because it now
+  reports kinetic plus potential energy. With no gravity the two are identical,
+  so the figures documented in `scenarios/spinning_bodies.scn` and
+  `scenarios/tumbling_impact.scn` are unchanged; the wording in the latter was
+  updated to match the new label.
+- `MALLOY_CHECK_NEAR` and `MALLOY_CHECK_VEC2_NEAR` now FAIL on a NaN. See below.
+
+### Fixed
+
+- `MALLOY_CHECK_NEAR` and `MALLOY_CHECK_VEC2_NEAR` silently passed any NaN.
+  Both compared `std::abs(difference) > epsilon`, and every comparison involving
+  a NaN is false, so a NaN difference took the passing branch. That affected
+  every one of the roughly 370 near-equality assertions in the project at once:
+  a test asserting that some quantity was 0 would pass just as happily if the
+  code under test returned NaN.
+
+  Both macros now use the negated form `!(difference <= epsilon)`, which is true
+  for a NaN and therefore fails. Rebuilding and running all eleven suites with
+  the stricter macro produced no new failures, so nothing in the project was
+  passing only because of the hole; it was a latent hole rather than a live one.
+
+  Two consequences worth knowing. A NaN tolerance is now rejected as well, so a
+  bad epsilon cannot quietly accept every value. And two infinities are no
+  longer "near", because infinity minus infinity is NaN: use `MALLOY_CHECK_EQ`
+  for a value expected to be infinite.
+
+  Found while mutation testing M15, when a mutation that made
+  `total_potential_energy` return NaN for a static body was not caught by an
+  assertion written specifically to catch it.
+
+### Architecture Notes
+
+- Gravity is an acceleration, not a force. It is added to a velocity directly
+  and never divided by a mass, which is why bodies of different mass fall
+  identically. A static body is skipped explicitly: infinity times zero is NaN,
+  and without the skip an immovable wall would accelerate downwards forever
+  while still refusing to be pushed by anything.
+- Rotation under gravity is EMERGENT, not implemented. The field acts through
+  the centre of mass and so generates no torque however long a body falls, but a
+  contact away from the centre of mass does have a moment arm. Dropping a body
+  whose centre of mass is offset from its collision disc makes it rock, and that
+  is M14's contact arm driven by M15's field with no new machinery between them.
+- `malloy_rigid` still has no force or torque accumulators. Gravity is a setting
+  applied in one pass, not a registered force producer.
+- Statics are excluded from potential energy, because infinite mass times a
+  position is not a number.
+
+### What conserves, and what does not
+
+Total energy is NOT conserved under a constant field, and the amount lost is
+exact rather than approximate. Semi-implicit Euler sheds
+`(1/2) * (sum of m) * |g|^2 * dt^2` per free-flight step, the same constant
+derived for the particle domain in M12 because it is the same integrator on the
+same kind of field. `scenarios/dropped_bodies.scn` measures 1.563840e-01 over
+its first 500 steps of free fall against a predicted 1.563837e-01.
+
+Linear and angular momentum are not conserved either, and for a more ordinary
+reason: gravity and an immovable floor are both external to the bodies.
+
+### Tests
+
+- Zero gravity reproduces the pre-M15 trajectory exactly, position and angle, so
+  every scenario written before the setting existed is unaffected.
+- The integrator is checked to be semi-implicit rather than explicit: with
+  g = (0, -10) and dt = 0.5 one step gives velocity -5 and a centre-of-mass
+  displacement of -2.5, not the 0 that explicit Euler would give.
+- Gravity accelerates a 0.5 kg body and a 500 kg body identically, and moves an
+  immovable one not at all.
+- The free-fall energy loss matches the derived constant to 1e-10.
+- Potential energy is measured at the centre of mass, not the body origin, and
+  an offset centre of mass changes it accordingly.
+- A body dropped on a floor lands, stops, and does not sink into it.
+- The emergent case: a body with an offset centre of mass resting on a floor
+  rocks, which it would not do if the centre of mass were at the disc centre.
+- The claim `scenarios/dropped_bodies.scn` is built on is asserted directly:
+  two bodies differing tenfold in mass hold the same height, angle and vertical
+  velocity to 1e-12 across a fall and a bounce. A companion test breaks their
+  shared inertia-to-mass ratio and confirms the agreement then stops, which is
+  what shows the bounce depends on `I/m` rather than on mass.
+- The check macros now have their own tests, in the smoke executable because it
+  links no libraries: ordinary near-equality, NaN on either side, NaN in either
+  Vec2 component, a NaN tolerance, infinities, that a failure is reported and
+  that a pass is silent.
+- Verified by mutation testing. Five mutations to the gravity work were applied
+  and four were caught at once: gravity applied after the position update
+  instead of before, gravity scaled by mass, the static skip removed, and the
+  sign of the potential energy flipped. The fifth, dropping the static skip from
+  `total_potential_energy`, escaped, and chasing it found the NaN hole in the
+  check macros recorded above. With the macros fixed it is caught. The fixed
+  macros were themselves mutated back to the old comparison, which the new
+  smoke tests catch, and the README count guard was mutated to a wrong count,
+  which the scenario tests catch.
+
 ## [M14] - 2026-09-10  (rigid-body contact response)
 
 ### Added

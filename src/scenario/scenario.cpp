@@ -188,14 +188,16 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             else
             {
-                scenario.rigid_restitution = value;
+                scenario.rigid_settings.restitution = value;
             }
         }
         else if (key == "gravity")
         {
-            if (scenario.type != ScenarioType::Particles)
+            if (scenario.type != ScenarioType::Particles &&
+                scenario.type != ScenarioType::Rigid)
             {
-                return make_error(line_number, "gravity belongs to type particles");
+                return make_error(line_number,
+                                  "gravity belongs to type particles or rigid");
             }
             saw_domain_key = true;
             math::Real gx{};
@@ -204,7 +206,14 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "gravity requires: gx gy");
             }
-            scenario.particle_settings.gravity = math::Vec2{gx, gy};
+            if (scenario.type == ScenarioType::Particles)
+            {
+                scenario.particle_settings.gravity = math::Vec2{gx, gy};
+            }
+            else
+            {
+                scenario.rigid_settings.gravity = math::Vec2{gx, gy};
+            }
         }
         else if (key == "bounds")
         {

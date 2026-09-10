@@ -13,7 +13,8 @@ project.
 
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
-bodies, spring networks and rigid-body contact response (milestones M1-M14).
+bodies, spring networks, rigid-body contact response and gravity for rigid
+bodies (milestones M1-M15).
 
 ## Locked baseline
 
@@ -49,7 +50,7 @@ alongside an ASCII view of the bodies.
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | `Circle`, `Aabb`, overlap tests, contact normal/depth/point |
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
-| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response |
+| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
@@ -71,8 +72,9 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. Seven templates ship across four domains, and every
-one is parsed, validated and stepped by the test suite.
+and runnable with the shipped binary. 8 templates ship across four domains,
+and every one is parsed, validated and stepped by the test suite. That count
+is checked against the directory by the scenario tests, so it cannot go stale.
 
 A scenario names its domain with a `type` key, dispatched by a plain switch to
 one concrete world per domain. There is no simulation base class:
@@ -90,8 +92,8 @@ particle 1.0  0.30  -2.0 -2.0   1.30 0.90
 keep working unchanged.
 
 The classical mechanics track is complete: collision geometry, colliding
-particles, rigid bodies, ballistics, spring networks and rigid-body contact
-response have all shipped. Work is gated one milestone at a time; see
+particles, rigid bodies, ballistics, spring networks, rigid-body contact
+response and gravity for rigid bodies have all shipped. Work is gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 
 ## Build
@@ -223,6 +225,7 @@ built-in scenarios shown above.
 | M12 | ballistics: uniform gravity in the particle domain | ✅ Done |
 | M13 | `malloy_springs`: spring networks + force accumulation | ✅ Done |
 | M14 | rigid-body contact response: statics, torque from impacts | ✅ Done |
+| M15 | gravity for rigid bodies: uniform field, potential energy | ✅ Done |
 
 ## Out of scope (gated)
 

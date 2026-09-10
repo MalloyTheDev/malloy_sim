@@ -28,6 +28,7 @@ M11 - 2D rigid body basics              [done]
 M12 - ballistics/projectiles            [done]
 M13 - springs and oscillators           [done]
 M14 - rigid-body contact response       [done]
+M15 - gravity for rigid bodies          [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -48,6 +49,14 @@ mean immovable, which is the representation M11 deliberately deferred on the
 grounds that nothing needed statics until contact response did (ADR 0007).
 Contacts are disc against disc: oriented boxes and SAT would be their own
 milestone.
+
+M15 added a uniform gravity field to the rigid domain, applied before the
+position update so the integration stays semi-implicit Euler. It is an
+acceleration rather than a force, so it does not scale with mass and static
+bodies are skipped explicitly. Rotation under gravity is emergent: the field
+acts through the centre of mass and generates no torque on its own, but a
+contact away from the centre of mass does, so bodies rock and tumble without
+any new machinery. `malloy_rigid` still has no force or torque accumulators.
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
 `ParticleWorld`, because a spring network is interaction topology rather than

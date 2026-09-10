@@ -7,6 +7,7 @@
 
 #include <malloy/math/vec2.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
+#include <malloy/rigid/rigid_settings.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/time/fixed_step.hpp>
 
@@ -29,21 +30,20 @@ class RigidWorld
 {
 public:
     RigidWorld(sim_core::SimulationSettings simulation_settings,
-               std::vector<RigidBody2D> bodies, math::Real restitution = 1.0);
+               std::vector<RigidBody2D> bodies, RigidSettings settings = {});
 
-    // Bounciness of every contact. 1 is perfectly elastic and conserves kinetic
-    // energy; 0 is perfectly inelastic, so the pair stops separating along the
-    // contact normal. Set at construction and fixed for the world.
-    math::Real restitution() const { return restitution_; }
+    const RigidSettings& settings() const { return settings_; }
 
-    // Ok, or InvalidSettings (dt or restitution) / InvalidState (a body).
+    // Ok, or InvalidSettings (dt, restitution, gravity) / InvalidState (a body).
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step:
     //
-    //   1. move the centre of mass by velocity * dt;
-    //   2. advance the angle by angular_velocity * dt;
-    //   3. resolve contacts in ascending pair order.
+    //   1. add gravity * dt to every non-static velocity;
+    //   2. move the centre of mass by the UPDATED velocity * dt, which keeps
+    //      the integration semi-implicit (symplectic) Euler;
+    //   3. advance the angle by angular_velocity * dt;
+    //   4. resolve contacts in ascending pair order.
     //
     // The body origin follows from the centre of mass and the new angle, so a
     // body whose origin is offset from its centre of mass orbits correctly
@@ -81,7 +81,7 @@ public:
 
 private:
     sim_core::SimulationSettings simulation_settings_;
-    math::Real restitution_{1.0};
+    RigidSettings settings_;
     std::vector<RigidBody2D> bodies_;
     std::vector<RigidBody2D> previous_;
     std::optional<time::FixedStep> step_;
@@ -114,4 +114,20 @@ math::Vec2 total_linear_momentum(const std::vector<RigidBody2D>& bodies);
 math::Real total_angular_momentum(const std::vector<RigidBody2D>& bodies);
 
 math::Real total_kinetic_energy(const std::vector<RigidBody2D>& bodies);
+
+// Gravitational potential energy in the uniform field: the sum of -m (g . r),
+// with r the centre of mass. Zero when gravity is zero. Static bodies are
+// skipped, since infinite mass times a position is not a number.
+math::Real total_potential_energy(const std::vector<RigidBody2D>& bodies,
+                                  const math::Vec2& gravity);
+
+// Kinetic plus potential.
+//
+// NOT conserved under a constant field. Semi-implicit Euler loses exactly
+// (1/2) * (sum of m) * |g|^2 * dt^2 per free-flight step, the same constant
+// secular drift derived for the particle domain in M12, because it is the same
+// integrator on the same kind of field. Contacts remove more on top of that
+// whenever restitution is below 1.
+math::Real total_energy(const std::vector<RigidBody2D>& bodies,
+                        const math::Vec2& gravity);
 } // namespace malloy::rigid
