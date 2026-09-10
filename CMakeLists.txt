@@ -95,6 +95,7 @@ target_include_directories(malloy_scenario PUBLIC include)
 target_link_libraries(malloy_scenario
     PUBLIC
         malloy::charges
+        malloy::collide
         malloy::nbody
         malloy::particles
         malloy::rigid
@@ -440,6 +441,32 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_charges_tests COMMAND malloy_charges_tests)
+
+    # Issue #13: the module graph is enforced at link time and nowhere else,
+    # because every module puts the whole include/ tree on its consumers'
+    # search path. This target reads the build files and the sources and checks
+    # they agree, so it needs the repository root.
+    add_executable(malloy_layering_tests
+        tests/layering/layering_tests.cpp
+    )
+
+    target_include_directories(malloy_layering_tests
+        PRIVATE
+            tests
+    )
+
+    target_compile_definitions(malloy_layering_tests
+        PRIVATE
+            MALLOY_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    target_link_libraries(malloy_layering_tests
+        PRIVATE
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_layering_tests COMMAND malloy_layering_tests)
 
     # The number of test executables is stated in README.md and
     # docs/00_START_HERE.md, and such counts go stale. This is the only

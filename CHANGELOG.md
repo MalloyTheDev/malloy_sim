@@ -7,6 +7,43 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Added
 
+- Issue #13: a layering test, `malloy_layering_tests`, which checks the module
+  graph against the build files and the sources.
+
+  The graph was enforced at LINK time and nowhere else. Every module declares
+  `target_include_directories(<mod> PUBLIC include)`, so the whole include tree
+  is on every consumer's search path, and a module can include another's header
+  without linking it. The build succeeds, and the rule it breaks is the one the
+  architecture rests on: domains share only `malloy::math` and the sim_core
+  vocabulary, and no domain knows that any other exists (ADR 0006).
+
+  Three things are checked. Every `#include <malloy/X/...>` must be covered by
+  a declared link, which is the check the link step cannot make. No physics
+  domain may link or include another, stated directly rather than inferred, so
+  adding the link would not make it legal. And `malloy_sim_core` may depend on
+  `malloy::math` and nothing else, which is CLAUDE.md rule 13 written down as a
+  test.
+
+  The declared graph is parsed out of CMakeLists.txt rather than kept in a
+  table here, so the two cannot drift. Both spellings of
+  `target_link_libraries` are handled, since INTERFACE targets put it on one
+  line and STATIC ones spread it over several.
+
+  Verified by mutation: a domain including another domain's header, a domain
+  declaring a link on another domain, and `sim_core` growing a dependency are
+  all caught, each with a message naming the file and the rule.
+
+### Fixed
+
+- `malloy_scenario` used `collide::Halfplane` and `collide::Aabb` without
+  declaring `malloy::collide`, found by the test above on its first run. It
+  linked only because collide arrives transitively through particles and rigid,
+  so the day either of those stopped depending on it, scenario would have
+  broken with an error pointing somewhere else entirely.
+
+
+### Added
+
 - Issue #14: scenario templates now carry machine-checkable assertions, and the
   scenario tests evaluate them against a real run.
 

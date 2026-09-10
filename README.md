@@ -44,7 +44,7 @@ bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
 response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
 **M17: friction**, **M18: charged particles**). The
 project builds clean under
-MSVC (`/W4 /permissive-`), and all 12 test executables pass via CTest. The
+MSVC (`/W4 /permissive-`), and all 13 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
 
