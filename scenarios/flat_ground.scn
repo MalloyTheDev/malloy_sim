@@ -3,13 +3,16 @@
 # This is what M16 adds. Every contact in this project was disc against disc,
 # so a floor had to be built out of overlapping discs. scenarios/dropped_bodies.scn
 # still does exactly that, and documents the result as a surface scalloped by
-# about 0.05.
+# about 0.05. That 0.05 is the ripple of the FLOOR's own surface; the height
+# ripple a radius-0.4 body's centre actually rides is 0.0318, and the two go
+# with different normal tilts. See dropped_bodies.scn.
 #
 # That height ripple is the wrong number to worry about. What matters is the
 # contact NORMAL, which on a disc floor points at whichever disc centre is
-# nearest and therefore SWINGS as a body moves along it: by up to 14 degrees
-# for the floor in dropped_bodies.scn. A body sliding across it gets steered
-# and spun by a surface that is supposed to be flat.
+# nearest and therefore SWINGS as a body moves along it: by up to 14.48 degrees
+# for the radius-0.4 bodies in dropped_bodies.scn, and 15.26 degrees for the
+# radius-0.35 one. A body sliding across it gets steered and spun by a surface
+# that is supposed to be flat.
 #
 # A halfplane has one normal, everywhere, forever. The contact against it is
 # also the only pair in malloy_collide with no degenerate case: the plane
@@ -74,8 +77,12 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 #    direction is (0.8, -0.6), so the HORIZONTAL acceleration is
 #    9.81 * 0.6 * 0.8 = 4.7088. Only the ramp body has horizontal motion while
 #    the other is still falling, and its mass is 1, so the p column is its
-#    velocity directly: (4.71002080 - 2.35562080) / 0.5 = 4.7088, agreeing with
-#    the prediction to 9e-16. That number is the milestone: on a floor built
+#    velocity directly: (4.71002080 - 2.35562080) / 0.5 = 4.7088, matching the
+#    prediction to the full 9 significant figures the column prints, which is
+#    about 1e-8 relative. (Doing the same subtraction in double precision on
+#    the unrounded values gives 8.9e-15 relative, roughly 10 ulp. The printed
+#    digits cannot support a tighter claim than 1e-8.) That number is the
+#    milestone: on a floor built
 #    from discs there is no constant incline angle to predict it from.
 #
 # 3. Momentum is EXACTLY unchanged across steps 3000, 3500 and 4000, to every
@@ -93,7 +100,11 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 # reaches the floor and strikes the other one, and restitution 0.35 takes its
 # cut at every bounce. E is not conserved here and is not meant to be: the
 # planes are immovable, so they are external to the system, and the final
-# change at step 4500 is the wall.
+# change at step 4500 is the RAMP, not the wall. Across that event the m=1.5
+# body accelerates at (+4.7088, -3.5316), which is the frictionless-ramp
+# signature derived in point 2 above, and its p_x RISES, which the wall's
+# normal of (-1, 0) could never do. The wall does act, earlier, between the
+# printed reports at steps 1000 and 3000.
 #
 # The planes themselves do not appear in the ASCII view, which plots bodies.
 # The view is better for it: it fits the bodies, where a floor built from discs

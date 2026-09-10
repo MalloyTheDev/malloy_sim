@@ -61,20 +61,27 @@ rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.
 # Expected, from a real run of the shipped binary:
 #
 #   step      0   E   1.23930000e+02   L  -8.50000000e+00   p   2.00000000e+01
-#   step   1500   E   6.62038366e+01   L  -8.50000632e+00   p   1.48497598e+01
-#   step   3000   E   5.69299886e+01   L  -8.50001063e+00   p   1.13333568e+01
-#   step   4500   E   5.69299886e+01   L  -8.50001063e+00   p   1.13333568e+01
-#   step   6000   E   5.69299886e+01   L  -8.50001063e+00   p   1.13333568e+01
+#   step   1500   E   6.62039426e+01   L  -8.49999368e+00   p   1.48497402e+01
+#   step   3000   E   5.69300114e+01   L  -8.49998937e+00   p   1.13333099e+01
+#   step   4500   E   5.69300114e+01   L  -8.49998937e+00   p   1.13333099e+01
+#   step   6000   E   5.69300114e+01   L  -8.49998937e+00   p   1.13333099e+01
 #
 # Four things there are derivable rather than merely observed.
 #
 # 1. The final momentum is the three closed-form speeds, summed. With all three
 #    masses at 2, p = 2 * (2.6667 - 0.3333 + 3.3333) = 11.33333, against a
-#    measured 11.3333568. The residual is about 2e-6 relative and it has a
-#    cause: the contact POINT is reported midway through the overlap, so the
-#    arm is R - depth/2 rather than R, and the invariant above assumes R. In
-#    steady contact depth is about g*dt^2, which predicts exactly the size of
-#    the gap seen here.
+#    measured 11.3333099.
+#
+#    The residual is about 2e-6 relative, and it is derivable rather than
+#    noise. The contact POINT is reported midway through the overlap, so the
+#    lever arm is R - depth/2 while the invariant above assumes R. Feeding
+#    a = R - depth/2 back through the same algebra predicts 11.3333099, which
+#    is what the run prints, to every digit it prints.
+#
+#    In steady contact the penetration is g*dt^2/(1 + restitution), which is
+#    g*dt^2 here only because restitution is 0. Two other templates confirm the
+#    (1+e) factor independently: flat_ground's frozen p_y is exactly
+#    sum(m)*e*g*dt/(1+e), and so is projectile_arc's.
 #
 # 2. Nothing changes at all after step 3000. E, L and p are identical to every
 #    printed digit at steps 3000, 4500 and 6000. That is the physical
@@ -91,12 +98,24 @@ rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.
 #        disc 2:  0.25*18  + 2*(-0.5*4) = +0.5
 #        disc 3:  0.25*-12 + 2*(-0.5*2) = -5.0
 #
-# 4. L barely moves across the whole run, by about 1e-5, and that is not luck.
-#    Every contact here lies on the line y = 0, which passes through the world
-#    origin, and every friction impulse is horizontal, so a friction impulse
-#    exerts no torque about the origin at all. The tiny drift left is the
-#    normal impulses and gravity, whose torques about the origin nearly cancel
-#    in steady contact.
+# 4. L moves by about 1e-5 across the whole run, and FRICTION is the cause,
+#    not a residue left over from anything else.
+#
+#    The contact point is not on the line y = 0. It sits half a penetration
+#    away from it, because the overlap midpoint is where the contact is
+#    reported. A horizontal impulse applied half a penetration off the origin
+#    line does exert a torque about the origin, and summing it over the run
+#    gives (depth/2) * (p - p0), which is 1.226e-6 * -8.667 = 1.063e-5. That
+#    is the number in the table.
+#
+#    Gravity, the positional push-out and the normal impulse cancel EXACTLY in
+#    steady contact rather than nearly: per step they contribute
+#    -m*g*x_n*dt, -m*g*v*dt^2 and +m*g*x_(n+1)*dt, and x_(n+1) = x_n + v*dt
+#    makes the three sum to zero.
+#
+#    The clinching evidence is in the table above: after step 3000 friction
+#    switches off and L becomes bit-constant for 3000 further steps. A residue
+#    from gravity versus normal impulses would have kept accumulating.
 #
 # The big fall in E over the first 3000 steps is the slipping phase, and it is
 # the only place energy goes anywhere. Sliding dissipates; rolling does not.

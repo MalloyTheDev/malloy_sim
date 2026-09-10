@@ -50,6 +50,18 @@ math::Real cross(const math::Vec2& a, const math::Vec2& b)
 //
 // Immovable bodies fall out for free: their inverse mass and inverse inertia
 // are zero, so they contribute nothing to k and receive nothing from j.
+// Velocity of the material point at a given ARM from the centre of mass.
+//
+// velocity_at() takes a world point and subtracts the body's CURRENT centre of
+// mass, so calling it before and after the positional correction silently
+// measures two different arms. Inside a contact the arm is fixed once, up
+// front, and every use goes through here.
+math::Vec2 velocity_at_arm(const RigidBody2D& body, const math::Vec2& arm)
+{
+    const math::Real w = body.angular_velocity;
+    return body.velocity + math::Vec2{-w * arm.y, w * arm.x};
+}
+
 // Applies one already-resolved contact. Split out of resolve_contact because
 // it has a second caller: a body against a ground plane, where the plane stands
 // in as a body of infinite mass and inertia. Writing the impulse formula twice
@@ -65,8 +77,30 @@ void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& conta
     const math::Real inverse_inertia_a = a.inverse_inertia();
     const math::Real inverse_inertia_b = b.inverse_inertia();
 
+    // Arms from each centre of mass to the contact point, not from the origins.
+    //
+    // Measured BEFORE the positional correction below, which is the whole point
+    // of the ordering. `hit->point` was computed from the pre-correction
+    // positions, so pairing it with a post-correction centre of mass mixes two
+    // frames: the correction lifts the centre by the full penetration while the
+    // point stays where it was, and the lever arm comes out as R + depth/2
+    // instead of the R - depth/2 the contact actually describes. That is the
+    // one of the three possible answers that errs outward, and it was an
+    // accident of statement order rather than a choice.
+    const math::Vec2 arm_a = hit->point - center_of_mass(a);
+    const math::Vec2 arm_b = hit->point - center_of_mass(b);
+
+    // Relative velocity AT THE CONTACT POINT, which is what a rigid contact
+    // responds to: the centre-of-mass velocities plus each body's omega x r.
+    // Same frame, for the same reason.
+    const math::Vec2 relative = velocity_at_arm(b, arm_b) - velocity_at_arm(a, arm_a);
+
     // Separate the overlap in inverse-mass proportion. Positions only, so no
     // momentum changes and an immovable body does not move at all.
+    //
+    // Still before the impulse, so a pair that is overlapping but already
+    // separating is pushed apart even though the early return below skips its
+    // impulse.
     const math::Real inverse_sum = inverse_mass_a + inverse_mass_b;
     if (hit->penetration > math::Real{0} && inverse_sum > math::Real{0})
     {
@@ -74,14 +108,6 @@ void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& conta
         a.position -= correction * inverse_mass_a;
         b.position += correction * inverse_mass_b;
     }
-
-    // Arms from each centre of mass to the contact point, not from the origins.
-    const math::Vec2 arm_a = hit->point - center_of_mass(a);
-    const math::Vec2 arm_b = hit->point - center_of_mass(b);
-
-    // Relative velocity AT THE CONTACT POINT, which is what a rigid contact
-    // responds to: the centre-of-mass velocities plus each body's omega x r.
-    const math::Vec2 relative = velocity_at(b, hit->point) - velocity_at(a, hit->point);
     const math::Real closing = math::dot(relative, hit->normal);
     if (closing >= math::Real{0})
     {
@@ -115,8 +141,7 @@ void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& conta
     // Recomputed AFTER the normal impulse, because friction resists what is
     // left rather than what arrived. The ordering is observable and is fixed in
     // the step contract in rigid_world.hpp.
-    const math::Vec2 remaining =
-        velocity_at(b, hit->point) - velocity_at(a, hit->point);
+    const math::Vec2 remaining = velocity_at_arm(b, arm_b) - velocity_at_arm(a, arm_a);
     const math::Vec2 sideways =
         remaining - hit->normal * math::dot(remaining, hit->normal);
     const math::Real sliding = math::length(sideways);

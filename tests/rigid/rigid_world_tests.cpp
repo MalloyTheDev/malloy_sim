@@ -640,12 +640,18 @@ int main()
         // dt of zero would be invalid, so take the impulse on the first step
         // with a tiny dt. Integration still introduces about 2e-9 of
         // penetration, so the correction still fires and still perturbs the
-        // angular momentum, just proportionally less.
+        // angular momentum, just far less.
         //
-        // That proportionality is the evidence. The long run above drifts by
-        // about 5e-4 with ordinary penetrations; here, with penetration nine
-        // orders smaller, the drift is around 5e-9. The correction is the
-        // cause, and the impulse is exact.
+        // The measured figures are +5.02583e-04 for the long run above and
+        // -1.20527e-09 here, a factor of 4.2e5.
+        //
+        // Do not read that ratio as the penetration ratio alone. The
+        // perturbation is c x (v_b - v_a), so it scales with the RELATIVE
+        // VELOCITY as well as with the correction, and these two setups differ
+        // in both. Proportionality to penetration is established by holding a
+        // setup fixed and varying dt, not by comparing these two numbers.
+        //
+        // The correction is the cause, and the impulse is exact.
         RigidWorld w{SimulationSettings{1e-9}, start, RigidSettings{1.0}};
         MALLOY_CHECK_TRUE(w.step().ok());
         MALLOY_CHECK_VEC2_NEAR(total_linear_momentum(w.bodies()), p0, 1e-12);
@@ -1558,15 +1564,31 @@ int main()
 
             // Rolling without slipping: the contact point is not moving. The
             // bound is not zero, and the residual is derivable rather than
-            // tuned. In steady contact the body sinks about g*dt^2 per step
-            // before the correction, and the contact POINT is reported midway
-            // through that overlap, so the arm is R - depth/2 instead of R and
-            // rolling is established about a point just inside the surface.
-            // That predicts v * (depth/2) / R, which for the first run is
-            // 2.0 * (9.81 * 0.0005^2 / 2) / 0.5 = 4.905e-6, and the measured
-            // residual is 4.905e-6. The other two runs are smaller still.
+            // tuned. In steady contact the body sinks by g*dt^2/(1 + e) per
+            // step before the correction, which is g*dt^2 here because e is 0,
+            // and the contact POINT is reported midway through that overlap.
+            // The lever arm is therefore R - depth/2 rather than R, so rolling
+            // is established about a point just inside the surface and the
+            // contact creeps BACKWARD by v * (depth/2) / R.
+            //
+            // For the first run that is
+            // -2.0 * (9.81 * 0.0005^2 / 2) / 0.5 = -4.905e-6, and the measured
+            // residual is -4.905e-6. The sign matters and was once recorded
+            // backwards: the assertion below is a magnitude bound, so it
+            // cannot catch a sign error on its own.
+            //
+            // The second run has the SAME residual, not a smaller one, because
+            // the penetration is set by gravity, dt and restitution and never
+            // by the friction coefficient. Only the third run, at g = 4.0,
+            // is smaller, at -2.0e-6.
+            // Derived from this run's own gravity rather than hard coded, and
+            // SIGNED. A magnitude bound cannot tell R - depth/2 from
+            // R + depth/2, which is exactly how the sign came to be recorded
+            // backwards in the first place: both give the same 4.905e-6.
+            const Real depth = run.gravity * 0.0005 * 0.0005;
+            const Real expected_creep = -now.velocity.x * (depth / 2.0) / radius;
             const Vec2 contact{now.position.x, 0.0};
-            MALLOY_CHECK_NEAR(velocity_at(now, contact).x, 0.0, 1e-5);
+            MALLOY_CHECK_NEAR(velocity_at(now, contact).x, expected_creep, 1e-9);
             // Which for this geometry means omega = -v/R, to the same bound
             // divided by R.
             MALLOY_CHECK_NEAR(now.angular_velocity, -now.velocity.x / radius, 2e-5);

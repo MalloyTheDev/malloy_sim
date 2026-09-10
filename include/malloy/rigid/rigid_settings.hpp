@@ -45,7 +45,7 @@ struct RigidSettings
     // Immovable ground planes: floors, walls, ramps. Each resolves exactly as a
     // body of infinite mass and inertia would, with one difference that is the
     // whole reason the primitive exists. A floor built from discs has a contact
-    // normal that TURNS as a body rolls across it, by as much as 14 degrees for
+    // normal that TURNS as a body rolls across it, by as much as 14.48 degrees for
     // the floor in dropped_bodies.scn, because the normal points at whichever
     // disc centre is nearest. A plane's normal is its own and never turns.
     //

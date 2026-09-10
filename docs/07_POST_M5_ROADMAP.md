@@ -62,7 +62,7 @@ any new machinery. `malloy_rigid` still has no force or torque accumulators.
 
 M16 added `collide::Halfplane` and ground planes in `RigidSettings`. Before it,
 a floor had to be built from overlapping discs, whose contact normal swings by
-up to 14 degrees as a body moves along it, because it points at whichever disc
+up to 14.48 degrees as a body moves along it, because it points at whichever disc
 centre is nearest. A plane's normal never turns. It is also the only pair in
 `malloy_collide` with no degenerate case, since the plane supplies the direction
 instead of it being inferred from two centres.

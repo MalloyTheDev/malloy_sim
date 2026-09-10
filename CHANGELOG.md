@@ -5,6 +5,97 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A statement-ordering bug in `apply_contact` made every contact lever arm
+  `R + depth/2` instead of `R - depth/2`. The positional correction lifted the
+  centre of mass by the full penetration, and only then was the arm measured
+  against a `hit->point` still holding its pre-correction value, so the two
+  quantities came from different frames. Of the three consistent answers, that
+  is the one that errs outward, and nobody chose it.
+
+  All contact arithmetic now takes one arm, fixed before the correction, in the
+  frame the contact data actually describes. A new `velocity_at_arm` helper
+  takes the arm directly, because `velocity_at` re-derives it from the body's
+  CURRENT centre of mass and so silently measured two different arms depending
+  on where it was called. The friction tangent was the third site and was still
+  reading the post-correction frame after the first two were fixed.
+
+  The normal impulse is provably unaffected: the arm changed purely along the
+  normal, and `cross(k*n, n)` is zero, so `cross(arm, normal)` is identical
+  either way. Confirmed by measurement, and it is why exactly one of the ten
+  templates moved. `scenarios/rolling_and_slipping.scn` is the only one with
+  friction, and its figures are updated.
+
+  The correction lands on the derived value: with `a = R - depth/2` the closed
+  form predicts a final momentum of 11.333309898 and a final energy of
+  56.93001145, and the binary now prints `1.13333099e+01` and `5.69300114e+01`,
+  which is exact at the nine significant figures it reports.
+
+- Three explanations that were wrong while their numbers were right, all in
+  work shipped in M16 and M17, and all found by independently re-deriving the
+  physics rather than by re-reading the code:
+
+  - The M17 lever arm above. The documented `R - depth/2` predicted a residual
+    of the correct MAGNITUDE and the wrong SIGN, and the assertion guarding it
+    was a magnitude bound, so nothing could catch the discrepancy. That
+    assertion now derives a signed expectation from the run's own gravity and
+    holds to 1e-9, and reverting the ordering fix is caught by it.
+  - `scenarios/rolling_and_slipping.scn` claimed friction exerts no torque
+    about the world origin and blamed the observed angular-momentum drift on
+    gravity and the normal impulses "nearly" cancelling. Backwards on both
+    counts. The contact point sits half a penetration off the origin line, so
+    friction is the only net torque, and it accounts for the drift as
+    `(depth/2) * (p - p0)`. Gravity, the push-out and the normal impulse cancel
+    EXACTLY rather than nearly. The file's own table was the disproof all
+    along: L goes bit-constant the moment friction switches off at step 3000,
+    which a residue from gravity could not do.
+  - `scenarios/flat_ground.scn` attributed its final energy change to the wall.
+    It is the ramp: across that event the body accelerates at
+    `(+4.7088, -3.5316)`, the frictionless-ramp signature the same file derives
+    two points earlier, and its horizontal momentum RISES, which a wall normal
+    of `(-1, 0)` cannot do.
+
+- Two numbers offered as evidence in the M14 angular-momentum test were wrong.
+  The short-run drift is `-1.20527e-09`, not "around 5e-9", and the two
+  penetrations differ by 5.9 orders, not nine. The comment also contradicted
+  itself: 5e-4 reduced by nine orders is 5e-13, and back-solving its own
+  figures implied a penetration of 2.0 between discs of radius 0.5. Both
+  measured values are now quoted, along with the reason the ratio is not the
+  penetration ratio alone: the perturbation is `c x (v_b - v_a)`, so it scales
+  with the relative velocity too.
+
+- Two overstated precision claims. `flat_ground.scn` claimed agreement "to
+  9e-16" from values printed to nine significant figures, which can only
+  support about 1e-8; the true double-precision figure is 8.9e-15.
+  `dropped_bodies.scn` presented `1.563837e-01 against a measured 1.563840e-01`
+  as a discrepancy, when the print resolution on those values is about 5e-7 and
+  the prediction sits inside it. There was nothing to explain.
+
+- The scalloped-floor numbers described two different surfaces. The 0.0546
+  ripple belongs to the floor's own surface and goes with a normal tilt of
+  24.62 degrees; a radius-0.4 body rides a locus that ripples by 0.0318, and
+  that is the one whose normal swings by 14.48 degrees. No body ever rides a
+  0.0546 ripple. The judgement that the normal swing is the number that matters
+  was right; the two figures quoted beside it were not a matched pair.
+
+### Changed
+
+- Two N-body assertions were far looser than the errors they measure, and one
+  could not fail at all.
+
+  Angular momentum is EXACT for this integrator, to all orders in dt: for
+  pairwise central forces the (i,j) and (j,i) torque contributions cancel
+  identically, and softening changes only the magnitude. The only possible
+  error is rounding, measured at 1.8e-15 on a quantity of order 2.3, about
+  8 ulp. It was asserted at 0.02, roughly 1e13 times too loose, which would
+  have passed for an integrator that was not symplectic at all. Now 1e-12.
+
+  Energy oscillates about the shadow Hamiltonian with bounded amplitude rather
+  than drifting; measured at 7.42e-08 and asserted at 0.02. Now 1e-6.
+
+
+
 ### Added
 
 - `docs/decisions/0009-three-dimensions-are-the-destination.md`. Every mention
@@ -440,7 +531,7 @@ All notable changes to MalloySim are recorded here. The format follows
   arrangement drifts.
 - This milestone depends on M16. The invariant below assumes a contact arm of
   constant length R, which a floor built from overlapping discs does not
-  provide: its normal swings by up to 14 degrees, so there is no constant arm
+  provide: its normal swings by up to 14.48 degrees, so there is no constant arm
   and the closed-form result does not hold.
 
 ### What conserves, and what does not
@@ -470,10 +561,16 @@ to step 6000.
 The result is not exact in the code, and the residual is derived rather than
 tuned. The contact POINT is reported midway through the overlap, so the arm is
 `R - depth/2` rather than `R` while the invariant assumes `R`. In steady contact
-the penetration is about `g*dt^2`, which predicts a rolling residual of
-`v * (depth/2) / R`. For the headline test that is
-`2.0 * (9.81 * 0.0005^2 / 2) / 0.5 = 4.905e-6`, and the measured residual is
-4.905e-6.
+the penetration is `g*dt^2/(1 + restitution)`, which predicts a rolling residual
+of `-v * (depth/2) / R`. For the headline test that is
+`-2.0 * (9.81 * 0.0005^2 / 2) / 0.5 = -4.905e-6`.
+
+NOTE, added later: as shipped in M17 the code did NOT do this. A statement
+ordering bug made the effective arm `R + depth/2`, so the residual was
+`+4.905e-6` and this paragraph described a behaviour the code did not have. The
+magnitude was right, which is why nothing caught it: the assertion was a
+magnitude bound. Both the code and the claim are corrected in the Unreleased
+section above.
 
 Kinetic energy is strictly non-increasing across every contact, at every
 coefficient, which is asserted at every step of a long run rather than at the
@@ -556,9 +653,12 @@ exists to prevent. Named here and deferred rather than left to drift in.
 
 - The reason this exists is the contact NORMAL, not the surface height. A floor
   built from overlapping discs has a normal that points at whichever disc centre
-  is nearest, so it SWINGS as a body moves along it: up to 14 degrees for the
-  floor in `scenarios/dropped_bodies.scn`, which documents its height ripple as
-  about 0.05 and thereby understates the problem considerably. Getting that
+  is nearest, so it SWINGS as a body moves along it: up to 14.48 degrees for
+  the radius-0.4 bodies in `scenarios/dropped_bodies.scn`, which documents its
+  height ripple as about 0.05 and thereby understates the problem considerably.
+  (That 0.05 is the FLOOR's own surface ripple. The locus a radius-0.4 body's
+  centre actually rides ripples by 0.0318. The two were quoted together as
+  though they described one surface, which is corrected in Unreleased above.) Getting that
   under one degree with discs needs roughly 160 of them. A plane has one normal
   everywhere.
 - Circle against halfplane is the only pair in `malloy_collide` with NO

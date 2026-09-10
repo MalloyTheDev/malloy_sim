@@ -225,8 +225,24 @@ int main()
         }
 
         MALLOY_CHECK_VEC2_NEAR(total_momentum(world.bodies()), momentum0, 1e-9);
-        MALLOY_CHECK_NEAR(total_energy(world.bodies(), 1.0, 0.001), energy0, 0.02);
-        MALLOY_CHECK_NEAR(total_angular_momentum(world.bodies()), angular0, 0.02);
+
+        // These two were both asserted at 0.02, which is far looser than the
+        // errors they are measuring and left them unable to fail.
+        //
+        // Energy is not conserved by this integrator, but it does not drift
+        // secularly either: it oscillates about the shadow Hamiltonian with a
+        // bounded amplitude. Measured here: 7.42e-08.
+        MALLOY_CHECK_NEAR(total_energy(world.bodies(), 1.0, 0.001), energy0, 1e-6);
+
+        // Angular momentum is EXACT for this integrator, to all orders in dt,
+        // and not merely accurate. For pairwise central forces the (i,j) and
+        // (j,i) torque contributions are x_i x x_j and x_j x x_i, which cancel
+        // identically; softening does not break that because it changes only
+        // the magnitude. So the only error possible is floating-point rounding,
+        // and the measured value is 1.8e-15 on a quantity of order 2.3, about
+        // 8 ulp. At the old 0.02 the integrator could have been replaced with
+        // one that is not symplectic at all and this would still have passed.
+        MALLOY_CHECK_NEAR(total_angular_momentum(world.bodies()), angular0, 1e-12);
     }
 
     // --- Issue #2: coincident bodies with softening == 0 stay finite. The

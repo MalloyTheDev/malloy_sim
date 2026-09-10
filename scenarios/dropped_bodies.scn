@@ -26,10 +26,18 @@
 #    M14's arm being driven by M15's field; neither part does it alone.
 #
 # On the floor: contacts in this project are disc against disc, so a flat floor
-# has to be built out of overlapping discs. The surface is scalloped rather than
-# flat, by about 0.05 between disc tops, and a body sliding along it hops. That
-# is a real limitation of disc-only collision, not a modelling choice, and
-# oriented boxes with SAT would be their own milestone.
+# has to be built out of overlapping discs. The floor's own surface is scalloped
+# by 0.0546 between disc tops, and a body sliding along it hops.
+#
+# Two different heights are easy to conflate here. A body does not ride the
+# floor's surface, it rides the locus of its own centre, one body radius out.
+# For the radius-0.4 bodies that locus ripples by 0.0318, not 0.0546. What
+# matters for a rolling or sliding body is neither: it is the CONTACT NORMAL,
+# which swings by 14.48 degrees for those bodies and 15.26 degrees for the
+# radius-0.35 one, because it points at whichever disc centre is nearest.
+#
+# That is a real limitation of disc-only collision, not a modelling choice. M16
+# added halfplanes, which have one normal everywhere; see flat_ground.scn.
 #
 # On the diagnostics: E is now kinetic PLUS gravitational potential, so it stays
 # near flat during free fall instead of climbing as the bodies speed up. Linear
@@ -86,9 +94,15 @@ rigid_static 0.60   4.00 -1.20  0.00
 # Everything is still falling at step 500, and E has moved by only 1.5638e-01,
 # or 0.075 per cent. That figure is not approximate. Semi-implicit Euler under a
 # constant field loses exactly (1/2)(sum of m)|g|^2 dt^2 per free-flight step,
-# which for these three bodies over 500 steps is 1.563837e-01 against a measured
-# 1.563840e-01. The same constant was derived for the particle domain in M12,
-# because it is the same integrator on the same kind of field.
+# which for these three bodies over 500 steps is 1.5638366e-01. The measured
+# figure agrees: E is printed to 9 significant figures, so a loss read off two
+# values near 2.08e+02 is only resolved to about +/- 5e-7, and the prediction
+# sits inside that. There is no discrepancy to explain, only a display limit.
+#
+# The constant itself is exact rather than leading-order: the v.g terms cancel
+# identically, so the loss is (1/2)m|g|^2 dt^2 per step for any velocity,
+# position, orientation or spin. The same constant was derived for the particle
+# domain in M12, because it is the same integrator on the same kind of field.
 #
 # Between steps 500 and 1000 the bodies land, and E drops by two thirds: that is
 # restitution 0.45, not integrator drift. It keeps falling afterwards as they
@@ -100,5 +114,11 @@ rigid_static 0.60   4.00 -1.20  0.00
 #
 # The two bodies released at y = 3 touch down on the same step and hold the same
 # height, angle and vertical velocity for the whole run despite a tenfold mass
-# difference. That is asserted directly in tests/rigid/rigid_world_tests.cpp
-# rather than left as a claim here.
+# difference. Two separate reasons are at work, and only the first is gravity.
+# The FALL matches because gravity is an acceleration and never divides by a
+# mass. The BOUNCE matches because the contact response depends on the ratio
+# I/m, and these two share it: 0.08/0.5 = 0.80/5.0 = 0.16. Change one inertia
+# and only the fall would still agree.
+#
+# Both are asserted in tests/rigid/rigid_world_tests.cpp, which also ships the
+# negative control that breaks the ratio.
