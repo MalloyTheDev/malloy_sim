@@ -56,7 +56,23 @@ struct RigidBody2D
     // radius is non-negative and finite, and every other value is finite.
     bool is_valid() const;
 
-    // True when this body cannot be moved by any impulse.
+    // Infinity is PER QUANTITY, and the two mean different things. Infinite
+    // mass alone is a body that can spin but not translate; infinite inertia
+    // alone is one that can translate but not spin, which is a real modelling
+    // primitive rather than a degenerate case.
+    bool has_infinite_mass() const;
+    bool has_infinite_inertia() const;
+
+    // True when this body cannot be moved by any impulse in any sense: both
+    // quantities infinite. An AND, deliberately.
+    //
+    // It was an OR, which made a body with finite mass and infinite inertia
+    // report itself static while contacts still moved it, and while gravity and
+    // every diagnostic skipped it. That silently falsified the exact
+    // linear-momentum conservation claimed in rigid_world.hpp, because the
+    // momentum handed to such a body vanished from the report. Ask
+    // has_infinite_mass() or has_infinite_inertia() for the quantity you
+    // actually care about.
     bool is_static() const;
 
     // Zero for an immovable body, so a contact against it behaves as though the

@@ -131,9 +131,21 @@ bool RigidBody2D::is_valid() const
            math::is_finite(local_center_of_mass);
 }
 
+bool RigidBody2D::has_infinite_mass() const
+{
+    return !math::is_finite(mass);
+}
+
+bool RigidBody2D::has_infinite_inertia() const
+{
+    return !math::is_finite(inertia);
+}
+
 bool RigidBody2D::is_static() const
 {
-    return !math::is_finite(mass) || !math::is_finite(inertia);
+    // AND, not OR. See the header: infinity is per quantity, and a body that
+    // is immovable in only one sense is still movable in the other.
+    return has_infinite_mass() && has_infinite_inertia();
 }
 
 math::Real RigidBody2D::inverse_mass() const
@@ -291,13 +303,14 @@ sim_core::StepResult RigidWorld::step()
 
     // (1) gravity, before the position update, which keeps this semi-implicit
     //     (symplectic) Euler and matches every other world here. It is an
-    //     acceleration, so it does NOT scale with mass; a static body is
-    //     skipped explicitly, because otherwise an immovable wall would start
-    //     falling.
+    //     acceleration, so it does NOT scale with mass; a body of infinite
+    //     mass is skipped explicitly, because otherwise an immovable wall would
+    //     start falling. The test is on the MASS, not on is_static(): a body
+    //     that merely cannot spin still falls.
     const math::Vec2 gravity = settings_.gravity;
     for (RigidBody2D& body : bodies_)
     {
-        if (!body.is_static())
+        if (!body.has_infinite_mass())
         {
             body.velocity += gravity * dt;
         }
@@ -348,10 +361,11 @@ math::Vec2 total_linear_momentum(const std::vector<RigidBody2D>& bodies)
     math::Vec2 momentum{};
     for (const RigidBody2D& body : bodies)
     {
-        // An immovable body has infinite mass and zero velocity, so its
-        // contribution would be inf * 0 = NaN. It also never moves, so it
-        // carries no momentum to report.
-        if (body.is_static())
+        // Infinite mass with zero velocity is inf * 0 = NaN, and such a body
+        // never translates, so it carries no linear momentum to report. This
+        // asks about the MASS specifically: a body with infinite inertia but
+        // finite mass does translate, and its momentum is real.
+        if (body.has_infinite_mass())
         {
             continue;
         }
@@ -368,12 +382,19 @@ math::Real total_angular_momentum(const std::vector<RigidBody2D>& bodies)
         // Spin about the centre of mass, plus the orbital term about the world
         // origin. Dropping either makes a whole class of motion look conserved
         // when it is not.
-        if (body.is_static())
+        //
+        // The two terms are guarded SEPARATELY, because they depend on
+        // different quantities. A body with infinite inertia and finite mass
+        // has no spin term (inf * 0 is NaN, and it cannot spin) but a perfectly
+        // real orbital one.
+        if (!body.has_infinite_inertia())
         {
-            continue; // infinite inertia times zero spin would be NaN
+            angular += body.inertia * body.angular_velocity;
         }
-        angular += body.inertia * body.angular_velocity;
-        angular += body.mass * cross(center_of_mass(body), body.velocity);
+        if (!body.has_infinite_mass())
+        {
+            angular += body.mass * cross(center_of_mass(body), body.velocity);
+        }
     }
     return angular;
 }
@@ -383,13 +404,19 @@ math::Real total_kinetic_energy(const std::vector<RigidBody2D>& bodies)
     math::Real kinetic = 0.0;
     for (const RigidBody2D& body : bodies)
     {
-        if (body.is_static())
+        // Translational and rotational energy are guarded separately, for the
+        // same reason as angular momentum: an infinite quantity contributes
+        // nothing and would produce NaN, but the other half is still real.
+        if (!body.has_infinite_mass())
         {
-            continue; // immovable, so it holds no kinetic energy
+            kinetic +=
+                math::Real{0.5} * body.mass * math::dot(body.velocity, body.velocity);
         }
-        kinetic += math::Real{0.5} * body.mass * math::dot(body.velocity, body.velocity);
-        kinetic += math::Real{0.5} * body.inertia * body.angular_velocity *
-                   body.angular_velocity;
+        if (!body.has_infinite_inertia())
+        {
+            kinetic += math::Real{0.5} * body.inertia * body.angular_velocity *
+                       body.angular_velocity;
+        }
     }
     return kinetic;
 }
@@ -400,7 +427,7 @@ math::Real total_potential_energy(const std::vector<RigidBody2D>& bodies,
     math::Real potential = 0.0;
     for (const RigidBody2D& body : bodies)
     {
-        if (body.is_static())
+        if (body.has_infinite_mass())
         {
             continue; // infinite mass times a position is not a number
         }

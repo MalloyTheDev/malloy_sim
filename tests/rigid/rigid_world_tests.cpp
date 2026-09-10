@@ -83,7 +83,12 @@ int main()
         RigidBody2D inf_inertia = awkward_body();
         inf_inertia.inertia = inf;
         MALLOY_CHECK_TRUE(inf_inertia.is_valid());
-        MALLOY_CHECK_TRUE(inf_inertia.is_static());
+        // NOT static: infinite inertia alone means it cannot spin, and it can
+        // still be pushed. This assertion used to read is_static() == true,
+        // which is the contract that changed and why it changed.
+        MALLOY_CHECK_FALSE(inf_inertia.is_static());
+        MALLOY_CHECK_TRUE(inf_inertia.has_infinite_inertia());
+        MALLOY_CHECK_FALSE(inf_inertia.has_infinite_mass());
 
         // NaN is still invalid, because NaN > 0 is false.
         RigidBody2D nan_mass = awkward_body();
@@ -1056,6 +1061,141 @@ int main()
             MALLOY_CHECK_TRUE(w.step().ok());
         }
         MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angle - w.bodies()[1].angle) > 1e-6);
+    }
+
+    // --- Infinity is per quantity, so a half-infinite body is immovable in
+    //     exactly one sense and fully real in the other.
+    //
+    //     This was a defect, not a gap. is_static() used to be an OR, so a body
+    //     with finite mass and infinite inertia called itself static: contacts
+    //     moved it, while gravity and every diagnostic skipped it. The momentum
+    //     handed to it vanished from the report, which falsified the exact
+    //     linear-momentum conservation the header claims. ---
+    {
+        RigidBody2D slider; // can translate, cannot spin
+        slider.mass = 2.0;
+        slider.inertia = inf;
+        slider.velocity = Vec2{3.0, -1.0};
+        slider.position = Vec2{1.0, 4.0};
+        MALLOY_CHECK_TRUE(slider.is_valid());
+        MALLOY_CHECK_FALSE(slider.is_static());
+        MALLOY_CHECK_NEAR(slider.inverse_mass(), 0.5, eps);
+        MALLOY_CHECK_NEAR(slider.inverse_inertia(), 0.0, 0.0);
+
+        RigidBody2D flywheel; // can spin, cannot translate
+        flywheel.mass = inf;
+        flywheel.inertia = 0.25;
+        flywheel.angular_velocity = 4.0;
+        MALLOY_CHECK_TRUE(flywheel.is_valid());
+        MALLOY_CHECK_FALSE(flywheel.is_static());
+        MALLOY_CHECK_NEAR(flywheel.inverse_mass(), 0.0, 0.0);
+        MALLOY_CHECK_NEAR(flywheel.inverse_inertia(), 4.0, eps);
+
+        RigidBody2D wall; // neither
+        wall.mass = inf;
+        wall.inertia = inf;
+        MALLOY_CHECK_TRUE(wall.is_static());
+
+        // The slider carries real linear momentum, which the OR version
+        // discarded. 2 * (3, -1).
+        MALLOY_CHECK_VEC2_NEAR(total_linear_momentum({slider}), Vec2(6.0, -2.0), eps);
+        // And real translational kinetic energy: 0.5 * 2 * (9 + 1) = 10.
+        MALLOY_CHECK_NEAR(total_kinetic_energy({slider}), 10.0, eps);
+        // Its spin term is dropped rather than becoming inf * 0 = NaN.
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(total_kinetic_energy({slider})));
+        // Orbital angular momentum survives, spin does not: m * cross(r, v)
+        // with r = (1, 4) and v = (3, -1) gives 2 * (1*-1 - 4*3) = -26.
+        MALLOY_CHECK_NEAR(total_angular_momentum({slider}), -26.0, eps);
+        // And it has gravitational potential energy, being of finite mass.
+        MALLOY_CHECK_NEAR(total_potential_energy({slider}, Vec2{0.0, -10.0}), 80.0, eps);
+
+        // The flywheel is the mirror: real spin energy, no translation terms.
+        MALLOY_CHECK_NEAR(total_kinetic_energy({flywheel}), 2.0, eps); // 0.5*0.25*16
+        MALLOY_CHECK_NEAR(total_angular_momentum({flywheel}), 1.0, eps); // 0.25*4
+        MALLOY_CHECK_VEC2_NEAR(total_linear_momentum({flywheel}), Vec2(0.0, 0.0), 0.0);
+        MALLOY_CHECK_NEAR(total_potential_energy({flywheel}, Vec2{0.0, -10.0}), 0.0, 0.0);
+
+        // The wall contributes nothing at all, and nothing is NaN.
+        MALLOY_CHECK_NEAR(total_kinetic_energy({wall}), 0.0, 0.0);
+        MALLOY_CHECK_NEAR(total_angular_momentum({wall}), 0.0, 0.0);
+    }
+
+    // --- Gravity asks about the MASS, not about is_static(). A body that
+    //     merely cannot spin still falls; one of infinite mass does not. ---
+    {
+        RigidBody2D slider;
+        slider.mass = 1.0;
+        slider.inertia = inf;
+        RigidBody2D flywheel;
+        flywheel.position = Vec2{20.0, 0.0};
+        flywheel.mass = inf;
+        flywheel.inertia = 1.0;
+
+        RigidSettings g;
+        g.gravity = Vec2{0.0, -8.0};
+        RigidWorld w{SimulationSettings{0.25}, {slider, flywheel}, g};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(0.0, -2.0), eps);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(0.0, 0.0), 0.0);
+        // The slider fell but did not turn: it cannot.
+        MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 0.0);
+    }
+
+    // --- A contact against a half-infinite body conserves linear momentum
+    //     EXACTLY, which is the claim the OR version falsified. The slider is
+    //     pushed and its momentum change is visible in the total. ---
+    {
+        RigidBody2D ball;
+        ball.mass = 1.0;
+        ball.inertia = 0.5;
+        ball.radius = 0.5;
+        ball.position = Vec2{-0.6, 0.0};
+        ball.velocity = Vec2{4.0, 0.0};
+
+        RigidBody2D slider;
+        slider.mass = 3.0;
+        slider.inertia = inf; // cannot spin, but is pushed
+        slider.radius = 0.5;
+        slider.position = Vec2{0.3, 0.0};
+
+        const std::vector<RigidBody2D> start = {ball, slider};
+        const Vec2 before = total_linear_momentum(start);
+        MALLOY_CHECK_VEC2_NEAR(before, Vec2(4.0, 0.0), eps);
+
+        RigidWorld w{SimulationSettings{0.001}, start, RigidSettings{1.0}};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(total_linear_momentum(w.bodies()), before, 1e-12);
+        // The slider really did move, so this is not conservation by inaction.
+        MALLOY_CHECK_TRUE(w.bodies()[1].velocity.x > 0.1);
+        // And it did not start spinning, however off-centre the contact was.
+        MALLOY_CHECK_NEAR(w.bodies()[1].angular_velocity, 0.0, 0.0);
+    }
+
+    // --- Two bodies of infinite mass and finite inertia are NOT static under
+    //     the AND rule, so they now reach impulse code that the OR rule used to
+    //     short-circuit. With the contact normal running through both centres
+    //     of mass, every arm is parallel to it and the effective mass is
+    //     exactly zero. The guard must return rather than divide by it. ---
+    {
+        RigidBody2D a;
+        a.mass = inf;
+        a.inertia = 1.0;
+        a.radius = 0.5;
+        a.position = Vec2{-0.4, 0.0};
+        a.velocity = Vec2{1.0, 0.0}; // closing, so the separating exit is not taken
+        RigidBody2D b = a;
+        b.position = Vec2{0.4, 0.0};
+        b.velocity = Vec2{-1.0, 0.0};
+        MALLOY_CHECK_FALSE(a.is_static());
+
+        RigidWorld w{SimulationSettings{0.001}, {a, b}, RigidSettings{1.0}};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        // Nothing became NaN, and no impulse was applied, because there is no
+        // finite effective mass for one to divide by.
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(1.0, 0.0), 0.0);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(-1.0, 0.0), 0.0);
+        MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 0.0);
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(w.bodies()[0].position));
     }
 
     std::cout << "malloy_rigid_tests passed\n";

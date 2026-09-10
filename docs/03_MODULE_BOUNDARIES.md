@@ -62,7 +62,7 @@ Not responsible for collision geometry (that is `malloy_collide`), orientation, 
 
 Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
 
-Also responsible for rigid contact response since M14: disc against disc contacts, impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia.
+Also responsible for rigid contact response since M14: disc against disc contacts, impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 

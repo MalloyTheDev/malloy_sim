@@ -217,6 +217,43 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+### Fixed
+
+- `RigidBody2D::is_static()` was an OR over two independently inverted
+  quantities, so a body with finite mass and infinite inertia reported itself
+  static while `inverse_mass()` remained non-zero. Contacts moved it and the
+  pose loop integrated it, while gravity and all four diagnostics skipped it
+  entirely. The momentum handed to such a body vanished from the report, which
+  silently falsified the exact linear-momentum conservation that
+  `rigid_world.hpp` claims for every contact.
+
+  Infinity is now per quantity throughout, which is what the M14 note already
+  described: infinite mass alone is a body that can spin but not translate,
+  infinite inertia alone one that can translate but not spin, and `is_static()`
+  is an AND meaning immovable in both senses. `has_infinite_mass()` and
+  `has_infinite_inertia()` are the questions the consumers now ask. Gravity
+  tests the mass, so a body that merely cannot spin still falls. Angular
+  momentum and kinetic energy guard their translational and rotational terms
+  separately, so the real half of a half-infinite body is reported and only the
+  infinite half is dropped.
+
+  BREAKING for anyone relying on the old meaning: `is_static()` now returns
+  false for a half-infinite body, and the M14 assertion that pinned the OR
+  behaviour changed with it, deliberately and with the reason recorded beside
+  it.
+
+  Found by an audit for assertions that cannot fail, and confirmed the same way
+  as the rest: BOTH directions of the inconsistency escaped the suite, so the
+  tests specified neither semantics. Six mutations now cover it, including each
+  diagnostic reverting to the blanket check, and all six are caught. One of them
+  is caught by the NaN-rejecting macro fixed earlier in this entry, because
+  reverting the momentum guard lets `inf * 0` reach the assertion.
+
+  Also newly tested: two bodies of infinite mass and finite inertia are no
+  longer short-circuited by the static early-out, so they reach the impulse
+  code with an effective mass of exactly zero. The existing guard returns
+  rather than dividing, but nothing had exercised that path.
+
 - Scenario templates are now run for their FULL documented number of steps by
   the test suite, not one step. A single step cannot tell a template that runs
   from one that diverges on step 900, and `step()` reports `InvalidState` as
