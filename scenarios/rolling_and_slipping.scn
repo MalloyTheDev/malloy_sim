@@ -1,0 +1,102 @@
+# MalloySim scenario: friction, rolling, and spin traded for motion.
+#
+# This is what M17 adds. Every contact in the project was normal-only, so a
+# body that landed slid forever and a body that was spun stayed spun. Both
+# scenarios/projectile_arc.scn and scenarios/flat_ground.scn have said so in
+# writing since M12 and M16 respectively. A tangential impulse, clamped to
+# Coulomb's cone, is the whole of the change.
+#
+# Three uniform discs, identical apart from how they are launched. Each has
+# inertia m*R^2/2 = 2 * 0.25 / 2 = 0.25, which is what makes their final speeds
+# predictable in closed form.
+#
+# The invariant behind all three: a tangential impulse at the contact point
+# changes v and omega together in a fixed ratio, so
+#
+#     I*omega - m*R*v
+#
+# is unchanged by it, however large the impulse and whether or not the cone
+# clamped it. Rolling without slipping means omega = -v/R. Put those together
+# and the final speed follows from the launch conditions alone, with no
+# dependence on the friction coefficient or on gravity: those two decide only
+# how long the slipping phase lasts, never what it ends at.
+#
+#   disc 1   launched at 4, no spin      ->  -1*4      = -1.5*v  ->  v = 2.6667
+#   disc 2   launched at 4, backspin 18  ->  0.25*18-4 = -1.5*v  ->  v = -0.3333
+#   disc 3   launched at 2, topspin -12  ->  0.25*-12-2= -1.5*v  ->  v = 3.3333
+#
+# Disc 2 is the one worth watching. It rolls out, stops, and comes BACK, which
+# nothing in this project could do before: it needs spin converted into
+# translation. Disc 3 is the mirror of that, and it ends up FASTER than it was
+# launched, because friction is not a brake, it is a constraint.
+#
+# This scenario needs the flat ground of M16 to mean anything. On a floor built
+# from overlapping discs the contact normal swings by up to 14 degrees, so
+# there is no constant arm R and the invariant above does not hold.
+
+type rigid
+
+dt 0.0005
+steps 6000
+output_every 750
+
+gravity 0.0 -9.81
+restitution 0.0
+friction 0.35
+
+# The floor: y = 0, so a disc of radius 0.5 rests with its centre at 0.5.
+ground 0 1 0
+
+# rigid_body <mass> <inertia> <radius> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
+
+# Plain: launched forward with no spin. Settles at exactly two thirds.
+rigid_body 2.00  0.25  0.50   0.00  0.00  -16.00  0.50  0.00    4.00  0.00    0.00
+
+# Backspin: launched forward, spinning the way that fights it. Comes back.
+rigid_body 2.00  0.25  0.50   0.00  0.00   -4.00  0.50  0.00    4.00  0.00   18.00
+
+# Topspin: over-spun for its speed, so friction drives it FORWARD.
+rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.00
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   1.23930000e+02   L  -8.50000000e+00   p   2.00000000e+01
+#   step   1500   E   6.62038366e+01   L  -8.50000632e+00   p   1.48497598e+01
+#   step   3000   E   5.69299886e+01   L  -8.50001063e+00   p   1.13333568e+01
+#   step   4500   E   5.69299886e+01   L  -8.50001063e+00   p   1.13333568e+01
+#   step   6000   E   5.69299886e+01   L  -8.50001063e+00   p   1.13333568e+01
+#
+# Four things there are derivable rather than merely observed.
+#
+# 1. The final momentum is the three closed-form speeds, summed. With all three
+#    masses at 2, p = 2 * (2.6667 - 0.3333 + 3.3333) = 11.33333, against a
+#    measured 11.3333568. The residual is about 2e-6 relative and it has a
+#    cause: the contact POINT is reported midway through the overlap, so the
+#    arm is R - depth/2 rather than R, and the invariant above assumes R. In
+#    steady contact depth is about g*dt^2, which predicts exactly the size of
+#    the gap seen here.
+#
+# 2. Nothing changes at all after step 3000. E, L and p are identical to every
+#    printed digit at steps 3000, 4500 and 6000. That is the physical
+#    signature of friction switching itself off: once a disc rolls without
+#    slipping there is no tangential relative velocity left, so no friction
+#    impulse is applied and rolling dissipates nothing. Contrast
+#    scenarios/flat_ground.scn, where p is also constant but for the opposite
+#    reason: nothing was ever acting.
+#
+# 3. The starting angular momentum is exactly -8.5, and it is a hand sum. Each
+#    disc contributes I*omega + m*(r x v), and with every centre at y = 0.5 the
+#    orbital term is -0.5*m*vx:
+#        disc 1:  0        + 2*(-0.5*4) = -4.0
+#        disc 2:  0.25*18  + 2*(-0.5*4) = +0.5
+#        disc 3:  0.25*-12 + 2*(-0.5*2) = -5.0
+#
+# 4. L barely moves across the whole run, by about 1e-5, and that is not luck.
+#    Every contact here lies on the line y = 0, which passes through the world
+#    origin, and every friction impulse is horizontal, so a friction impulse
+#    exerts no torque about the origin at all. The tiny drift left is the
+#    normal impulses and gravity, whose torques about the origin nearly cancel
+#    in steady contact.
+#
+# The big fall in E over the first 3000 steps is the slipping phase, and it is
+# the only place energy goes anywhere. Sliding dissipates; rolling does not.

@@ -409,6 +409,127 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M17] - 2026-09-10  (Coulomb friction)
+
+### Added
+
+- Coulomb friction for rigid contacts. After the normal impulse, a tangential
+  impulse is applied along the slide, clamped to `friction` times the normal
+  impulse.
+- `RigidSettings::friction`, defaulting to 0. Validated as non-negative and
+  finite, and deliberately NOT capped at 1: a coefficient above 1 is physically
+  real, and clamping it would silently change a caller's model.
+- `friction <mu>` in the scenario format, for `type rigid`.
+- `scenarios/rolling_and_slipping.scn`.
+
+### Architecture Notes
+
+- Friction is a contact impulse, not a persistent force. It is computed and
+  consumed inside a contact exactly as restitution is, so `malloy_rigid` still
+  has no force or torque accumulators and rule 5 is untouched. It also adds no
+  state to `RigidBody2D`.
+- The clamp is a MINIMUM of two quantities: what it would take to stop the slide
+  outright, and the cone limit. Taking the cone limit unconditionally is the
+  classic way friction ends up adding energy, because it overshoots a slide that
+  was about to stop and reverses it.
+- Friction is gated on the normal impulse by construction, since the limit is a
+  multiple of it. No normal impulse means no friction, automatically, so a body
+  in mid-air cannot be dragged sideways however large the coefficient.
+- There is no fallback direction for a zero tangent, and there must not be.
+  Inventing one would push a body that is not sliding, which is how a resting
+  arrangement drifts.
+- This milestone depends on M16. The invariant below assumes a contact arm of
+  constant length R, which a floor built from overlapping discs does not
+  provide: its normal swings by up to 14 degrees, so there is no constant arm
+  and the closed-form result does not hold.
+
+### What conserves, and what does not
+
+A tangential impulse at the contact point changes velocity and spin together in
+a fixed ratio, so it leaves `I*omega - m*R*v` unchanged however large the
+impulse is and whether or not the cone clamped it. That single fact gives every
+result in the template in closed form.
+
+For a uniform disc launched at `v0` with no spin, the constant is `-m*R*v0`, and
+rolling without slipping means `omega = -v/R`, which makes it `-(3/2)*m*R*v`.
+So:
+
+    v_roll = (2/3) * v0
+
+and exactly one third of the launch kinetic energy is gone. Neither figure
+depends on the friction coefficient or on gravity: those decide only how long
+the slipping phase lasts, never what it ends at. The test asserts it across
+three different combinations of the two for that reason, because a result that
+cannot be tuned is worth more than one that can.
+
+Once rolling, friction switches itself off: there is no tangential relative
+velocity left, so no impulse is applied, and rolling dissipates nothing. In the
+template, E, L and momentum are identical to every printed digit from step 3000
+to step 6000.
+
+The result is not exact in the code, and the residual is derived rather than
+tuned. The contact POINT is reported midway through the overlap, so the arm is
+`R - depth/2` rather than `R` while the invariant assumes `R`. In steady contact
+the penetration is about `g*dt^2`, which predicts a rolling residual of
+`v * (depth/2) / R`. For the headline test that is
+`2.0 * (9.81 * 0.0005^2 / 2) / 0.5 = 4.905e-6`, and the measured residual is
+4.905e-6.
+
+Kinetic energy is strictly non-increasing across every contact, at every
+coefficient, which is asserted at every step of a long run rather than at the
+end.
+
+### Tests
+
+- Validation: negative and non-finite coefficients refused, above 1 accepted.
+- Zero friction reproduces the pre-M17 trajectory exactly.
+- The 2/3 rolling ratio at three different (friction, gravity) pairs, with the
+  rolling condition checked physically as "the contact point is not moving"
+  rather than through a sign convention.
+- Exactly one third of the launch energy gone.
+- Backspin reversal: a disc launched forward with backspin rolls out, stops and
+  comes back. Nothing in the project could do this before, since it needs spin
+  converted into translation.
+- Spin-down: a body dropped with spin and no translation loses the spin and
+  gains motion from it.
+- Static holding on a slope, using a body of infinite inertia so it slides
+  rather than rolls: it holds when the coefficient reaches `tan(theta)` and
+  otherwise accelerates at exactly `g(sin - mu cos)`. That body is only
+  expressible because infinity is per quantity, so infinite inertia means
+  "cannot spin" rather than "immovable".
+- Friction cannot act in mid-air, however large the coefficient.
+- Verified by mutation testing. Nine mutations were applied and seven were
+  caught immediately: the impulse sign flipped, the cone removed, the cone
+  applied unconditionally rather than as a minimum, the gating on the normal
+  impulse removed, the rotational terms dropped from the tangential effective
+  mass, the friction torque dropped, and validation dropped.
+
+  One escaped and exposed a real gap. The step contract states that friction is
+  computed from the velocity REMAINING after the normal impulse, and that this
+  is observable, but nothing tested it: on a flat floor the normal impulse does
+  not change the tangential velocity, so both orderings agree. The case that
+  distinguishes them is a body whose centre of mass is offset from its disc,
+  dropped straight down with no spin. Its tangential velocity before the normal
+  impulse is exactly zero, and the impulse then spins it, which is what gives
+  friction something to resist. Now tested, and now caught.
+
+  The ninth is an equivalent mutant, and it was measured rather than argued.
+  Removing the explicit zero-slide guard changes nothing, because a zero slide
+  makes the tangent NaN, which makes the tangential effective mass NaN, which
+  fails the negated `!(effective > 0)` check and returns. Confirmed by running
+  all ten templates with the guard removed and diffing: byte-identical. The
+  guard is kept because relying on NaN propagation reaching a negated
+  comparison is fragile, not because the code needs it today.
+
+### Not in this milestone
+
+`malloy_particles` has no friction; particle contacts remain normal-only, and
+`scenarios/projectile_arc.scn` still documents that correctly. The solver is a
+single pass with no iteration, so a stack of bodies will not stand. That is
+where sequential-impulse iteration and then a constraint solver start pulling,
+and a constraint solver is where a `Constraint` base class grows, which rule 12
+exists to prevent. Named here and deferred rather than left to drift in.
+
 ## [M16] - 2026-09-10  (halfplanes: true flat ground)
 
 ### Added

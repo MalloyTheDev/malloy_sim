@@ -835,6 +835,48 @@ int main()
         MALLOY_CHECK_TRUE(r.scenario.rigid_settings.ground.empty());
     }
 
+    // --- M17: the friction key. Above 1 is accepted on purpose; negative is
+    //     rejected by the settings rather than by the parser, which is where
+    //     the rule lives. ---
+    {
+        std::istringstream in("type rigid\n"
+                              "friction 1.35\n"
+                              "rigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.friction, 1.35, eps);
+        MALLOY_CHECK_TRUE(r.scenario.rigid_settings.is_valid());
+    }
+    {
+        // Absent means frictionless, so every rigid scenario written before
+        // M17 loads and behaves exactly as it did.
+        std::istringstream in("type rigid\nrigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.friction, 0.0, 0.0);
+    }
+    {
+        // Parsed, but refused by validation, which is reported as a bad world
+        // rather than a bad file.
+        std::istringstream in("type rigid\nfriction -0.5\nrigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_FALSE(r.scenario.rigid_settings.is_valid());
+    }
+    {
+        std::istringstream in("type rigid\nfriction\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // friction belongs to the rigid domain and to no other.
+        std::istringstream in("type particles\nfriction 0.5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type springs\nfriction 0.5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+
     std::cout << "malloy_scenario_tests passed\n";
     return 0;
 }

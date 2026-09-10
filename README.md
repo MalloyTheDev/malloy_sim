@@ -19,7 +19,7 @@ for what that means for the code as it stands today.
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
 bodies, spring networks, rigid-body contact response and gravity for rigid
-bodies and flat ground (milestones M1-M16).
+bodies, flat ground and Coulomb friction (milestones M1-M17).
 
 ## Locked baseline
 
@@ -40,7 +40,8 @@ The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 (**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
 **M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
 bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
-response**, **M15: gravity for rigid bodies**, **M16: halfplanes**). The
+response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
+**M17: friction**). The
 project builds clean under
 MSVC (`/W4 /permissive-`), and all 11 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
@@ -56,7 +57,7 @@ reporting conserved system diagnostics alongside an ASCII view of the bodies.
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | `Circle`, `Aabb`, `Halfplane`, overlap tests, contact normal/depth/point |
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
-| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity |
+| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
@@ -78,7 +79,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 9 templates ship across four domains,
+and runnable with the shipped binary. 10 templates ship across four domains,
 and every one is parsed, validated and stepped by the test suite. That count
 is checked against the directory by the scenario tests, so it cannot go stale.
 
@@ -233,6 +234,7 @@ built-in scenarios shown above.
 | M14 | rigid-body contact response: statics, torque from impacts | ✅ Done |
 | M15 | gravity for rigid bodies: uniform field, potential energy | ✅ Done |
 | M16 | halfplanes: true flat ground, floors, walls and ramps | ✅ Done |
+| M17 | Coulomb friction: rolling, spin-down, static holding | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -250,7 +252,8 @@ Intended, not yet built, and never added speculatively
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is
   ASCII text only, and terminal-first holds until then)
-- friction: every contact in the project is normal-only, so bodies slide forever
+- friction for PARTICLE contacts. M17 added it to `malloy_rigid`; particle
+  contacts are still normal-only, so particles slide forever
 - oriented-box contacts and SAT (M9 shipped circle and AABB geometry, M16 added
   halfplanes; body against body is still disc against disc only)
 - persistent forces and force/torque accumulators (gravity is a setting applied

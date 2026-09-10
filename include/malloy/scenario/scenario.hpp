@@ -98,6 +98,11 @@ struct ScenarioParseResult
 //
 //   restitution <value>   bounciness in [0, 1]     (default 1.0)
 //   gravity <gx> <gy>     uniform acceleration     (default 0 0)
+//   friction <mu>         Coulomb coefficient      (default 0, frictionless)
+//
+//     Not capped at 1: a coefficient above 1 is physically real. Only a
+//     negative or non-finite one is refused.
+//
 //   ground <nx> <ny> <offset>   an immovable infinite plane
 //
 //     The plane is the line dot((nx, ny), p) == offset, and (nx, ny) points

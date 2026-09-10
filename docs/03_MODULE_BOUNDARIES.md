@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M16). These boundaries are in force
+> All modules below are implemented (M2-M17). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -65,6 +65,8 @@ Responsible for `RigidBody2D` (pose plus mass distribution), mass-property const
 Also responsible for rigid contact response since M14: disc against disc contacts, impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
 
 Since M16 a world also owns immovable ground planes, carried in `RigidSettings`. They are `collide::Halfplane` values, so the geometry stays in `malloy_collide` and `malloy_rigid` only resolves against it.
+
+Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to the friction coefficient times the normal impulse. It is a contact impulse rather than a persistent force, so it needs no force accumulator and rule 5 is untouched. `malloy_particles` has no friction.
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 

@@ -215,6 +215,20 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 scenario.rigid_settings.gravity = math::Vec2{gx, gy};
             }
         }
+        else if (key == "friction")
+        {
+            if (scenario.type != ScenarioType::Rigid)
+            {
+                return make_error(line_number, "friction belongs to type rigid");
+            }
+            saw_domain_key = true;
+            math::Real value{};
+            if (!(tokens >> value))
+            {
+                return make_error(line_number, "friction requires a value");
+            }
+            scenario.rigid_settings.friction = value;
+        }
         else if (key == "ground")
         {
             if (scenario.type != ScenarioType::Rigid)

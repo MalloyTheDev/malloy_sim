@@ -84,9 +84,10 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 #    the scalloped disc floor of dropped_bodies.scn the normal swings by up to
 #    14 degrees, which would steer the body and change this column every frame.
 #
-# Point 3 is also the limitation the next milestone removes. Nothing here has
-# friction, so a body that lands keeps sliding forever, exactly as
-# scenarios/projectile_arc.scn has documented since M12.
+# Point 3 is what M17 then changed. Friction is a setting, and this scenario
+# leaves it at its default of zero, so a body that lands here still slides
+# forever. See scenarios/rolling_and_slipping.scn for the same floor with
+# friction turned on, where a disc settles into rolling instead.
 #
 # The big fall in E between steps 1000 and 1500 is the impacts: the ramp body
 # reaches the floor and strikes the other one, and restitution 0.35 takes its

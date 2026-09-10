@@ -55,8 +55,9 @@ math::Real cross(const math::Vec2& a, const math::Vec2& b)
 // in as a body of infinite mass and inertia. Writing the impulse formula twice
 // is exactly the second copy that becomes a third (ADR 0008).
 void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& contact_data,
-                   math::Real restitution)
+                   const RigidSettings& settings)
 {
+    const math::Real restitution = settings.restitution;
     const std::optional<collide::Contact> hit = contact_data;
 
     const math::Real inverse_mass_a = a.inverse_mass();
@@ -105,9 +106,61 @@ void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& conta
     a.angular_velocity -= cross(arm_a, impulse) * inverse_inertia_a;
     b.velocity += impulse * inverse_mass_b;
     b.angular_velocity += cross(arm_b, impulse) * inverse_inertia_b;
+
+    if (!(settings.friction > math::Real{0}))
+    {
+        return; // frictionless, which is the pre-M17 behaviour and the default
+    }
+
+    // Recomputed AFTER the normal impulse, because friction resists what is
+    // left rather than what arrived. The ordering is observable and is fixed in
+    // the step contract in rigid_world.hpp.
+    const math::Vec2 remaining =
+        velocity_at(b, hit->point) - velocity_at(a, hit->point);
+    const math::Vec2 sideways =
+        remaining - hit->normal * math::dot(remaining, hit->normal);
+    const math::Real sliding = math::length(sideways);
+    if (!(sliding > math::Real{0}))
+    {
+        return; // no sliding, so no direction for friction to act along
+    }
+
+    // A unit tangent along the slide. There is no fallback for a zero tangent
+    // and there must not be: inventing a direction would push a body that is
+    // not sliding, which is the classic way a stack of bodies drifts.
+    const math::Vec2 tangent = sideways / sliding;
+
+    const math::Real tangent_cross_a = cross(arm_a, tangent);
+    const math::Real tangent_cross_b = cross(arm_b, tangent);
+    const math::Real tangent_effective =
+        inverse_mass_a + inverse_mass_b +
+        tangent_cross_a * tangent_cross_a * inverse_inertia_a +
+        tangent_cross_b * tangent_cross_b * inverse_inertia_b;
+    if (!(tangent_effective > math::Real{0}))
+    {
+        return;
+    }
+
+    // What it would take to stop the slide outright, then Coulomb's cone. The
+    // smaller of the two in magnitude is what actually gets applied, so a
+    // contact that CAN stop sliding stops exactly rather than reversing: taking
+    // the cone limit unconditionally is how friction ends up adding energy.
+    math::Real tangent_magnitude = -sliding / tangent_effective;
+    const math::Real limit = settings.friction * magnitude;
+    if (tangent_magnitude < -limit)
+    {
+        tangent_magnitude = -limit;
+    }
+
+    const math::Vec2 friction_impulse = tangent * tangent_magnitude;
+
+    a.velocity -= friction_impulse * inverse_mass_a;
+    a.angular_velocity -= cross(arm_a, friction_impulse) * inverse_inertia_a;
+    b.velocity += friction_impulse * inverse_mass_b;
+    b.angular_velocity += cross(arm_b, friction_impulse) * inverse_inertia_b;
 }
 
-void resolve_contact(RigidBody2D& a, RigidBody2D& b, math::Real restitution)
+void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settings)
 {
     if (a.radius <= math::Real{0} || b.radius <= math::Real{0})
     {
@@ -127,7 +180,7 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, math::Real restitution)
     {
         return;
     }
-    apply_contact(a, b, *hit, restitution);
+    apply_contact(a, b, *hit, settings);
 }
 
 // Resolves one body against one immovable ground plane.
@@ -141,7 +194,7 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, math::Real restitution)
 // that cannot be moved leaves the effective mass at zero and the guard inside
 // apply_contact returns.
 void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
-                    math::Real restitution)
+                    const RigidSettings& settings)
 {
     if (body.radius <= math::Real{0})
     {
@@ -158,7 +211,7 @@ void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
     RigidBody2D ground;
     ground.mass = std::numeric_limits<math::Real>::infinity();
     ground.inertia = std::numeric_limits<math::Real>::infinity();
-    apply_contact(body, ground, *hit, restitution);
+    apply_contact(body, ground, *hit, settings);
 }
 
 } // namespace
@@ -280,6 +333,10 @@ bool RigidSettings::is_valid() const
     {
         return false;
     }
+    if (!(friction >= math::Real{0}) || !math::is_finite(friction))
+    {
+        return false;
+    }
     for (const collide::Halfplane& plane : ground)
     {
         if (!plane.is_valid())
@@ -389,7 +446,7 @@ sim_core::StepResult RigidWorld::step()
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
-            resolve_contact(bodies_[i], bodies_[j], settings_.restitution);
+            resolve_contact(bodies_[i], bodies_[j], settings_);
         }
     }
 
@@ -399,7 +456,7 @@ sim_core::StepResult RigidWorld::step()
     {
         for (const collide::Halfplane& plane : settings_.ground)
         {
-            resolve_ground(body, plane, settings_.restitution);
+            resolve_ground(body, plane, settings_);
         }
     }
 

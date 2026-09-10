@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M16 are complete, so this is the live roadmap for what comes next.
+M1-M17 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -30,6 +30,7 @@ M13 - springs and oscillators           [done]
 M14 - rigid-body contact response       [done]
 M15 - gravity for rigid bodies          [done]
 M16 - halfplanes, for true flat ground  [done]
+M17 - Coulomb friction                  [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -66,9 +67,19 @@ centre is nearest. A plane's normal never turns. It is also the only pair in
 `malloy_collide` with no degenerate case, since the plane supplies the direction
 instead of it being inferred from two centres.
 
-Friction is the natural next step, and it is what makes the flat normal worth
-having: a frictionless body on any surface slides forever, which every template
-in the repository has documented since M12.
+M17 added Coulomb friction, which is what makes the flat normal worth having.
+A tangential impulse clamped to the friction coefficient times the normal
+impulse gives rolling, spin-down, backspin reversal and static holding, none of
+which existed before, and it needs no new state on a body and no force
+accumulator: friction is computed and consumed inside a contact exactly as
+restitution is.
+
+What M17 makes visible is the next pressure point. Friction makes stacking look
+achievable, and the solver is a single pass with no iteration, so a stack will
+not stand. That is where sequential-impulse iteration and then a constraint
+solver start pulling, and a constraint solver is where a `Constraint` base class
+grows. Rule 12 exists to stop exactly that, so it is named here and deferred
+rather than left to drift in.
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
 `ParticleWorld`, because a spring network is interaction topology rather than

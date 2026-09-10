@@ -30,6 +30,18 @@ struct RigidSettings
     // switched on rather than anything new here.
     math::Vec2 gravity{};
 
+    // Coulomb friction coefficient for every contact. 0 is frictionless, which
+    // is how the project behaved before M17 and remains the default.
+    //
+    // The tangential impulse is clamped to `friction` times the normal impulse,
+    // which is what makes it self-limiting: no normal impulse means no friction
+    // at all, automatically, so a body in mid-air cannot be accelerated
+    // sideways by it.
+    //
+    // Not capped at 1. A coefficient above 1 is physically real (rubber on
+    // rubber), and clamping it would silently change a caller's model.
+    math::Real friction{0.0};
+
     // Immovable ground planes: floors, walls, ramps. Each resolves exactly as a
     // body of infinite mass and inertia would, with one difference that is the
     // whole reason the primitive exists. A floor built from discs has a contact
@@ -41,8 +53,8 @@ struct RigidSettings
     // as it did.
     std::vector<collide::Halfplane> ground;
 
-    // Valid when restitution is in [0, 1] and finite, gravity is finite, and
-    // every ground plane is itself valid.
+    // Valid when restitution is in [0, 1] and finite, friction is non-negative
+    // and finite, gravity is finite, and every ground plane is itself valid.
     bool is_valid() const;
 };
 } // namespace malloy::rigid

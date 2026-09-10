@@ -1455,6 +1455,407 @@ int main()
         MALLOY_CHECK_TRUE(std::abs(now.velocity.y) < 0.2);
     }
 
+    // --- M17: friction validation. Negative and non-finite are refused; a
+    //     coefficient above 1 is NOT, because rubber on rubber really does
+    //     exceed it and clamping would silently change the caller's model. ---
+    {
+        RigidSettings ok;
+        ok.friction = 1.7;
+        MALLOY_CHECK_TRUE(ok.is_valid());
+        MALLOY_CHECK_TRUE(RigidSettings{}.is_valid()); // default 0, frictionless
+
+        RigidSettings negative;
+        negative.friction = -0.1;
+        MALLOY_CHECK_FALSE(negative.is_valid());
+        RigidSettings not_a_number;
+        not_a_number.friction = nan;
+        MALLOY_CHECK_FALSE(not_a_number.is_valid());
+        RigidSettings unbounded;
+        unbounded.friction = inf;
+        MALLOY_CHECK_FALSE(unbounded.is_valid());
+    }
+
+    // --- Zero friction reproduces the pre-M17 trajectory exactly, so every
+    //     world written before this existed is unaffected. ---
+    {
+        RigidBody2D slider;
+        slider.mass = 1.5;
+        slider.inertia = 0.2;
+        slider.radius = 0.4;
+        slider.position = Vec2{-3.0, 0.4};
+        slider.velocity = Vec2{2.0, 0.0};
+
+        RigidSettings without;
+        without.restitution = 0.0;
+        without.gravity = Vec2{0.0, -9.81};
+        without.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+        RigidSettings explicit_zero = without;
+        explicit_zero.friction = 0.0;
+
+        RigidWorld a{SimulationSettings{0.001}, {slider}, without};
+        RigidWorld b{SimulationSettings{0.001}, {slider}, explicit_zero};
+        for (int i = 0; i < 2000; ++i)
+        {
+            MALLOY_CHECK_TRUE(a.step().ok());
+            MALLOY_CHECK_TRUE(b.step().ok());
+        }
+        MALLOY_CHECK_VEC2_NEAR(a.bodies()[0].velocity, b.bodies()[0].velocity, 0.0);
+        // And it really did keep sliding, since nothing was there to stop it.
+        MALLOY_CHECK_NEAR(a.bodies()[0].velocity.x, 2.0, 0.0);
+    }
+
+    // --- THE MILESTONE'S INVARIANT: a uniform disc launched with no spin onto
+    //     a flat floor settles into rolling at exactly two thirds of its launch
+    //     speed, and that figure depends on NEITHER the friction coefficient
+    //     NOR gravity. Both only decide how long it takes to get there.
+    //
+    //     The reason it is exact rather than approximate: a tangential impulse
+    //     at the contact point changes v and omega together in a fixed ratio,
+    //     so `I*omega - m*R*v` is unchanged by it however large or small the
+    //     impulse is, clamped or not. Starting from omega = 0 that constant is
+    //     -m*R*v0, and rolling means omega = -v/R, which gives
+    //     -(3/2)*m*R*v_roll, so v_roll = (2/3)*v0. The discretisation cannot
+    //     move it, which is why this is not a tolerance-tuned test.
+    //
+    //     I = m*R^2/2 for a uniform disc is not asserted here by hand: it comes
+    //     out of collide::second_moment_of_area and rigid::mass_properties,
+    //     which have their own tests against closed-form values. ---
+    {
+        struct Run
+        {
+            Real friction;
+            Real gravity;
+        };
+        const Run runs[] = {{0.30, 9.81}, {0.80, 9.81}, {0.15, 4.00}};
+        const Real v0 = 3.0;
+        const Real radius = 0.5;
+        const Real mass = 2.0;
+
+        for (const Run& run : runs)
+        {
+            RigidBody2D disc;
+            disc.mass = mass;
+            disc.inertia = mass * radius * radius / 2.0; // uniform disc
+            disc.radius = radius;
+            disc.position = Vec2{-8.0, radius}; // exactly touching the floor
+            disc.velocity = Vec2{v0, 0.0};
+            disc.angular_velocity = 0.0;
+
+            RigidSettings g;
+            g.restitution = 0.0;
+            g.friction = run.friction;
+            g.gravity = Vec2{0.0, -run.gravity};
+            g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+            RigidWorld w{SimulationSettings{0.0005}, {disc}, g};
+            for (int i = 0; i < 6000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+
+            const RigidBody2D& now = w.bodies()[0];
+            MALLOY_CHECK_NEAR(now.velocity.x, 2.0 * v0 / 3.0, 1e-5);
+
+            // Rolling without slipping: the contact point is not moving. The
+            // bound is not zero, and the residual is derivable rather than
+            // tuned. In steady contact the body sinks about g*dt^2 per step
+            // before the correction, and the contact POINT is reported midway
+            // through that overlap, so the arm is R - depth/2 instead of R and
+            // rolling is established about a point just inside the surface.
+            // That predicts v * (depth/2) / R, which for the first run is
+            // 2.0 * (9.81 * 0.0005^2 / 2) / 0.5 = 4.905e-6, and the measured
+            // residual is 4.905e-6. The other two runs are smaller still.
+            const Vec2 contact{now.position.x, 0.0};
+            MALLOY_CHECK_NEAR(velocity_at(now, contact).x, 0.0, 1e-5);
+            // Which for this geometry means omega = -v/R, to the same bound
+            // divided by R.
+            MALLOY_CHECK_NEAR(now.angular_velocity, -now.velocity.x / radius, 2e-5);
+        }
+    }
+
+    // --- And exactly one third of the launch kinetic energy is gone, which is
+    //     the same statement in energy terms: (1/2)m v0^2 becomes
+    //     (1/2)m v^2 + (1/2)I omega^2 = (1/3) m v0^2. ---
+    {
+        const Real v0 = 3.0;
+        const Real radius = 0.5;
+        const Real mass = 2.0;
+
+        RigidBody2D disc;
+        disc.mass = mass;
+        disc.inertia = mass * radius * radius / 2.0;
+        disc.radius = radius;
+        disc.position = Vec2{-8.0, radius};
+        disc.velocity = Vec2{v0, 0.0};
+
+        RigidSettings g;
+        g.restitution = 0.0;
+        g.friction = 0.4;
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.0005}, {disc}, g};
+        for (int i = 0; i < 6000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const RigidBody2D& now = w.bodies()[0];
+        const Real rolling_energy =
+            0.5 * mass * now.velocity.x * now.velocity.x +
+            0.5 * disc.inertia * now.angular_velocity * now.angular_velocity;
+        MALLOY_CHECK_NEAR(rolling_energy, mass * v0 * v0 / 3.0, 1e-3);
+    }
+
+    // --- Backspin reversal. A disc launched forward while spinning the wrong
+    //     way walks forward, stops, and comes BACK. Nothing in the project
+    //     could do this before: it needs a tangential impulse to convert spin
+    //     into translation. ---
+    {
+        RigidBody2D disc;
+        disc.mass = 1.0;
+        disc.inertia = 0.125; // uniform disc, R = 0.5
+        disc.radius = 0.5;
+        disc.position = Vec2{0.0, 0.5};
+        disc.velocity = Vec2{2.0, 0.0};
+        disc.angular_velocity = 14.0; // backspin: same sign as forward motion
+
+        RigidSettings g;
+        g.restitution = 0.0;
+        g.friction = 0.5;
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.0005}, {disc}, g};
+        Real furthest = disc.position.x;
+        for (int i = 0; i < 6000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+            furthest = std::max(furthest, w.bodies()[0].position.x);
+        }
+        // It went out, and then came back past where it turned around.
+        MALLOY_CHECK_TRUE(furthest > 0.1);
+        MALLOY_CHECK_TRUE(w.bodies()[0].velocity.x < 0.0);
+        MALLOY_CHECK_TRUE(w.bodies()[0].position.x < furthest - 0.05);
+    }
+
+    // --- Spin-down: a body dropped with spin and no translation loses the
+    //     spin to the floor, and gains translation from it. ---
+    {
+        RigidBody2D top;
+        top.mass = 1.0;
+        top.inertia = 0.125;
+        top.radius = 0.5;
+        top.position = Vec2{0.0, 0.5};
+        top.angular_velocity = -20.0;
+
+        RigidSettings g;
+        g.restitution = 0.0;
+        g.friction = 0.4;
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.0005}, {top}, g};
+        for (int i = 0; i < 4000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angular_velocity) < 20.0);
+        MALLOY_CHECK_TRUE(w.bodies()[0].velocity.x > 0.1); // spin became motion
+    }
+
+    // --- Static holding on a slope. A body that CANNOT roll, because its
+    //     inertia is infinite, stays put when the friction coefficient reaches
+    //     the tangent of the slope angle and slides when it does not. The
+    //     3-4-5 plane has tan(theta) = 0.6/0.8 = 0.75.
+    //
+    //     Infinite inertia meaning "can translate but cannot spin" is the
+    //     per-quantity rule; under the old OR-based is_static() this body would
+    //     have called itself immovable and the test would be vacuous. ---
+    {
+        // An explicit return type, and step failures reported through a flag:
+        // MALLOY_CHECK_TRUE expands to `return 1`, which cannot live in a
+        // lambda that returns a Vec2.
+        bool every_step_ok = true;
+        const auto slide_test = [&](Real friction) -> Vec2 {
+            RigidBody2D block;
+            block.mass = 1.0;
+            block.inertia = inf; // cannot roll, so this is pure sliding
+            block.radius = 0.5;
+            block.position = Vec2{1.5, -0.5}; // exactly touching the 3-4-5 plane
+
+            RigidSettings g;
+            g.restitution = 0.0;
+            g.friction = friction;
+            g.gravity = Vec2{0.0, -9.81};
+            g.ground.push_back(Halfplane{Vec2{0.6, 0.8}, 0.0});
+
+            RigidWorld w{SimulationSettings{0.001}, {block}, g};
+            for (int i = 0; i < 2000; ++i)
+            {
+                if (!w.step().ok())
+                {
+                    every_step_ok = false;
+                    break;
+                }
+            }
+            return w.bodies()[0].velocity;
+        };
+
+        // Above the friction angle: it holds. Two seconds of gravity and it has
+        // gone essentially nowhere.
+        const Vec2 held = slide_test(0.9);
+        MALLOY_CHECK_TRUE(every_step_ok);
+        MALLOY_CHECK_TRUE(malloy::math::length(held) < 0.02);
+
+        // Below it: it accelerates at exactly g(sin - mu cos). With mu = 0.3
+        // that is 9.81 * (0.6 - 0.3 * 0.8) = 3.5316, over 2 seconds giving
+        // 7.0632 down the slope along (0.8, -0.6).
+        const Vec2 sliding = slide_test(0.3);
+        MALLOY_CHECK_TRUE(every_step_ok);
+        const Real expected = 9.81 * (0.6 - 0.3 * 0.8) * 2.0;
+        MALLOY_CHECK_NEAR(malloy::math::length(sliding), expected, 1e-2);
+        MALLOY_CHECK_NEAR(sliding.x, expected * 0.8, 1e-2);
+        MALLOY_CHECK_NEAR(sliding.y, -expected * 0.6, 1e-2);
+    }
+
+    // --- Friction can only ever REMOVE kinetic energy. An unclamped or
+    //     sign-flipped tangential impulse pumps it in, and this is the
+    //     assertion that catches that at every step rather than at the end. ---
+    {
+        for (const Real friction : {0.1, 0.6, 2.0})
+        {
+            RigidBody2D a;
+            a.mass = 1.0;
+            a.inertia = 0.125;
+            a.radius = 0.5;
+            a.position = Vec2{-1.2, 0.5};
+            a.velocity = Vec2{4.0, 0.0};
+            a.angular_velocity = -3.0;
+
+            RigidBody2D b;
+            b.mass = 2.0;
+            b.inertia = 0.4;
+            b.radius = 0.5;
+            b.position = Vec2{1.2, 0.5};
+            b.velocity = Vec2{-1.0, 0.0};
+            b.angular_velocity = 5.0;
+
+            RigidSettings g;
+            g.restitution = 0.9;
+            g.friction = friction;
+            g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+            RigidWorld w{SimulationSettings{0.0005}, {a, b}, g};
+            Real previous = total_kinetic_energy(w.bodies());
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                const Real now = total_kinetic_energy(w.bodies());
+                MALLOY_CHECK_TRUE(now <= previous + 1e-12);
+                previous = now;
+            }
+        }
+    }
+
+    // --- Friction is gated on the NORMAL impulse, so a body touching nothing
+    //     cannot be slowed by it. Without that gating a falling body would be
+    //     dragged sideways by a friction term with no contact to justify it. ---
+    {
+        RigidBody2D falling;
+        falling.mass = 1.0;
+        falling.inertia = 0.125;
+        falling.radius = 0.5;
+        falling.position = Vec2{0.0, 40.0}; // far above the floor
+        falling.velocity = Vec2{5.0, 0.0};
+
+        RigidSettings g;
+        g.friction = 2.0; // enormous, and still irrelevant in mid-air
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.001}, {falling}, g};
+        for (int i = 0; i < 500; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        MALLOY_CHECK_NEAR(w.bodies()[0].velocity.x, 5.0, 0.0); // exactly, still
+        MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 0.0);
+    }
+
+    // --- The ordering in the step contract is observable, and this is what
+    //     makes it so. A body whose centre of mass is offset from its disc
+    //     drops STRAIGHT DOWN onto the floor with no spin, so the tangential
+    //     relative velocity before the normal impulse is exactly zero. The
+    //     normal impulse then acts at a point that is not below the centre of
+    //     mass, which spins the body, and THAT gives the contact point a
+    //     sideways velocity for friction to resist.
+    //
+    //     So friction computed from the pre-impulse velocity does nothing here
+    //     and the body picks up no horizontal motion at all, while friction
+    //     computed from what remains does. The mutation that reads the
+    //     pre-impulse velocity escaped the entire suite until this existed. ---
+    {
+        RigidBody2D lopsided;
+        lopsided.mass = 1.0;
+        lopsided.inertia = 0.05;
+        lopsided.radius = 0.5;
+        lopsided.local_center_of_mass = Vec2{0.3, 0.0}; // offset from the disc
+        lopsided.position = Vec2{0.0, 0.5};             // exactly touching
+        lopsided.velocity = Vec2{0.0, -2.0};            // straight down, no spin
+        lopsided.angular_velocity = 0.0;
+
+        RigidSettings g;
+        g.restitution = 0.0;
+        g.friction = 0.5;
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.001}, {lopsided}, g};
+        MALLOY_CHECK_TRUE(w.step().ok());
+
+        // It arrived with no horizontal velocity and no spin whatsoever, and
+        // both are now nonzero: the spin came from the off-centre normal
+        // impulse, and the horizontal motion came from friction resisting the
+        // slide that spin produced.
+        MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angular_velocity) > 1e-6);
+        MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].velocity.x) > 1e-6);
+    }
+
+    // --- A body genuinely at rest on the ground has EXACTLY zero tangential
+    //     relative velocity, so there is no direction for friction to act
+    //     along. Dividing by that zero to build a tangent produces NaN and
+    //     poisons the body, which validate() would then reject.
+    //
+    //     Every other test here slides by some tiny residual and so never
+    //     reaches the exact zero. This one does. ---
+    {
+        RigidBody2D resting;
+        resting.mass = 1.0;
+        resting.inertia = 0.125;
+        resting.radius = 0.5;
+        resting.position = Vec2{0.0, 0.5}; // exactly touching, motionless
+        // velocity and angular_velocity are both exactly zero
+
+        RigidSettings g;
+        g.restitution = 0.0;
+        g.friction = 0.7;
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.001}, {resting}, g};
+        for (int i = 0; i < 500; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const RigidBody2D& now = w.bodies()[0];
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(now.position));
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(now.velocity));
+        // And it did not wander sideways, which is what an invented tangent
+        // direction would have made it do.
+        MALLOY_CHECK_NEAR(now.velocity.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(now.position.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(now.angular_velocity, 0.0, 0.0);
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }
