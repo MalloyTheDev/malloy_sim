@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <fstream>
+#include <limits>
 #include <istream>
 #include <sstream>
 #include <string>
@@ -166,15 +167,20 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "restitution")
         {
-            if (scenario.type != ScenarioType::Particles)
+            if (scenario.type != ScenarioType::Particles &&
+                scenario.type != ScenarioType::Rigid)
             {
-                return make_error(line_number, "restitution belongs to type particles");
+                return make_error(line_number,
+                                  "restitution belongs to type particles or rigid");
             }
             saw_domain_key = true;
-            if (!(tokens >> scenario.particle_settings.restitution))
+            math::Real value{};
+            if (!(tokens >> value))
             {
                 return make_error(line_number, "restitution requires a number");
             }
+            scenario.particle_settings.restitution = value;
+            scenario.rigid_restitution = value;
         }
         else if (key == "gravity")
         {
@@ -244,16 +250,39 @@ ScenarioParseResult parse_scenario(std::istream& input)
             math::Real py{};
             math::Real vx{};
             math::Real vy{};
-            if (!(tokens >> body.mass >> body.inertia >> comx >> comy >> px >> py >>
-                  body.angle >> vx >> vy >> body.angular_velocity))
+            if (!(tokens >> body.mass >> body.inertia >> body.radius >> comx >> comy >>
+                  px >> py >> body.angle >> vx >> vy >> body.angular_velocity))
             {
                 return make_error(line_number,
-                                  "rigid_body requires: mass inertia comx comy px py "
-                                  "angle vx vy omega");
+                                  "rigid_body requires: mass inertia radius comx comy "
+                                  "px py angle vx vy omega");
             }
             body.local_center_of_mass = math::Vec2{comx, comy};
             body.position = math::Vec2{px, py};
             body.velocity = math::Vec2{vx, vy};
+            scenario.rigid_bodies.push_back(body);
+        }
+        else if (key == "rigid_static")
+        {
+            if (scenario.type != ScenarioType::Rigid)
+            {
+                return make_error(line_number, "rigid_static belongs to type rigid");
+            }
+            saw_domain_key = true;
+            // A separate key rather than writing "inf inf" on a rigid_body line,
+            // because MSVC's num_get does not accept the token "inf", and
+            // "static" reads better in a scenario than a pair of infinities.
+            rigid::RigidBody2D body;
+            math::Real px{};
+            math::Real py{};
+            if (!(tokens >> body.radius >> px >> py >> body.angle))
+            {
+                return make_error(line_number,
+                                  "rigid_static requires: radius px py angle");
+            }
+            body.mass = std::numeric_limits<math::Real>::infinity();
+            body.inertia = std::numeric_limits<math::Real>::infinity();
+            body.position = math::Vec2{px, py};
             scenario.rigid_bodies.push_back(body);
         }
         else if (key == "spring_body")

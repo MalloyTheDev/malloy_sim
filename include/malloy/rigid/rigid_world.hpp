@@ -18,25 +18,32 @@ namespace malloy::rigid
 // ADR 0006). It shares only malloy_math, malloy_time and the sim_core
 // vocabulary with the other domains, and knows nothing about them.
 //
-// M11 scope: no forces and no contact response. Nothing accelerates a body
-// except an impulse the caller applies, so a body left alone translates and
-// spins forever. That is not a placeholder, it is the invariant this milestone
-// is built to demonstrate: with no impulse, linear and angular momentum are
-// conserved exactly. Persistent forces arrive with ballistics, and contact
-// response with rigid-body collision.
+// M11 gave it free motion plus impulses. M14 added contact response: bodies
+// with a nonzero radius collide as discs and the resulting impulse generates
+// torque, so they tumble rather than merely bouncing.
+//
+// Still no persistent forces and no force or torque accumulators. A body with
+// no contacts translates and spins forever, which remains the cleanest
+// invariant here: linear and angular momentum conserved exactly.
 class RigidWorld
 {
 public:
     RigidWorld(sim_core::SimulationSettings simulation_settings,
-               std::vector<RigidBody2D> bodies);
+               std::vector<RigidBody2D> bodies, math::Real restitution = 1.0);
 
-    // Ok, or InvalidSettings (dt) / InvalidState (a body).
+    // Bounciness of every contact. 1 is perfectly elastic and conserves kinetic
+    // energy; 0 is perfectly inelastic, so the pair stops separating along the
+    // contact normal. Set at construction and fixed for the world.
+    math::Real restitution() const { return restitution_; }
+
+    // Ok, or InvalidSettings (dt or restitution) / InvalidState (a body).
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step:
     //
     //   1. move the centre of mass by velocity * dt;
-    //   2. advance the angle by angular_velocity * dt.
+    //   2. advance the angle by angular_velocity * dt;
+    //   3. resolve contacts in ascending pair order.
     //
     // The body origin follows from the centre of mass and the new angle, so a
     // body whose origin is offset from its centre of mass orbits correctly
@@ -74,6 +81,7 @@ public:
 
 private:
     sim_core::SimulationSettings simulation_settings_;
+    math::Real restitution_{1.0};
     std::vector<RigidBody2D> bodies_;
     std::vector<RigidBody2D> previous_;
     std::optional<time::FixedStep> step_;
@@ -81,14 +89,28 @@ private:
 
 // --- Whole-system diagnostics ---
 //
-// With no forces and no impulses applied, both are conserved exactly.
+// With no forces, no impulses and no contacts, all three are conserved exactly.
+// Immovable bodies are skipped: infinite mass times zero velocity would be NaN,
+// and an immovable body carries nothing to report.
 
+// Contacts conserve linear momentum exactly: the impulse is equal and opposite,
+// and the positional correction moves positions without touching a velocity.
 math::Vec2 total_linear_momentum(const std::vector<RigidBody2D>& bodies);
 
 // Angular momentum about the world origin: the spin term I*omega plus the
 // orbital term m * (r x v), with r running from the origin to the centre of
 // mass. Both terms are needed: a body translating past the origin carries
 // angular momentum about it even with zero spin.
+//
+// The contact IMPULSE conserves this exactly, because it is equal and opposite
+// and acts at one shared point, so the two contributions are -(p x J) and
+// +(p x J). The positional CORRECTION does not: it moves positions without
+// changing velocities, which shifts the orbital term by c x (v_b - v_a), where
+// c is the correction. The perturbation is proportional to penetration depth,
+// so it shrinks with the timestep rather than accumulating from the impulse.
+//
+// This is the usual cost of resolving penetration by moving bodies, and it is
+// recorded here rather than hidden behind a loose tolerance.
 math::Real total_angular_momentum(const std::vector<RigidBody2D>& bodies);
 
 math::Real total_kinetic_energy(const std::vector<RigidBody2D>& bodies);

@@ -161,7 +161,8 @@ int main()
                                    "bouncing_particles.scn",
                                    "spinning_bodies.scn",
                                    "projectile_arc.scn",
-                                   "spring_chain.scn"};
+                                   "spring_chain.scn",
+                                   "tumbling_impact.scn"};
         for (const char* name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;
@@ -199,7 +200,8 @@ int main()
             {
                 MALLOY_CHECK_TRUE(r.scenario.rigid_bodies.size() >= 1);
                 malloy::rigid::RigidWorld world{r.scenario.simulation,
-                                                r.scenario.rigid_bodies};
+                                                r.scenario.rigid_bodies,
+                                                r.scenario.rigid_restitution};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
                 MALLOY_CHECK_TRUE(world.step().ok());
             }
@@ -332,7 +334,9 @@ int main()
         std::istringstream in("type rigid\n"
                               "dt 0.01\n"
                               "steps 50\n"
-                              "rigid_body 2.5 3.75 0.6 -0.4 1.0 2.0 0.7 3.0 4.0 0.9\n");
+                              // 11 fields since M14: radius came third.
+                              "rigid_body 2.5 3.75 1.5 0.6 -0.4 1.0 2.0 0.7 "
+                              "3.0 4.0 0.9\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_TRUE(r.ok);
         MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid);
@@ -340,6 +344,7 @@ int main()
         const auto& b = r.scenario.rigid_bodies[0];
         MALLOY_CHECK_NEAR(b.mass, 2.5, eps);
         MALLOY_CHECK_NEAR(b.inertia, 3.75, eps);
+        MALLOY_CHECK_NEAR(b.radius, 1.5, eps);
         MALLOY_CHECK_NEAR(b.local_center_of_mass.x, 0.6, eps);
         MALLOY_CHECK_NEAR(b.local_center_of_mass.y, -0.4, eps);
         MALLOY_CHECK_NEAR(b.position.x, 1.0, eps);
@@ -428,6 +433,40 @@ int main()
     }
     {
         std::istringstream in("type springs\nspring 0 1 1 1\n"); // one short
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+
+    // --- M14: the rigid format carries a radius, and rigid_static declares an
+    //     immovable body without needing the token "inf". ---
+    {
+        std::istringstream in("type rigid\n"
+                              "restitution 0.25\n"
+                              "rigid_body 2.5 3.75 0.8 0.6 -0.4 1.0 2.0 0.7 3.0 4.0 0.9\n"
+                              "rigid_static 1.5 9.0 8.0 0.3\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_EQ(r.scenario.rigid_bodies.size(), std::size_t{2});
+        MALLOY_CHECK_NEAR(r.scenario.rigid_restitution, 0.25, eps);
+
+        const auto& moving = r.scenario.rigid_bodies[0];
+        MALLOY_CHECK_NEAR(moving.radius, 0.8, eps);
+        MALLOY_CHECK_NEAR(moving.mass, 2.5, eps);
+        MALLOY_CHECK_FALSE(moving.is_static());
+
+        const auto& wall = r.scenario.rigid_bodies[1];
+        MALLOY_CHECK_TRUE(wall.is_static());
+        MALLOY_CHECK_NEAR(wall.inverse_mass(), 0.0, 0.0);
+        MALLOY_CHECK_NEAR(wall.radius, 1.5, eps);
+        MALLOY_CHECK_NEAR(wall.position.x, 9.0, eps);
+        MALLOY_CHECK_NEAR(wall.angle, 0.3, eps);
+    }
+    {
+        std::istringstream in("type particles\nrigid_static 1.0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // restitution now serves two domains, but not a third.
+        std::istringstream in("type springs\nrestitution 0.5\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 

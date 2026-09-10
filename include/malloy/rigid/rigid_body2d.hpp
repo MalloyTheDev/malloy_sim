@@ -35,11 +35,34 @@ struct RigidBody2D
 
     math::Vec2 local_center_of_mass{};
 
-    // Valid when mass and inertia are strictly positive and every value is
-    // finite. Infinite ("static") bodies are not represented: nothing needs
-    // them until contact response does, and inventing a representation early
-    // would be speculative (CLAUDE.md rule 11).
+    // Collision radius, as a disc centred on the BODY ORIGIN, not on the centre
+    // of mass. That offset is the whole point: a contact on the rim of a disc
+    // whose centre is the centre of mass has a normal passing straight through
+    // it and can never generate torque. Offsetting them is what makes a contact
+    // spin the body.
+    //
+    // Zero means the body does not collide, which is how a body can take part
+    // in free motion and impulses without being a contact participant.
+    math::Real radius{0.0};
+
+    // Infinite mass and inertia mean immovable: a wall or a floor. M11 left
+    // statics unrepresented on the grounds that nothing needed them until
+    // contact response did (ADR 0007). Contact response now does, so they are
+    // represented, and the representation is infinity rather than a flag so
+    // that inverse_mass() and inverse_inertia() fall out as exactly zero and
+    // every impulse formula handles the case without branching.
+    //
+    // Valid when mass and inertia are strictly positive (infinity included),
+    // radius is non-negative and finite, and every other value is finite.
     bool is_valid() const;
+
+    // True when this body cannot be moved by any impulse.
+    bool is_static() const;
+
+    // Zero for an immovable body, so a contact against it behaves as though the
+    // other body struck an unyielding wall.
+    math::Real inverse_mass() const;
+    math::Real inverse_inertia() const;
 };
 
 // The centre of mass in world space: the body origin plus the local offset

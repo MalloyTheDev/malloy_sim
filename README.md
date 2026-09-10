@@ -13,7 +13,7 @@ project.
 
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
-bodies and spring networks (milestones M1-M13).
+bodies, spring networks and rigid-body contact response (milestones M1-M14).
 
 ## Locked baseline
 
@@ -33,7 +33,7 @@ bodies and spring networks (milestones M1-M13).
 The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 (**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
 **M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
-bodies**, **M12: ballistics**, **M13: spring networks**).
+bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact response**).
 The project builds clean under MSVC (`/W4 /permissive-`), all eleven test
 executables pass via CTest, and the terminal app runs N-body scenarios --
 built-in, or loaded from a text file -- reporting conserved system diagnostics
@@ -49,7 +49,7 @@ alongside an ASCII view of the bodies.
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | `Circle`, `Aabb`, overlap tests, contact normal/depth/point |
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
-| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses |
+| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
@@ -71,7 +71,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. Six templates ship across four domains, and every
+and runnable with the shipped binary. Seven templates ship across four domains, and every
 one is parsed, validated and stepped by the test suite.
 
 A scenario names its domain with a `type` key, dispatched by a plain switch to
@@ -90,7 +90,8 @@ particle 1.0  0.30  -2.0 -2.0   1.30 0.90
 keep working unchanged.
 
 The classical mechanics track is complete: collision geometry, colliding
-particles, rigid bodies, ballistics and spring networks have all shipped. Work is gated one milestone at a time; see
+particles, rigid bodies, ballistics, spring networks and rigid-body contact
+response have all shipped. Work is gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 
 ## Build
@@ -221,6 +222,7 @@ built-in scenarios shown above.
 | M11 | `malloy_rigid`: 2D rigid bodies, mass properties, impulses | ✅ Done |
 | M12 | ballistics: uniform gravity in the particle domain | ✅ Done |
 | M13 | `malloy_springs`: spring networks + force accumulation | ✅ Done |
+| M14 | rigid-body contact response: statics, torque from impacts | ✅ Done |
 
 ## Out of scope (gated)
 

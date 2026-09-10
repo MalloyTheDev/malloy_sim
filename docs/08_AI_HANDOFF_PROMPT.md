@@ -24,11 +24,11 @@ Before doing anything, read:
 
 Current status:
 
-M1-M13 are complete. Gravity, colliding particles (with ballistics as uniform
-gravity in that domain), 2D rigid bodies and spring networks are the four
-finished domains, and the scenario format dispatches between them with a type
-key. The classical mechanics track is complete (docs/07_POST_M5_ROADMAP.md).
-Rigid-body contact response is promised but was never given a milestone number.
+M1-M14 are complete. Gravity, colliding particles (with ballistics as uniform
+gravity in that domain), 2D rigid bodies with contact response, and spring
+networks are the four finished domains, and the scenario format dispatches
+between them with a type key. The classical mechanics track is complete
+(docs/07_POST_M5_ROADMAP.md).
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to

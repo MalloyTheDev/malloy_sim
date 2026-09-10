@@ -1,0 +1,48 @@
+# MalloySim scenario: rigid discs colliding and tumbling off an immovable wall.
+#
+# This is what M14 adds. M11 gave rigid bodies free motion and impulses, but
+# nothing could make them collide. Now a contact generates an impulse at a
+# point, and because that point is off the centre of mass, it generates torque:
+# the bodies pick up spin from being hit, rather than only bouncing.
+#
+# Every moving body here has its collision disc centred on its body ORIGIN while
+# its centre of mass sits somewhere else. That offset is the whole mechanism. A
+# disc whose centre is its centre of mass has every contact normal passing
+# straight through it, so it can never be spun by an impact.
+#
+# The last body has infinite mass and inertia, which means immovable. Its
+# inverse mass and inverse inertia are exactly zero, so the impulse formula
+# handles it with no special case, and the diagnostics skip it because infinite
+# mass times zero velocity would be NaN.
+#
+# On the diagnostics: linear momentum is NOT conserved here, because the wall is
+# immovable and absorbs whatever it likes. Watch KE instead. With restitution
+# 0.85 it falls at every impact, and some of what remains has moved from
+# translation into spin.
+
+type rigid
+
+dt 0.002
+steps 9000
+output_every 1000
+
+restitution 0.85
+
+# rigid_body <mass> <inertia> <radius> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
+rigid_body 1.00  0.35  0.45   0.00  0.30   -3.20   0.60   0.00    2.10  -0.35   0.00
+rigid_body 1.80  0.90  0.55  -0.25  0.15   -3.40  -0.90   0.40    1.70   0.55  -0.30
+rigid_body 0.70  0.18  0.35   0.20 -0.22   -2.60   1.60  -0.60    2.40  -0.80   0.45
+
+# An immovable wall on the right. Its own key, because MSVC stream extraction
+# does not accept the token "inf".
+# rigid_static <radius> <px> <py> <angle>
+rigid_static 1.20   2.60  0.00  0.00
+
+# Expected: KE falls from 7.44e+00 to about 5.12e+00 over the first 2000 steps
+# as the three bodies strike the wall and restitution takes its cut, then holds
+# flat once they have all bounced clear and nothing is in contact any more.
+#
+# The angular momentum column swings from -2.74e+00 to +3.09e+00 across those
+# same impacts. That is the milestone working: the bodies left with spin they
+# did not arrive with. It is not a conservation failure, because an immovable
+# body is an external agent rather than part of a closed system.

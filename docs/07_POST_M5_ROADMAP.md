@@ -27,6 +27,7 @@ M10 - colliding particles               [done]
 M11 - 2D rigid body basics              [done]
 M12 - ballistics/projectiles            [done]
 M13 - springs and oscillators           [done]
+M14 - rigid-body contact response       [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -39,12 +40,14 @@ shapes, not bodies, so it has no world and no scenario template, and rule 16
 does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
 collision demonstrable.
 
-Track 1 is complete. What remains from it is one thing that was promised and
-never numbered:
+Track 1 is complete, including the rigid-body contact response that M11
+promised and left unnumbered. It became M14.
 
-```text
-M?? - rigid-body contact response       (promised, never numbered)
-```
+M14 gave `RigidBody2D` a collision radius and made infinite mass and inertia
+mean immovable, which is the representation M11 deliberately deferred on the
+grounds that nothing needed statics until contact response did (ADR 0007).
+Contacts are disc against disc: oriented boxes and SAT would be their own
+milestone.
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
 `ParticleWorld`, because a spring network is interaction topology rather than

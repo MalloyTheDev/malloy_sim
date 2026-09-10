@@ -202,9 +202,10 @@ std::vector<Vec2> rigid_points(const std::vector<RigidBody2D>& bodies)
 // base class with the other two, and the dispatch switch is the whole
 // mechanism (ADR 0006).
 int run_rigid(const char* title, const SimulationSettings& sim,
-              std::vector<RigidBody2D> bodies, int steps, int output_every)
+              std::vector<RigidBody2D> bodies, Real restitution, int steps,
+              int output_every)
 {
-    RigidWorld world{sim, std::move(bodies)};
+    RigidWorld world{sim, std::move(bodies), restitution};
 
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
               << "  dt=" << sim.dt << "  steps=" << steps << '\n';
@@ -367,8 +368,8 @@ int main(int argc, char** argv)
             return run_particles(argv[1], s.simulation, s.particle_settings,
                                  s.particle_list, s.steps, s.output_every);
         case ScenarioType::Rigid:
-            return run_rigid(argv[1], s.simulation, s.rigid_bodies, s.steps,
-                             s.output_every);
+            return run_rigid(argv[1], s.simulation, s.rigid_bodies,
+                             s.rigid_restitution, s.steps, s.output_every);
         case ScenarioType::Springs:
             return run_springs(argv[1], s.simulation, s.spring_network,
                                s.spring_bodies, s.steps, s.output_every);

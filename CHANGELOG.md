@@ -199,6 +199,98 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M14] - 2026-09-10  (rigid-body contact response)
+
+### Added
+
+- Rigid contact response in `malloy_rigid`. Bodies with a nonzero radius collide
+  as discs, and the impulse acts at the contact point rather than at the centre
+  of mass, so it generates torque and the bodies tumble.
+- `RigidBody2D::radius`, a collision disc centred on the BODY ORIGIN.
+- Static bodies: infinite mass and inertia mean immovable, with
+  `is_static()`, `inverse_mass()` and `inverse_inertia()`.
+- `RigidWorld` restitution, validated to lie in [0, 1].
+- `rigid_static <radius> <px> <py> <angle>` in the scenario format, and a
+  `restitution` key now accepted for `type rigid` as well as `type particles`.
+- `scenarios/tumbling_impact.scn`.
+
+### Changed
+
+- BREAKING, scenario format: `rigid_body` takes eleven fields rather than ten.
+  The radius is third, after mass and inertia. `scenarios/spinning_bodies.scn`
+  was updated with radius 0, meaning no collision, and its output is unchanged.
+  Any scenario file outside this repository using `rigid_body` needs the extra
+  field.
+- `RigidBody2D::is_valid()` now ACCEPTS infinite mass and inertia. M11 rejected
+  them on the grounds that nothing needed statics until contact response did
+  (ADR 0007), and a test asserted that rejection. Contact response needs them,
+  so the contract changed deliberately and the test changed with it. NaN is
+  still rejected, because NaN > 0 is false.
+- The diagnostics skip immovable bodies. Infinite mass times zero velocity is
+  NaN, and an immovable body carries no momentum or kinetic energy to report.
+
+### Architecture Notes
+
+- The disc is centred on the body origin, not on the centre of mass, and that
+  offset is the entire mechanism. A contact normal on a disc centred at the
+  centre of mass passes straight through it, giving a zero moment arm, so such a
+  body can never be spun by an impact. Offsetting them is what makes contacts
+  rotational.
+- Immovability is infinity rather than a flag, so `inverse_mass()` and
+  `inverse_inertia()` come out as exactly zero and every impulse formula handles
+  a static body with no branch: it contributes nothing to the effective mass and
+  receives nothing from the impulse.
+- Contacts are disc against disc. Oriented boxes need SAT, which
+  `malloy_collide` does not have, and that is its own milestone.
+- Still no persistent forces and no force or torque accumulators in
+  `malloy_rigid`.
+
+### What conserves, and what does not
+
+The contact IMPULSE conserves both linear and angular momentum exactly. It is
+equal and opposite and acts at one shared point, so the two angular
+contributions are `-(p x J)` and `+(p x J)`.
+
+The positional CORRECTION does not conserve angular momentum. It moves positions
+without changing velocities, which shifts the orbital term `m (r x v)` by
+`c x (v_b - v_a)` where `c` is the correction. This was found by a failing test
+and then isolated by disabling the correction, which made angular momentum hold
+to 1e-8. The perturbation is proportional to penetration depth: the long-run
+test drifts by about 5e-4, while a single contact with penetration nine orders
+smaller drifts by about 5e-9. Linear momentum is unaffected either way, because
+the correction never touches a velocity.
+
+This is the usual cost of resolving penetration by moving bodies. It is recorded
+in the header and in the tests rather than hidden behind a loose tolerance.
+
+### Tests
+
+- Statics: infinite mass and inertia are valid, report `is_static()`, give
+  exactly zero inverses, and cannot be moved by any impulse.
+- A head-on contact between discs whose centres of mass are at their disc
+  centres exchanges velocities and produces no spin at all, which is the
+  control case.
+- The milestone's point: an off-centre contact against an immovable body
+  produces spin the body did not arrive with, and mirroring the offset mirrors
+  the spin, so both torque signs occur.
+- A zero radius means the body passes through others untouched.
+- Momentum invariants at three restitutions, plus a zero-penetration case that
+  isolates the impulse from the correction artefact.
+- Restitution 1 conserves kinetic energy across a contact including its
+  rotational term; below 1 strictly removes some.
+- Verified by mutation testing. Nine mutations were applied and seven were
+  caught immediately: rotational terms dropped from the effective mass, arms
+  measured from the body origin, a flipped angular impulse sign, and inverse
+  mass used where inverse inertia belongs. Two escaped and exposed real gaps,
+  both since closed:
+  - the relative velocity at a contact ignoring `omega x r`, which needed a
+    spinning body with zero linear velocity whose surface is nonetheless closing;
+  - a separating pair being impulsed again, which conserves momentum and so
+    needed a direct velocity assertion.
+  A tenth mutation, removing the infinity special case from `inverse_mass()`, is
+  an equivalent mutant: `1.0 / inf` is exactly `0.0` in IEEE 754, verified rather
+  than assumed, so the branch is readability and not correctness.
+
 ## [M13] - 2026-09-09  (spring networks and deterministic force accumulation)
 
 - The app refactor was triggered by a measurement rather than by taste. The

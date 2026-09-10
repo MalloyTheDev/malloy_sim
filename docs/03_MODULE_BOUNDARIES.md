@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M13). These boundaries are in force
+> All modules below are implemented (M2-M14). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -62,7 +62,9 @@ Not responsible for collision geometry (that is `malloy_collide`), orientation, 
 
 Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
 
-Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, contact response, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle: quaternions and inertia tensors are 3D concerns deferred to M19.
+Also responsible for rigid contact response since M14: disc against disc contacts, impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia.
+
+Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, oriented-box contacts, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle: quaternions and inertia tensors are 3D concerns deferred to M19.
 
 ## `malloy_springs`
 

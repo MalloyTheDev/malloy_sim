@@ -8,6 +8,7 @@
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/particles/particle2d.hpp>
 #include <malloy/particles/particle_settings.hpp>
+#include <malloy/math/real.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/springs/springs.hpp>
@@ -52,6 +53,7 @@ struct Scenario
 
     // type == Rigid
     std::vector<rigid::RigidBody2D> rigid_bodies;
+    math::Real rigid_restitution{1.0};
 
     // type == Springs
     std::vector<springs::SpringBody2D> spring_bodies;
@@ -93,10 +95,19 @@ struct ScenarioParseResult
 //
 // type rigid:
 //
-//   rigid_body <mass> <inertia> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
+//   restitution <value>   bounciness in [0, 1]     (default 1.0)
+//   rigid_body <mass> <inertia> <radius> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
 //
-//     mass and inertia are about the centre of mass; comx/comy is the local
-//     offset from the body origin to the centre of mass; angle is in radians.
+//     mass and inertia are about the centre of mass; radius is the collision
+//     disc centred on the body ORIGIN, and zero means the body does not
+//     collide; comx/comy is the local offset from the body origin to the
+//     centre of mass; angle is in radians. An infinite mass and inertia mean
+//     an immovable body.
+//
+//   rigid_static <radius> <px> <py> <angle>
+//
+//     An immovable body: infinite mass and inertia. A separate key because
+//     MSVC's stream extraction does not accept the token "inf".
 //
 // type springs:
 //
