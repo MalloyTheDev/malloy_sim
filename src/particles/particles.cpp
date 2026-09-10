@@ -100,7 +100,7 @@ bool Particle2D::is_valid() const
 {
     return mass > math::Real{0} && math::is_finite(mass) &&
            radius >= math::Real{0} && math::is_finite(radius) &&
-           math::is_finite(position) && math::is_finite(velocity);
+           math::is_squarable(position) && math::is_squarable(velocity);
 }
 
 bool ParticleSettings::is_valid() const

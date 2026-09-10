@@ -157,7 +157,37 @@ int main()
     // --- Near-circular orbit: the radius stays close to 1 over a short run. ---
     {
         NBodyWorld w = make_orbit_world();
-        const Real tolerance = 0.02;
+        // Issue #19: this deviation is not physics, and 0.02 was 47x looser
+        // than the thing it measures.
+        //
+        // Eliminating the velocity from the two update lines gives the
+        // Stormer-Verlet position recurrence, so the STORED velocity is a
+        // backward difference: it approximates the true velocity half a step
+        // earlier than the time it is reported at. Supplying a tangential
+        // velocity, as this world does, is therefore short of the discrete
+        // circular orbit by a radial component of (dt/2)|a|, and that seeds an
+        // epicycle of eccentricity dt*Omega/2.
+        //
+        // Here Omega is sqrt(G M / R^3) = 1.0000005, so the epicycle's
+        // amplitude is R dt Omega / 2 = 5.000002e-04. The physical
+        // eccentricity of these initial conditions is about 1e-6, so the wobble
+        // is roughly 500 times the physics.
+        //
+        // The run does not reach that amplitude, and the shortfall is part of
+        // the derivation rather than slack. The deviation grows as
+        // R e sin(Omega t), and 1000 steps at dt = 1e-3 is Omega t = 1.0 rad,
+        // about a sixth of an orbit. So the maximum over this run is
+        // 5.000002e-04 * sin(1.0000005) = 4.207358e-04, against a measured
+        // 4.210280e-04: agreement to 0.07 per cent, the remainder being the
+        // O(dt^2) shape of the epicycle.
+        //
+        // Bounded from BOTH sides deliberately. Fixing the initial conditions
+        // with a half-step kick would drop this into the 1e-6 range, and that
+        // is a change to what an initial velocity MEANS across the whole
+        // domain, so it should fail here and be updated on purpose rather than
+        // pass unnoticed.
+        const Real tolerance = 4.25e-4;
+        const Real artefact_floor = 4.15e-4;
         Real max_deviation = 0.0;
         for (int i = 0; i < 1000; ++i)
         {
@@ -171,6 +201,7 @@ int main()
             }
         }
         MALLOY_CHECK_TRUE(max_deviation < tolerance);
+        MALLOY_CHECK_TRUE(max_deviation > artefact_floor);
     }
 
     // --- Specific orbital energy: known value, then approximate conservation. ---
@@ -494,6 +525,18 @@ int main()
         NBodySettings not_finite;
         not_finite.softening = inf;
         MALLOY_CHECK_FALSE(not_finite.is_valid());
+    }
+
+    // --- Issue #16: a position or velocity whose SQUARE overflows is refused.
+    //     Finite is not enough. Everything that squares a vector reaches
+    //     infinity above about 1.34e154, so accepting state up to 1.8e308 left
+    //     a window in which a world validated clean while every energy it
+    //     reported was inf. ---
+    {
+        const Real too_big = 1.4e154; // finite, and its square is not
+        MALLOY_CHECK_TRUE((Body2D{Vec2{1.0, 2.0}, Vec2{}, 1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Body2D{Vec2{too_big, 0.0}, Vec2{}, 1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Body2D{Vec2{}, Vec2{0.0, too_big}, 1.0}.is_valid()));
     }
 
     std::cout << "malloy_nbody_tests passed\n";

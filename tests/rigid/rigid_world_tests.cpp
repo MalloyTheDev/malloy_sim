@@ -1878,6 +1878,73 @@ int main()
         MALLOY_CHECK_NEAR(now.angular_velocity, 0.0, 0.0);
     }
 
+    // --- Issue #16: a position or velocity whose SQUARE overflows is refused.
+    //     Finite is not enough. Everything that squares a vector reaches
+    //     infinity above about 1.34e154, so accepting state up to 1.8e308 left
+    //     a window in which a world validated clean while every energy it
+    //     reported was inf. ---
+    {
+        const Real too_big = 1.4e154; // finite, and its square is not
+        RigidBody2D ok;
+        ok.position = Vec2{1.0, 2.0};
+        MALLOY_CHECK_TRUE(ok.is_valid());
+
+        RigidBody2D far = ok;
+        far.position = Vec2{too_big, 0.0};
+        MALLOY_CHECK_FALSE(far.is_valid());
+
+        RigidBody2D fast = ok;
+        fast.velocity = Vec2{0.0, too_big};
+        MALLOY_CHECK_FALSE(fast.is_valid());
+
+        // The local centre of mass is squared too, through center_of_mass.
+        RigidBody2D offset = ok;
+        offset.local_center_of_mass = Vec2{too_big, 0.0};
+        MALLOY_CHECK_FALSE(offset.is_valid());
+    }
+
+    // --- Issue #18: the angle accumulates by repeated addition, and this pins
+    //     how far that drifts.
+    //
+    //     malloy_time computes elapsed time as tick_count * dt precisely so it
+    //     "cannot drift the way repeated floating-point addition would"
+    //     (fixed_step.hpp). The angle is the same pattern and does NOT get the
+    //     same treatment, and it cannot: angular velocity is changed by
+    //     contacts, so there is no constant increment to multiply.
+    //
+    //     What is left is to know the size of it. Summing N terms of magnitude
+    //     theta accumulates at most u*theta*N/2 with u = 2^-53, which for the
+    //     100000 steps below is 3.11e-09 on a final angle of 560 radians. The
+    //     comparison is against the exactly computed N*omega*dt.
+    //
+    //     ADR 0007 takes an explicit position on this area, so the behaviour is
+    //     documented rather than quietly changed. ---
+    {
+        RigidBody2D spinner;
+        spinner.mass = 1.0;
+        spinner.inertia = 1.0;
+        spinner.radius = 0.0; // no contacts, so omega really is constant
+        spinner.angular_velocity = 1.4;
+
+        const Real dt = 0.004;
+        const int steps = 100000;
+        RigidWorld w{SimulationSettings{dt}, {spinner}, RigidSettings{}};
+        for (int i = 0; i < steps; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+
+        const Real exact = static_cast<Real>(steps) * spinner.angular_velocity * dt;
+        const Real bound =
+            (1.0 / 9007199254740992.0) * exact * static_cast<Real>(steps) / 2.0;
+        MALLOY_CHECK_NEAR(w.bodies()[0].angle, exact, bound);
+
+        // The angle is NOT wrapped, which is the documented contract, so the
+        // comparison above is against 560 radians rather than a canonicalized
+        // remainder.
+        MALLOY_CHECK_TRUE(w.bodies()[0].angle > 500.0);
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

@@ -604,6 +604,18 @@ int main()
         }
     }
 
+    // --- Issue #16: a position or velocity whose SQUARE overflows is refused.
+    //     Finite is not enough. Everything that squares a vector reaches
+    //     infinity above about 1.34e154, so accepting state up to 1.8e308 left
+    //     a window in which a world validated clean while every energy it
+    //     reported was inf. ---
+    {
+        const Real too_big = 1.4e154; // finite, and its square is not
+        MALLOY_CHECK_TRUE((Particle2D{Vec2{1.0, 2.0}, Vec2{}, 1.0, 0.5}.is_valid()));
+        MALLOY_CHECK_FALSE((Particle2D{Vec2{too_big, 0.0}, Vec2{}, 1.0, 0.5}.is_valid()));
+        MALLOY_CHECK_FALSE((Particle2D{Vec2{}, Vec2{0.0, too_big}, 1.0, 0.5}.is_valid()));
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }

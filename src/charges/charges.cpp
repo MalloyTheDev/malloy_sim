@@ -28,8 +28,8 @@ bool ChargedParticle2D::is_valid() const
     // The charge is deliberately unconstrained apart from being finite. Zero
     // and negative are both meaningful.
     return mass > math::Real{0} && math::is_finite(mass) &&
-           math::is_finite(charge) && math::is_finite(position) &&
-           math::is_finite(velocity);
+           math::is_finite(charge) && math::is_squarable(position) &&
+           math::is_squarable(velocity);
 }
 
 bool ChargeSettings::is_valid() const

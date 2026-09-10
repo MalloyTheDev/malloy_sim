@@ -102,3 +102,28 @@ range. Near-cancellation cases belong in numerical-characterization tests that
 check sign stability, bounded magnitude, and finite results, not in golden
 values pinning one bit pattern, which would assert the cross-toolchain bitwise
 determinism `docs/04` declines to claim.
+
+## Amendment: the cost of accumulating the angle by addition
+
+The decision above integrates the angle as `theta_next = theta + omega*dt` and
+leaves canonicalization out. That still stands, and the code, the header
+contract and the tests all agree with it. What was never written down is the
+price.
+
+`malloy_time` computes elapsed time as `tick_count * dt` specifically so it
+"cannot drift the way repeated floating-point addition would". The angle is the
+same pattern and does not get the same treatment, and it cannot: angular
+velocity is changed by contacts, so there is no constant increment to multiply.
+
+The size of it: summing N terms accumulates at most `u * theta * N / 2` with
+`u = 2^-53`. Measured against exactly summed values at omega = 1.4, dt = 0.004
+and N = 1e7, the drift is -1.13e-05 rad, about 2.33 arcsec, against a bound of
+3.1e-05. The bound is tight to within 3x, and a test now pins it.
+
+Stagnation is not reachable. `theta += c` stops advancing at
+`theta > c * 2^53`, needing more than 9e15 steps against a parser cap of 2.1e9.
+
+The alternatives are a per-body accumulated tick count or compensated
+summation, both of which add state to `RigidBody2D`. Neither is taken. The
+drift is bounded, derivable and pinned, which is the honest resolution for a
+quantity nothing in the project reads at that precision (issue #18).

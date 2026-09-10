@@ -144,6 +144,39 @@ int main()
         MALLOY_CHECK_TRUE(approx_equal(Vec2(0.0, 0.0), Vec2(0.25, -0.25), 0.25));
     }
 
+    // --- Issue #16: is_squarable is not is_finite. length_squared squares each
+    //     component, so it reaches infinity above sqrt(DBL_MAX), about
+    //     1.34e154, while the vector itself is still finite and every
+    //     component is a normal number.
+    //
+    //     That gap is why validation testing only is_finite accepted state up
+    //     to 1.8e308 while every energy computed from it was inf. ---
+    {
+        const Real inf = std::numeric_limits<Real>::infinity();
+        const Real nan = std::numeric_limits<Real>::quiet_NaN();
+
+        MALLOY_CHECK_TRUE(malloy::math::is_squarable(Vec2{}));
+        MALLOY_CHECK_TRUE(malloy::math::is_squarable(Vec2{3.0, -4.0}));
+        MALLOY_CHECK_TRUE(malloy::math::is_squarable(Vec2{1.0e154, 0.0}));
+
+        // Finite, and not squarable. Both halves matter.
+        const Vec2 huge{1.4e154, 0.0};
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(huge));
+        MALLOY_CHECK_FALSE(malloy::math::is_squarable(huge));
+
+        // A pair each of which is squarable alone but not together.
+        const Vec2 both{1.0e154, 1.0e154};
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(both));
+        MALLOY_CHECK_FALSE(malloy::math::is_squarable(both));
+
+        MALLOY_CHECK_FALSE(malloy::math::is_squarable(Vec2{inf, 0.0}));
+        MALLOY_CHECK_FALSE(malloy::math::is_squarable(Vec2{nan, 0.0}));
+
+        // Underflow is not an error: a squared magnitude below the smallest
+        // normal is zero, which is a real answer rather than a broken one.
+        MALLOY_CHECK_TRUE(malloy::math::is_squarable(Vec2{1.0e-200, 0.0}));
+    }
+
     std::cout << "malloy_math_tests passed\n";
     return 0;
 }

@@ -117,6 +117,23 @@ inline bool is_finite(const Vec2& v)
     return is_finite(v.x) && is_finite(v.y);
 }
 
+// True when |v|^2 is representable, not merely when v is.
+//
+// `length_squared` squares each component, so it reaches infinity for a
+// magnitude above sqrt(DBL_MAX), about 1.34e154, while the vector itself is
+// still perfectly finite and every component is a normal number.
+//
+// That gap matters because everything which squares a vector reaches infinity
+// there: every kinetic energy, every squared distance, every softened
+// denominator. Validation that tests only `is_finite(v)` accepts state up to
+// 1.8e308, so there is a window covering the entire upper half of the exponent
+// range in which a world is reported sound and every number it reports is inf.
+inline bool is_squarable(const Vec2& v)
+{
+    return is_finite(length_squared(v));
+}
+
+
 // Component-wise approximate equality, reusing the scalar tolerance check
 // so there is one authoritative definition of "approximately equal".
 inline bool approx_equal(const Vec2& a, const Vec2& b, Real epsilon)

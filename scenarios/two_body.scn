@@ -10,6 +10,16 @@ output_every 1000
 body 1.0       0.0  0.0   0.0  0.0
 body 0.000001  1.0  0.0   0.0  1.0
 
+# On the radial wobble: the separation does not hold at exactly 1.0, and about
+# 5e-4 of the deviation is numerical rather than physical.
+#
+# The stored velocity in semi-implicit Euler is half a step behind the position
+# (docs/04), so giving this planet a purely tangential velocity is short of the
+# discrete circular orbit by a radial component, which seeds an epicycle of
+# eccentricity dt*Omega/2 = 5e-4. The physical eccentricity of these initial
+# conditions is about 1e-6, so the wobble is roughly 500 times the physics. It
+# halves when dt halves, which is how you can tell.
+#
 # Expected final report (Debug and Release, MSVC):
 #   step  10000   sep  1.00027148   E_total  -4.99999540e-07   L_total   1.00000000e-06
 # Matches the built-in two-body demo exactly.

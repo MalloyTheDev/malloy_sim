@@ -20,7 +20,7 @@ bool Spring::is_valid() const
 bool SpringBody2D::is_valid() const
 {
     return mass > math::Real{0} && math::is_finite(mass) &&
-           math::is_finite(position) && math::is_finite(velocity);
+           math::is_squarable(position) && math::is_squarable(velocity);
 }
 
 SpringId SpringNetwork::add(const Spring& spring)

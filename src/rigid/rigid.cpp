@@ -248,8 +248,8 @@ bool RigidBody2D::is_valid() const
     return mass > math::Real{0} && inertia > math::Real{0} &&
            radius >= math::Real{0} && math::is_finite(radius) &&
            math::is_finite(angle) && math::is_finite(angular_velocity) &&
-           math::is_finite(position) && math::is_finite(velocity) &&
-           math::is_finite(local_center_of_mass);
+           math::is_squarable(position) && math::is_squarable(velocity) &&
+           math::is_squarable(local_center_of_mass);
 }
 
 bool RigidBody2D::has_infinite_mass() const

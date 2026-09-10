@@ -5,6 +5,72 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Issue #16: `is_valid` accepted state that every diagnostic then reported as
+  `inf`.
+
+  Everything which squares a vector reaches infinity above sqrt(DBL_MAX), about
+  1.34e154, while the vector itself is still finite and every component is a
+  normal number. Validation tested only `is_finite`, which accepts up to
+  1.8e308, so a window covering the entire upper half of the exponent range
+  reported a world as sound while every energy it printed was infinite.
+
+  `math::is_squarable` is the exact predicate, and all five body types now
+  require it on position and velocity, plus `local_center_of_mass` for a rigid
+  body since `center_of_mass` squares that too. Five mutations, one per domain,
+  all caught.
+
+- Issue #19: `tests/nbody/nbody_world_tests.cpp` asserted a radial deviation at
+  0.02 against a real 4.21e-04, and that 4.21e-04 is not physics.
+
+  The stored velocity in semi-implicit Euler is half a step behind the
+  position, so a tangential initial velocity is short of the discrete circular
+  orbit by a radial component and seeds an epicycle of eccentricity
+  `dt * Omega / 2`. For that world it is 5.0e-04 against a physical
+  eccentricity of about 1e-6, so the wobble is roughly 500 times the physics.
+
+  The run only reaches part of it, and the shortfall is part of the derivation
+  rather than slack: the deviation grows as `R e sin(Omega t)`, and 1000 steps
+  is `Omega t = 1.0` rad, about a sixth of an orbit. Predicted maximum
+  `5.000002e-04 * sin(1.0000005) = 4.207358e-04`, measured 4.210280e-04, which
+  is 0.07 per cent.
+
+  Now bounded from BOTH sides. Correcting the initial conditions with a
+  half-step kick would drop this into the 1e-6 range, and that changes what an
+  initial velocity MEANS across the whole N-body domain and every template
+  figure with it, so it should fail here and be updated deliberately rather
+  than pass unnoticed. That remains a milestone rather than a patch.
+
+- Issue #18: the angle accumulates by repeated addition, and how far it drifts
+  is now written down and pinned.
+
+  `malloy_time` computes elapsed time as `tick_count * dt` specifically so it
+  cannot drift that way. The angle is the same pattern and cannot get the same
+  treatment, because angular velocity is changed by contacts and there is no
+  constant increment to multiply.
+
+  Summing N terms accumulates at most `u * theta * N / 2` with `u = 2^-53`. A
+  test now compares 100000 steps of constant spin against the exactly computed
+  `N * omega * dt` and holds inside that bound. ADR 0007 is amended with the
+  measurement and with why the two alternatives, a per-body tick count and
+  compensated summation, are not taken: both add state to `RigidBody2D` for a
+  quantity nothing reads at that precision.
+
+### Added
+
+- A coordinate magnitude budget in docs/04, which had no such convention. Two
+  limits, and the smaller is the one that matters: `position += velocity * dt`
+  stops advancing once the increment falls below half an ulp, so at
+  `|x| ~ 1e13` with metre-scale motion at millisecond steps a body travels
+  1.95x too far and at 1e14 it freezes, while every diagnostic reads perfectly
+  conserved because they are all computed from velocity. Budget: keep `|x|`
+  below about 1e12, scaled by `v * dt`.
+
+- The half-step velocity stagger is documented in docs/04, and
+  `scenarios/two_body.scn` says which part of its wobble is numerical.
+
+
 ### Added
 
 - Issue #13: a layering test, `malloy_layering_tests`, which checks the module
