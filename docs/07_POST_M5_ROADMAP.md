@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M12 are complete, so this is the live roadmap for what comes next.
+M1-M14 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,

@@ -136,6 +136,15 @@ All notable changes to MalloySim are recorded here. The format follows
   `docs/07_POST_M5_ROADMAP.md` both still said M1-M8 were the completed set, and
   `docs/08_AI_HANDOFF_PROMPT.md` said M1-M11 and omitted ballistics. A handoff
   prompt that understates what exists is worse than no prompt.
+- `docs/07_POST_M5_ROADMAP.md` said M1-M12 were the completed set, two
+  milestones stale. This is the second time that line has gone stale: it was
+  corrected in the pre-M13 audit and drifted again through M13 and M14. It is a
+  hand-maintained count with nothing guarding it.
+- The `restitution` scenario key wrote to both `particle_settings.restitution`
+  and `rigid_restitution` regardless of the declared type, so a rigid scenario
+  silently carried a particle setting it never reads. It now writes only the
+  field its own domain uses. Harmless before, but it read as a mistake to
+  anyone inspecting a parsed scenario.
 ### Removed
 
 ### Tests
@@ -187,6 +196,15 @@ All notable changes to MalloySim are recorded here. The format follows
   accessors were public API with no test at all. Now covered on all three
   worlds, with every field a distinct value so a getter returning the wrong
   member shows, and confirmed by a mutation that makes one return a default.
+- The scenario tests enumerate `scenarios/` with `std::filesystem` instead of a
+  hardcoded list. The list happened to be in sync, but the structure was the
+  risk: a template added without editing the test file would have been silently
+  untested, quietly breaking rule 16. Verified by dropping a broken template
+  into the directory and watching it fail with no test edit.
+- Rule 16's other half is now enforced too. Every template must contain a
+  documented expected result, checked by reading the file rather than trusted to
+  review. Verified by adding a template with no `# Expected` block and watching
+  it fail.
 ### Architecture Notes
 
 - The all-in-one goal raises rather than retires the engine-kernel risk named

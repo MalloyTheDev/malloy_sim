@@ -179,8 +179,17 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "restitution requires a number");
             }
-            scenario.particle_settings.restitution = value;
-            scenario.rigid_restitution = value;
+            // Write only the field the declared domain actually reads. Setting
+            // both would leave a rigid scenario carrying a particle setting it
+            // never uses, which reads as a mistake to anyone inspecting it.
+            if (scenario.type == ScenarioType::Particles)
+            {
+                scenario.particle_settings.restitution = value;
+            }
+            else
+            {
+                scenario.rigid_restitution = value;
+            }
         }
         else if (key == "gravity")
         {

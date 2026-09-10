@@ -7,7 +7,11 @@
 #include <malloy/sim_core/sim_core.hpp>
 #include <test_check.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -157,13 +161,25 @@ int main()
     //     the least-tested files in the repository. ---
 #ifdef MALLOY_SCENARIO_DIR
     {
-        const char* templates[] = {"two_body.scn", "three_body_triangle.scn",
-                                   "bouncing_particles.scn",
-                                   "spinning_bodies.scn",
-                                   "projectile_arc.scn",
-                                   "spring_chain.scn",
-                                   "tumbling_impact.scn"};
-        for (const char* name : templates)
+        // Enumerated from the directory rather than listed by hand. A hardcoded
+        // list means a template added without editing this file is silently
+        // untested, which would quietly break the rule that every template must
+        // have a test or a documented expected result (CLAUDE.md rule 16).
+        std::vector<std::string> templates;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(MALLOY_SCENARIO_DIR))
+        {
+            if (entry.is_regular_file() && entry.path().extension() == ".scn")
+            {
+                templates.push_back(entry.path().filename().string());
+            }
+        }
+        // Sorted, so a failure names the same file on every platform.
+        std::sort(templates.begin(), templates.end());
+        // The directory must not be empty: an empty enumeration would make this
+        // whole block silently vacuous.
+        MALLOY_CHECK_TRUE(templates.size() >= 5);
+        for (const std::string& name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;
             const ScenarioParseResult r =
@@ -174,6 +190,19 @@ int main()
                           << '\n';
                 return 1;
             }
+            // Rule 16 requires a template to have a test OR a documented
+            // expected result. The parse above is the test half; this is the
+            // documentation half, enforced rather than trusted to review.
+            std::ifstream source(path);
+            std::string text((std::istreambuf_iterator<char>(source)),
+                             std::istreambuf_iterator<char>());
+            if (text.find("# Expected") == std::string::npos)
+            {
+                std::cerr << "template " << name
+                          << " has no documented expected result\n";
+                return 1;
+            }
+
             MALLOY_CHECK_TRUE(r.scenario.steps > 0);
 
             // Same dispatch the app performs, so a template is validated by the
