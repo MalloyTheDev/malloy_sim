@@ -31,10 +31,11 @@ public:
 
     // Advance by exactly one fixed step, in this order:
     //
-    //   1. move every particle by velocity * dt (no forces act, so velocity is
-    //      unchanged by integration itself);
-    //   2. resolve particle/particle contacts in ascending pair order;
-    //   3. resolve wall contacts.
+    //   1. add gravity * dt to every velocity;
+    //   2. move every particle by the UPDATED velocity * dt, which makes this
+    //      semi-implicit (symplectic) Euler, the same order NBodyWorld uses;
+    //   3. resolve particle/particle contacts in ascending pair order;
+    //   4. resolve wall contacts.
     //
     // The pair order is fixed so a run is repeatable (docs/04). On validation
     // failure, before or after the update, the state is left unchanged and the
@@ -77,7 +78,23 @@ private:
 // run where nothing touches a wall.
 math::Vec2 total_momentum(const std::vector<Particle2D>& particles);
 
-// Kinetic energy is conserved only when restitution is exactly 1. Below that,
-// every collision removes some, which is what makes restitution testable.
+// Kinetic energy is conserved only when restitution is exactly 1 AND gravity is
+// zero. Below that, every collision removes some, which is what makes
+// restitution testable.
 math::Real total_kinetic_energy(const std::vector<Particle2D>& particles);
+
+// Gravitational potential energy in the uniform field: the sum of -m (g . r).
+// Zero when gravity is zero, so total_energy reduces to the kinetic term.
+math::Real total_potential_energy(const std::vector<Particle2D>& particles,
+                                  const math::Vec2& gravity);
+
+// Kinetic plus potential.
+//
+// This is NOT conserved under a constant field. Semi-implicit Euler loses
+// exactly (1/2) * (sum of m) * |g|^2 * dt^2 per free-flight step, a constant
+// secular drift rather than a bounded oscillation, because the motion is
+// unbounded. The exact per-step change is what the tests assert; claiming
+// conservation here would be claiming something false.
+math::Real total_energy(const std::vector<Particle2D>& particles,
+                        const math::Vec2& gravity);
 } // namespace malloy::particles

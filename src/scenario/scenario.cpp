@@ -171,6 +171,21 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 return make_error(line_number, "restitution requires a number");
             }
         }
+        else if (key == "gravity")
+        {
+            if (scenario.type != ScenarioType::Particles)
+            {
+                return make_error(line_number, "gravity belongs to type particles");
+            }
+            saw_domain_key = true;
+            math::Real gx{};
+            math::Real gy{};
+            if (!(tokens >> gx >> gy))
+            {
+                return make_error(line_number, "gravity requires: gx gy");
+            }
+            scenario.particle_settings.gravity = math::Vec2{gx, gy};
+        }
         else if (key == "bounds")
         {
             if (scenario.type != ScenarioType::Particles)

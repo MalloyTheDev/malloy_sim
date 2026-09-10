@@ -1,0 +1,40 @@
+# MalloySim scenario: projectiles under gravity, bouncing in a box.
+#
+# Three balls launched at different angles arc, land, bounce, and settle. This
+# is the M12 ballistics demonstration: uniform gravity acting on the colliding
+# particle domain, which is exactly what a 2D projectile is.
+#
+# On the energy column: total energy is NOT conserved here, and that is
+# correct rather than a defect. Two things reduce it, both deliberate:
+#
+#   restitution 0.6 removes energy at every bounce, which is the point of
+#   restitution and is why the balls settle instead of bouncing forever;
+#
+#   semi-implicit Euler under a constant field loses exactly
+#   (1/2) * (sum of m) * |g|^2 * dt^2 per free-flight step. With the values
+#   below that is about 6.7e-4 per step. The tests assert that figure exactly
+#   rather than claiming a conservation that does not hold.
+#
+# Set restitution to 1.0 and the balls keep bouncing, but the integrator drift
+# is still there and still exact.
+
+type particles
+
+dt 0.002
+steps 12000
+output_every 1500
+
+restitution 0.6
+gravity 0.0 -9.81
+bounds -8.0 0.0 8.0 12.0
+
+# particle <mass> <radius> <px> <py> <vx> <vy>
+particle 1.0  0.30  -7.0   1.0    6.5   7.0
+particle 2.0  0.45  -7.0   0.5    4.0   9.5
+particle 0.5  0.22  -6.0   2.0    8.0   4.5
+
+# Expected: energy falls steeply while the balls are bouncing (2.02e+02 at step
+# 0, about 1.30e+01 by step 3000) and then holds flat, because once they are
+# resting there is no free flight left to drift and no bounce left to damp.
+# There is no friction, so the small horizontal momentum persists: the balls
+# slide. That is correct for this model rather than a defect.

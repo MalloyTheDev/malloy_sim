@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M11). These boundaries are in force
+> All modules below are implemented (M2-M12). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -54,7 +54,7 @@ Not responsible for density, mass, inertia, bodies, velocity, contact response, 
 
 ## `malloy_particles`
 
-Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, and its own validation and diagnostics.
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy.
 
 Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, gravity, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 

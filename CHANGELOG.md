@@ -185,6 +185,81 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+## [M12] - 2026-09-09  (ballistics)
+
+### Added
+
+- Uniform `gravity` in `ParticleSettings`, applied before the position update so
+  the integration stays semi-implicit (symplectic) Euler, matching `NBodyWorld`.
+- `total_potential_energy` and `total_energy` in `malloy_particles`.
+- A `gravity` key for `type particles` scenarios.
+- `scenarios/projectile_arc.scn`.
+
+### Changed
+
+- The terminal app reports total energy rather than kinetic energy for particle
+  scenarios. With zero gravity the two are identical, so
+  `bouncing_particles.scn` still reports 6.82500000e+00 and only the column
+  label changed.
+
+### Architecture Notes
+
+- Ballistics shipped as gravity inside `malloy_particles`, not as a separate
+  library. A 2D projectile is a colliding particle under gravity, and a
+  dedicated domain would have duplicated almost all of `malloy_particles` to add
+  one setting. ADR 0006's "duplication beats abstraction" was about a few small
+  fields, not a whole world.
+- Gravity is world configuration, not body state, so `Particle2D` is unchanged
+  and ADR 0006 is untouched. It defaults to zero, which is asserted to reproduce
+  the pre-gravity behaviour exactly rather than merely closely.
+- No force or torque accumulators were introduced. A uniform field is applied
+  directly, so the accumulation-order determinism surface flagged during M11
+  still does not exist.
+
+### The energy invariant is NOT conservation
+
+Semi-implicit Euler under a constant field does not conserve energy. Deriving
+the step:
+
+```text
+v' = v + g dt
+x' = x + v' dt
+E  = (1/2) m |v|^2 - m (g . x)
+E' - E = -(1/2) m |g|^2 dt^2
+```
+
+so energy falls by exactly `(1/2) m |g|^2 dt^2` every free-flight step. This is
+a constant secular drift, not the bounded oscillation a symplectic integrator
+gives on a bounded orbit, because projectile motion is unbounded.
+
+The tests therefore assert the exact per-step change rather than approximate
+conservation, and the same for momentum: `dp = (sum m) g dt` exactly per step.
+An exact statement of what the integrator does is a stronger test than a loose
+statement of what it nearly does, and it does not require claiming something
+false. `scenarios/projectile_arc.scn` documents the figure for its own values.
+
+### Tests
+
+- Zero gravity reproduces the pre-gravity behaviour to exact equality over 400
+  steps, which is the backward-compatibility guard for every earlier scenario.
+- A single hand-computable step pinning that gravity is applied before the
+  position update: `g = (0,-10)`, `dt = 0.5` gives velocity -5 and position
+  -2.5, distinguishing semi-implicit Euler from both explicit Euler (0) and the
+  exact half-a-t-squared solution (-1.25).
+- Gravity accelerates equally regardless of mass, with both components nonzero.
+- The exact momentum change and the exact energy drift over long runs, each
+  asserted against a hand-computed figure, with a check that the drift is far
+  larger than the tolerance so the assertion is not vacuous.
+- Potential energy sign pinned on both axes, not just the one gravity usually
+  uses.
+- A dropped ball bounces and settles on the floor over 20000 steps.
+- Non-finite gravity is rejected by validation.
+- Verified by mutation testing: six broken implementations each make the suite
+  fail, including gravity applied after the position update (explicit Euler
+  order), integrated with `dt` squared, scaled by mass as though it were a force
+  rather than an acceleration, potential energy with a flipped sign or using
+  velocity instead of position, and validation dropping the finite check.
+
 ## [M11] - 2026-09-09  (2D rigid bodies)
 
 ### Added

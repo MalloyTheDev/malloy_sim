@@ -158,7 +158,8 @@ int main()
     {
         const char* templates[] = {"two_body.scn", "three_body_triangle.scn",
                                    "bouncing_particles.scn",
-                                   "spinning_bodies.scn"};
+                                   "spinning_bodies.scn",
+                                   "projectile_arc.scn"};
         for (const char* name : templates)
         {
             const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/" + name;

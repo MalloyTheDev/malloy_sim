@@ -81,6 +81,7 @@ struct ScenarioParseResult
 // type particles:
 //
 //   restitution <value>   bounciness in [0, 1]     (default 1.0)
+//   gravity <gx> <gy>     uniform acceleration     (default 0 0)
 //   bounds <minx> <miny> <maxx> <maxy>             (default -1 -1 1 1)
 //   particle <mass> <radius> <px> <py> <vx> <vy>
 //

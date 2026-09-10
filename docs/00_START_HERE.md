@@ -5,7 +5,7 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M11 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M12 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles and rigid libraries are built, and the terminal app runs all three
 domains. Gravity, colliding particles and rigid bodies are the finished domains. See `README.md` and `CHANGELOG.md`.
 
@@ -39,8 +39,9 @@ completion.
 
 ## What's next
 
-M1-M11 are done, with three finished domains and multi-domain dispatch in place.
-Ballistics and springs remain on the classical mechanics track. Work stays gated one milestone at a time; see
+M1-M12 are done, with three finished domains and multi-domain dispatch in place.
+Springs remain on the classical mechanics track, and rigid-body contact response
+still has no milestone number. Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 
 The all-in-one goal is not a license to build ahead. Breadth is earned by

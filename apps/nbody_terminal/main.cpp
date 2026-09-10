@@ -34,7 +34,7 @@ using malloy::particles::Particle2D;
 using malloy::rigid::RigidBody2D;
 using malloy::rigid::RigidWorld;
 using malloy::nbody::total_energy;
-using malloy::particles::total_kinetic_energy;
+using malloy::particles::total_energy;
 using malloy::particles::total_momentum;
 using malloy::particles::ParticleSettings;
 using malloy::particles::ParticleWorld;
@@ -129,11 +129,11 @@ int run_particles(const char* title, const SimulationSettings& sim,
 
     Viewport view = fit_viewport(particle_positions(world.particles()));
 
-    const auto report = [&world, &view](std::int64_t step_index) {
+    const auto report = [&world, &view, &settings](std::int64_t step_index) {
         const auto& now = world.particles();
         std::cout << "step " << std::setw(6) << step_index;
         std::cout << std::scientific;
-        std::cout << "   KE " << std::setw(16) << total_kinetic_energy(now)
+        std::cout << "   E " << std::setw(16) << total_energy(now, settings.gravity)
                   << "   p " << std::setw(16) << total_momentum(now).x << std::setw(16)
                   << total_momentum(now).y << '\n';
         std::cout << std::fixed;

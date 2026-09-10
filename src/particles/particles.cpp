@@ -106,7 +106,8 @@ bool Particle2D::is_valid() const
 bool ParticleSettings::is_valid() const
 {
     return restitution >= math::Real{0} && restitution <= math::Real{1} &&
-           math::is_finite(restitution) && bounds.is_valid();
+           math::is_finite(restitution) && math::is_finite(gravity) &&
+           bounds.is_valid();
 }
 
 ParticleWorld::ParticleWorld(sim_core::SimulationSettings simulation_settings,
@@ -165,7 +166,15 @@ sim_core::StepResult ParticleWorld::step()
     const math::Real restitution = particle_settings_.restitution;
     const std::size_t count = particles_.size();
 
-    // (1) no forces act, so integration is just position += velocity * dt.
+    // (1) gravity first, then (2) move by the UPDATED velocity. Velocities
+    //     before positions is what makes this semi-implicit (symplectic) Euler,
+    //     matching NBodyWorld. With zero gravity step (1) is a no-op and the
+    //     result is bit-identical to before gravity existed.
+    const math::Vec2 gravity = particle_settings_.gravity;
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        particles_[i].velocity += gravity * dt;
+    }
     for (std::size_t i = 0; i < count; ++i)
     {
         particles_[i].position += particles_[i].velocity * dt;
@@ -218,5 +227,23 @@ math::Real total_kinetic_energy(const std::vector<Particle2D>& particles)
         kinetic += math::Real{0.5} * p.mass * math::dot(p.velocity, p.velocity);
     }
     return kinetic;
+}
+
+math::Real total_potential_energy(const std::vector<Particle2D>& particles,
+                                  const math::Vec2& gravity)
+{
+    math::Real potential = 0.0;
+    for (const Particle2D& p : particles)
+    {
+        // U = -m (g . r), so with g pointing down a higher particle has more.
+        potential -= p.mass * math::dot(gravity, p.position);
+    }
+    return potential;
+}
+
+math::Real total_energy(const std::vector<Particle2D>& particles,
+                        const math::Vec2& gravity)
+{
+    return total_kinetic_energy(particles) + total_potential_energy(particles, gravity);
 }
 } // namespace malloy::particles

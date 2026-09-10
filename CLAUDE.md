@@ -40,17 +40,18 @@ It is still not:
 ## Current phase
 
 ```text
-M1-M11 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M12 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
-with multi-domain scenario dispatch, and 2D rigid bodies.
+with multi-domain scenario dispatch, 2D rigid bodies, and ballistics.
 ```
 
 Active track: **classical mechanics depth**. M9 (collision geometry), M10
-(colliding particles, which introduced the multi-domain `type` key) and M11
-(2D rigid bodies) are done. Ballistics and springs remain. See
-`docs/07_POST_M5_ROADMAP.md`.
+(colliding particles, which introduced the multi-domain `type` key), M11
+(2D rigid bodies) and M12 (ballistics, as uniform gravity in the particle
+domain) are done. Springs remain, and rigid-body contact response still has no
+milestone number. See `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M12 or later) unless explicitly asked, and
+Do not start any further milestone (M13 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 

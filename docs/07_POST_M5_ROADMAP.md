@@ -25,6 +25,7 @@ M8  - simple 2D debug visualization     [done]
 M9  - collision primitives              [done]
 M10 - colliding particles               [done]
 M11 - 2D rigid body basics              [done]
+M12 - ballistics/projectiles            [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -38,9 +39,22 @@ does not apply to it any more than it does to `malloy_ascii`. M10 is what makes
 collision demonstrable.
 
 ```text
-M12 - ballistics/projectiles
 M13 - springs and oscillators
+M?? - rigid-body contact response       (promised, never numbered)
 ```
+
+M12 shipped as uniform gravity in `malloy_particles` rather than a separate
+library. A 2D projectile is a colliding particle under gravity, and a dedicated
+domain would have duplicated almost all of `malloy_particles` for one extra
+setting. Gravity is world configuration, not body state, so no body type
+changed and ADR 0006 is unaffected. It defaults to zero, so every earlier
+scenario runs bit-identically.
+
+M11 promised that rigid-body contact response would be "its own milestone", but
+no such milestone was ever numbered. It is the gap between M9 (collision
+geometry) and M11 (rigid bodies): the two exist and nothing connects them. It
+also needs static, infinite-mass bodies, which M11 deliberately left
+unrepresented.
 
 M11 shipped as free motion plus impulses: no persistent forces, no force or
 torque accumulators, and no rigid-body contact response. Forces belong with

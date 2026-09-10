@@ -19,7 +19,14 @@ struct ParticleSettings
     // they carry momentum away: only the no-wall case conserves it.
     collide::Aabb bounds{math::Vec2{-1.0, -1.0}, math::Vec2{1.0, 1.0}};
 
-    // Valid when restitution is in [0, 1] and finite, and bounds is a valid box.
+    // Uniform acceleration applied to every particle, in world units. Defaults
+    // to zero, so every scenario written before this existed behaves exactly as
+    // it did. A setting rather than per-body state: it is a property of the
+    // world, not of a particle, so no body type changes (ADR 0006).
+    math::Vec2 gravity{};
+
+    // Valid when restitution is in [0, 1] and finite, bounds is a valid box,
+    // and gravity is finite.
     bool is_valid() const;
 };
 } // namespace malloy::particles

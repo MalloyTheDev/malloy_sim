@@ -1,8 +1,10 @@
 # MalloySim scenario: elastic particles colliding inside a box.
 #
-# restitution 1.0 is perfectly elastic, so total kinetic energy is conserved:
-# watch the KE column stay flat while the particles exchange momentum with each
-# other and with the walls. Lower it toward 0 to watch the box go quiet.
+# restitution 1.0 is perfectly elastic and gravity is absent, so total energy is
+# conserved: watch the E column stay flat while the particles exchange momentum
+# with each other and with the walls. Lower restitution toward 0 to watch the
+# box go quiet. With no gravity the potential term is zero, so E here is purely
+# kinetic.
 
 type particles
 
@@ -20,6 +22,6 @@ particle 2.0  0.45   0.0   2.0   0.70  -1.20
 particle 0.5  0.22  -1.0   1.5  -1.40  -0.60
 particle 1.5  0.38   1.5   0.5  -0.85  -1.35
 
-# Expected: KE holds at 6.82500000e+00 for every report, because restitution
+# Expected: E holds at 6.82500000e+00 for every report, because restitution
 # is exactly 1. Momentum is NOT conserved here: the walls are immovable and
 # carry it away on every bounce.
