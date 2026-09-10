@@ -739,6 +739,61 @@ int main()
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 
+    // --- M16: the ground key, normalized on load so the geometry type keeps a
+    //     strict unit-normal invariant. The direction below has length 5, and
+    //     both components are checked, so a dropped one would show. ---
+    {
+        std::istringstream in("type rigid\n"
+                              "ground 3 4 -2.5\n"
+                              "ground 0 -1 -7\n"
+                              "rigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_EQ(r.scenario.rigid_settings.ground.size(), std::size_t{2});
+
+        const auto& first = r.scenario.rigid_settings.ground[0];
+        MALLOY_CHECK_NEAR(first.normal.x, 0.6, eps);
+        MALLOY_CHECK_NEAR(first.normal.y, 0.8, eps);
+        MALLOY_CHECK_NEAR(first.offset, -2.5, eps);
+        MALLOY_CHECK_TRUE(first.is_valid());
+
+        // Order is preserved, and an already-unit normal is unchanged.
+        const auto& second = r.scenario.rigid_settings.ground[1];
+        MALLOY_CHECK_NEAR(second.normal.x, 0.0, eps);
+        MALLOY_CHECK_NEAR(second.normal.y, -1.0, eps);
+        MALLOY_CHECK_NEAR(second.offset, -7.0, eps);
+
+        MALLOY_CHECK_TRUE(r.scenario.rigid_settings.is_valid());
+    }
+    {
+        // A direction with no direction is refused rather than normalized into
+        // one, which would silently invent a floor orientation.
+        std::istringstream in("type rigid\nground 0 0 1\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // Three fields are required.
+        std::istringstream in("type rigid\nground 0 1\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // ground belongs to the rigid domain and to no other.
+        std::istringstream in("type particles\nground 0 1 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type springs\nground 0 1 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // Absent by default, so every rigid scenario written before M16 loads
+        // with no ground at all and behaves exactly as it did.
+        std::istringstream in("type rigid\nrigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.rigid_settings.ground.empty());
+    }
+
     std::cout << "malloy_scenario_tests passed\n";
     return 0;
 }

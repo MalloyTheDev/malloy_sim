@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M15 are complete, so this is the live roadmap for what comes next.
+M1-M16 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -29,6 +29,7 @@ M12 - ballistics/projectiles            [done]
 M13 - springs and oscillators           [done]
 M14 - rigid-body contact response       [done]
 M15 - gravity for rigid bodies          [done]
+M16 - halfplanes, for true flat ground  [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -57,6 +58,17 @@ bodies are skipped explicitly. Rotation under gravity is emergent: the field
 acts through the centre of mass and generates no torque on its own, but a
 contact away from the centre of mass does, so bodies rock and tumble without
 any new machinery. `malloy_rigid` still has no force or torque accumulators.
+
+M16 added `collide::Halfplane` and ground planes in `RigidSettings`. Before it,
+a floor had to be built from overlapping discs, whose contact normal swings by
+up to 14 degrees as a body moves along it, because it points at whichever disc
+centre is nearest. A plane's normal never turns. It is also the only pair in
+`malloy_collide` with no degenerate case, since the plane supplies the direction
+instead of it being inferred from two centres.
+
+Friction is the natural next step, and it is what makes the flat normal worth
+having: a frictionless body on any surface slides forever, which every template
+in the repository has documented since M12.
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
 `ParticleWorld`, because a spring network is interaction topology rather than

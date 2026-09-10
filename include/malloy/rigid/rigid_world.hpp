@@ -43,7 +43,12 @@ public:
     //   2. move the centre of mass by the UPDATED velocity * dt, which keeps
     //      the integration semi-implicit (symplectic) Euler;
     //   3. advance the angle by angular_velocity * dt;
-    //   4. resolve contacts in ascending pair order.
+    //   4. resolve body-against-body contacts in ascending pair order;
+    //   5. resolve every body against every ground plane, in ascending body
+    //      then plane order.
+    //
+    // Ground comes last on purpose: a body pushed by a pair impulse in step 4
+    // gets the floor's answer in the same step rather than the next one.
     //
     // Step 2 integrates EVERY body, including immovable ones. That is
     // deliberate: an immovable body with a velocity you set is a kinematic

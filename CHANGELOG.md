@@ -358,6 +358,108 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M16] - 2026-09-10  (halfplanes: true flat ground)
+
+### Added
+
+- `collide::Halfplane`: everything on one side of an infinite straight line,
+  stored as a unit normal and an offset. The normal points OUT of the solid, so
+  the signed distance `dot(normal, p) - offset` is positive in free space.
+- `overlaps(Circle, Halfplane)` and `contact(Circle, Halfplane)`.
+- Ground planes in `RigidSettings`, resolved after body-against-body contacts
+  in ascending body then plane order.
+- `ground <nx> <ny> <offset>` in the scenario format, for `type rigid`, and it
+  may appear more than once.
+- `scenarios/flat_ground.scn`: a ramp, a floor and a wall.
+
+### Changed
+
+- The rigid impulse formula moved into `apply_contact`, called by both
+  `resolve_contact` (disc against disc) and the new `resolve_ground`. Writing
+  it a second time for the plane path is exactly the second copy that becomes a
+  third (ADR 0008). No behaviour changed: the existing suite passed unaltered
+  across the extraction.
+
+### Architecture Notes
+
+- The reason this exists is the contact NORMAL, not the surface height. A floor
+  built from overlapping discs has a normal that points at whichever disc centre
+  is nearest, so it SWINGS as a body moves along it: up to 14 degrees for the
+  floor in `scenarios/dropped_bodies.scn`, which documents its height ripple as
+  about 0.05 and thereby understates the problem considerably. Getting that
+  under one degree with discs needs roughly 160 of them. A plane has one normal
+  everywhere.
+- Circle against halfplane is the only pair in `malloy_collide` with NO
+  degenerate case. Every other query has to infer a direction from two centres
+  and falls back to +x when they coincide (`contact.hpp`). The plane supplies
+  the direction itself, so even a circle whose centre lies exactly on the line
+  gets the correct normal rather than a documented arbitrary one.
+- The plane stands in as a body of infinite mass and inertia, which is what
+  keeps one copy of the impulse formula. Its inverse mass and inverse inertia
+  are exactly zero, so it absorbs the impulse without moving, takes no share of
+  the positional correction, and its arm cannot matter because that term is
+  multiplied by zero. No static early-out is needed: a body that cannot move
+  leaves the effective mass at zero and the existing guard returns.
+- Normalization happens once at the input boundary, in the scenario loader, so
+  the geometry type keeps a strict unit-normal invariant instead of normalizing
+  on every query. A direction that cannot be normalized is refused rather than
+  silently turned into one, since `(0, 0)` and `(1e-300, 0)` would otherwise
+  both look acceptable while meaning different things.
+- There is deliberately no `area`, `centroid` or `second_moment_of_area` for a
+  halfplane. All three are infinite, and returning 0 the way the invalid-shape
+  path does would be indistinguishable from a real answer.
+- Body against body is still disc against disc. Oriented boxes and SAT remain
+  their own milestone; a halfplane is a signed-distance test, not a
+  separating-axis loop.
+
+### What conserves, and what does not
+
+Nothing new. A ground plane is immovable and therefore external to the system,
+exactly like a static body, so neither momentum nor energy is conserved in its
+presence and neither is meant to be.
+
+The property worth stating is the one that is now exact: a body sliding along a
+plane keeps its tangential velocity to the last bit, and picks up no spin at
+all, because the normal never turns. The test asserts that with a tolerance of
+zero rather than a small number.
+
+One rounding caveat, recorded rather than hidden. On a SLANTED plane the spin a
+centred body picks up is about 7e-18 rather than exactly zero. The arm is
+parallel to the impulse, so the true cross product vanishes, but `cross`
+computes `arm.x * impulse.y - arm.y * impulse.x`, and on a slanted normal those
+two products multiply the same pair of components in opposite orders and round
+differently. On an axis-aligned plane it is exactly zero, because one factor in
+each product is a literal zero.
+
+### Tests
+
+- Validation: a unit normal is required, and a zero, non-unit, infinite or NaN
+  one is refused. Ground planes are validated with the rest of the settings, so
+  a malformed one is refused before it can produce a NaN normal.
+- Contact geometry off-origin and off-axis, including a 3-4-5 plane where both
+  components matter, a ceiling that pushes the other way, exact touching
+  reported with zero penetration, and the documented separation contract:
+  moving the circle by `-normal * penetration` leaves it exactly touching.
+- The case that would be degenerate for circle against circle: a centre lying
+  exactly on the line still gets the plane's own normal, with no fallback.
+- The milestone's point: a body sliding along a flat floor for 3000 steps keeps
+  its horizontal velocity EXACTLY and its spin at exactly zero.
+- A frictionless body on a 3-4-5 incline, derived in closed form for one step:
+  gravity gives `(0, -0.1)`, the contact removes the normal component, and the
+  result is `(0.048, -0.036)`, whose magnitude is `g dt sin(theta)` and whose
+  direction is down the slope.
+- An off-centre contact against a plane DOES generate spin, and mirroring the
+  offset mirrors it, so the zero above is a property of the geometry rather
+  than of planes being inert.
+- A corner made of two planes, so a loop that resolved only the first would
+  fail; a zero-radius body falling straight through; and an empty ground list
+  reproducing the pre-M16 trajectory exactly.
+- Verified by mutation testing. Seven mutations were applied and all seven were
+  caught: a non-unit normal accepted, the offset dropped from the signed
+  distance, the contact normal not negated, the penetration sign inverted, the
+  half-depth dropped from the contact point, only the first ground plane
+  resolved, and ground planes left unvalidated.
+
 ## [M15] - 2026-09-10  (gravity for rigid bodies)
 
 ### Added

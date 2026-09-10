@@ -30,6 +30,14 @@ math::Real interval_overlap(math::Real a_min, math::Real a_max, math::Real b_min
     return std::min(a_max, b_max) - std::max(a_min, b_min);
 }
 
+// Signed distance from a point to a halfplane's line: positive in free space,
+// negative inside the solid, zero exactly on it. Only a true distance because
+// the normal is required to be unit (shapes.hpp).
+math::Real signed_distance(const Halfplane& plane, const math::Vec2& point)
+{
+    return math::dot(plane.normal, point) - plane.offset;
+}
+
 // The point on box closest to the given point. Equals it when it is inside.
 math::Vec2 closest_point_on(const Aabb& box, const math::Vec2& point)
 {
@@ -37,6 +45,16 @@ math::Vec2 closest_point_on(const Aabb& box, const math::Vec2& point)
                       clamp_to(point.y, box.min.y, box.max.y)};
 }
 } // namespace
+
+bool Halfplane::is_valid() const
+{
+    // A unit normal squared is 1. The tolerance is on the SQUARE, so it needs
+    // no square root, and it is loose enough for a hand-written direction like
+    // (0.6, 0.8) whose components are not exact in binary.
+    const math::Real square = math::length_squared(normal);
+    return math::is_finite(normal) && math::is_finite(offset) &&
+           std::abs(square - math::Real{1}) <= math::Real{1e-12};
+}
 
 bool Circle::is_valid() const
 {
@@ -162,6 +180,43 @@ bool overlaps(const Circle& circle, const Aabb& box)
 // ----------------------------------------------------------------------------
 // Contact queries
 // ----------------------------------------------------------------------------
+
+bool overlaps(const Circle& circle, const Halfplane& plane)
+{
+    if (!circle.is_valid() || !plane.is_valid())
+    {
+        return false;
+    }
+    // Touching counts, matching every other query here.
+    return signed_distance(plane, circle.center) <= circle.radius;
+}
+
+std::optional<Contact> contact(const Circle& circle, const Halfplane& plane)
+{
+    if (!circle.is_valid() || !plane.is_valid())
+    {
+        return std::nullopt;
+    }
+
+    const math::Real distance = signed_distance(plane, circle.center);
+    const math::Real depth = circle.radius - distance;
+    if (depth < math::Real{0})
+    {
+        return std::nullopt;
+    }
+
+    Contact result;
+    // From the circle toward the plane's solid side, which is the direction the
+    // plane's outward normal does not point. No fallback is needed even when
+    // the centre lies exactly on the line: the plane supplies the direction.
+    result.normal = -plane.normal;
+    result.penetration = depth;
+    // Midway between the two surfaces along the normal, as for every other
+    // pair: the circle's surface is at distance -radius along the normal from
+    // its centre, and the plane's surface is `depth` further back.
+    result.point = circle.center + result.normal * (circle.radius - depth / math::Real{2});
+    return result;
+}
 
 std::optional<Contact> contact(const Circle& a, const Circle& b)
 {

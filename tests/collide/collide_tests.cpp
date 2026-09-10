@@ -10,6 +10,7 @@
 
 using malloy::collide::Aabb;
 using malloy::collide::Circle;
+using malloy::collide::Halfplane;
 using malloy::collide::Contact;
 using malloy::collide::area;
 using malloy::collide::centroid;
@@ -441,6 +442,112 @@ int main()
             MALLOY_CHECK_VEC2_NEAR(k->normal, c.normal, eps);
             MALLOY_CHECK_NEAR(k->penetration, c.penetration, eps);
         }
+    }
+
+    // --- M16: Halfplane validation. The normal must be a UNIT vector, because
+    //     the signed distance the queries rely on is only a distance when it
+    //     is, and a silently normalized (0, 0) would be indistinguishable from
+    //     a deliberate direction. ---
+    {
+        MALLOY_CHECK_TRUE(Halfplane{}.is_valid()); // default is the floor (0,1) at 0
+        MALLOY_CHECK_TRUE((Halfplane{Vec2{0.6, 0.8}, -4.25}.is_valid()));
+        MALLOY_CHECK_TRUE((Halfplane{Vec2{0.0, -1.0}, 7.5}.is_valid()));
+
+        MALLOY_CHECK_FALSE((Halfplane{Vec2{0.0, 0.0}, 0.0}.is_valid()));   // no direction
+        MALLOY_CHECK_FALSE((Halfplane{Vec2{0.0, 2.0}, 0.0}.is_valid()));   // not unit
+        MALLOY_CHECK_FALSE((Halfplane{Vec2{1.0, 1.0}, 0.0}.is_valid()));   // length sqrt(2)
+        MALLOY_CHECK_FALSE((Halfplane{Vec2{0.0, 1.0}, nan}.is_valid()));
+        MALLOY_CHECK_FALSE((Halfplane{Vec2{nan, 0.0}, 0.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Halfplane{Vec2{inf, 0.0}, 0.0}.is_valid()));
+    }
+
+    // --- Circle against halfplane. Touching counts, matching every other
+    //     query, and an invalid shape never overlaps. ---
+    {
+        const Halfplane floor{Vec2{0.0, 1.0}, 0.0};
+        MALLOY_CHECK_FALSE(overlaps(Circle{Vec2{3.0, 0.6}, 0.5}, floor));
+        MALLOY_CHECK_TRUE(overlaps(Circle{Vec2{3.0, 0.5}, 0.5}, floor));  // exact touch
+        MALLOY_CHECK_TRUE(overlaps(Circle{Vec2{3.0, 0.3}, 0.5}, floor));
+        MALLOY_CHECK_TRUE(overlaps(Circle{Vec2{3.0, -9.0}, 0.5}, floor)); // fully inside
+        MALLOY_CHECK_FALSE(overlaps(Circle{Vec2{0.0, 0.0}, -1.0}, floor));
+        MALLOY_CHECK_FALSE((overlaps(Circle{Vec2{0.0, 0.0}, 1.0}, Halfplane{Vec2{0.0, 3.0}, 0.0})));
+    }
+
+    // --- Contact data, off-origin so a dropped term shows. Floor at y = 0, a
+    //     disc of radius 0.5 whose centre sits 0.3 above it: 0.2 of overlap,
+    //     and the representative point is midway between the two surfaces, so
+    //     between y = -0.2 and y = 0. ---
+    {
+        const Halfplane floor{Vec2{0.0, 1.0}, 0.0};
+        const auto k = contact(Circle{Vec2{3.0, 0.3}, 0.5}, floor);
+        MALLOY_CHECK_TRUE(k.has_value());
+        MALLOY_CHECK_VEC2_NEAR(k->normal, Vec2(0.0, -1.0), eps);
+        MALLOY_CHECK_NEAR(k->penetration, 0.2, eps);
+        MALLOY_CHECK_VEC2_NEAR(k->point, Vec2(3.0, -0.1), eps);
+    }
+    {
+        // Exactly touching: reported, with zero penetration, not dropped.
+        const auto k = contact(Circle{Vec2{-2.0, 0.5}, 0.5}, Halfplane{});
+        MALLOY_CHECK_TRUE(k.has_value());
+        MALLOY_CHECK_NEAR(k->penetration, 0.0, 0.0);
+        MALLOY_CHECK_VEC2_NEAR(k->point, Vec2(-2.0, 0.0), eps);
+    }
+    {
+        // Clear of it: no contact.
+        MALLOY_CHECK_FALSE(contact(Circle{Vec2{0.0, 0.6}, 0.5}, Halfplane{}).has_value());
+    }
+    {
+        // The case that WOULD be degenerate for circle/circle: the centre lies
+        // exactly on the line, so there is no centre-to-centre direction to
+        // infer a normal from. The plane supplies it, so no fallback is used.
+        const auto k = contact(Circle{Vec2{2.0, 0.0}, 0.5}, Halfplane{});
+        MALLOY_CHECK_TRUE(k.has_value());
+        MALLOY_CHECK_VEC2_NEAR(k->normal, Vec2(0.0, -1.0), eps);
+        MALLOY_CHECK_NEAR(k->penetration, 0.5, eps);
+        MALLOY_CHECK_VEC2_NEAR(k->point, Vec2(2.0, -0.25), eps);
+    }
+    {
+        // A plane facing DOWN is a ceiling, and pushes the other way. The line
+        // is y = 3, free space is below it.
+        const Halfplane ceiling{Vec2{0.0, -1.0}, -3.0};
+        const auto k = contact(Circle{Vec2{1.0, 2.7}, 0.5}, ceiling);
+        MALLOY_CHECK_TRUE(k.has_value());
+        MALLOY_CHECK_VEC2_NEAR(k->normal, Vec2(0.0, 1.0), eps);
+        MALLOY_CHECK_NEAR(k->penetration, 0.2, eps);
+    }
+    {
+        // Off-axis and off-origin, so neither component can be dropped.
+        // distance = 0.6*1 + 0.8*2 - 1 = 1.2, radius 1.5, so 0.3 of overlap.
+        const Halfplane slope{Vec2{0.6, 0.8}, 1.0};
+        const auto k = contact(Circle{Vec2{1.0, 2.0}, 1.5}, slope);
+        MALLOY_CHECK_TRUE(k.has_value());
+        MALLOY_CHECK_VEC2_NEAR(k->normal, Vec2(-0.6, -0.8), eps);
+        MALLOY_CHECK_NEAR(k->penetration, 0.3, eps);
+        // point = centre + normal * (radius - penetration/2)
+        //       = (1, 2) + (-0.6, -0.8) * 1.35
+        MALLOY_CHECK_VEC2_NEAR(k->point, Vec2(0.19, 0.92), eps);
+    }
+    {
+        // An invalid shape on either side yields nothing rather than NaN.
+        MALLOY_CHECK_FALSE(contact(Circle{Vec2{}, nan}, Halfplane{}).has_value());
+        MALLOY_CHECK_FALSE((contact(Circle{Vec2{}, 1.0},
+                                    Halfplane{Vec2{1.0, 1.0}, 0.0}).has_value()));
+    }
+
+    // --- The documented separation contract: moving the circle by
+    //     -normal * penetration separates them EXACTLY, leaving them touching
+    //     rather than overlapping or apart. Checked on a slanted plane, where
+    //     both components matter. ---
+    {
+        const Halfplane slope{Vec2{0.6, 0.8}, 1.0};
+        const Circle before{Vec2{1.0, 2.0}, 1.5};
+        const auto k = contact(before, slope);
+        MALLOY_CHECK_TRUE(k.has_value());
+
+        const Circle after{before.center - k->normal * k->penetration, before.radius};
+        const auto again = contact(after, slope);
+        MALLOY_CHECK_TRUE(again.has_value()); // touching still reports
+        MALLOY_CHECK_NEAR(again->penetration, 0.0, 1e-15);
     }
 
     std::cout << "malloy_collide_tests passed\n";

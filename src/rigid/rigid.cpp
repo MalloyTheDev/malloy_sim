@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -49,26 +50,14 @@ math::Real cross(const math::Vec2& a, const math::Vec2& b)
 //
 // Immovable bodies fall out for free: their inverse mass and inverse inertia
 // are zero, so they contribute nothing to k and receive nothing from j.
-void resolve_contact(RigidBody2D& a, RigidBody2D& b, math::Real restitution)
+// Applies one already-resolved contact. Split out of resolve_contact because
+// it has a second caller: a body against a ground plane, where the plane stands
+// in as a body of infinite mass and inertia. Writing the impulse formula twice
+// is exactly the second copy that becomes a third (ADR 0008).
+void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& contact_data,
+                   math::Real restitution)
 {
-    if (a.radius <= math::Real{0} || b.radius <= math::Real{0})
-    {
-        return; // a zero radius means the body does not take part in contacts
-    }
-    if (a.is_static() && b.is_static())
-    {
-        return; // nothing to do, and k would be zero
-    }
-
-    // Discs are centred on the body ORIGIN, so a contact normal generally does
-    // not pass through the centre of mass. That offset is what creates torque.
-    const std::optional<collide::Contact> hit =
-        collide::contact(collide::Circle{a.position, a.radius},
-                         collide::Circle{b.position, b.radius});
-    if (!hit)
-    {
-        return;
-    }
+    const std::optional<collide::Contact> hit = contact_data;
 
     const math::Real inverse_mass_a = a.inverse_mass();
     const math::Real inverse_mass_b = b.inverse_mass();
@@ -116,6 +105,60 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, math::Real restitution)
     a.angular_velocity -= cross(arm_a, impulse) * inverse_inertia_a;
     b.velocity += impulse * inverse_mass_b;
     b.angular_velocity += cross(arm_b, impulse) * inverse_inertia_b;
+}
+
+void resolve_contact(RigidBody2D& a, RigidBody2D& b, math::Real restitution)
+{
+    if (a.radius <= math::Real{0} || b.radius <= math::Real{0})
+    {
+        return; // a zero radius means the body does not take part in contacts
+    }
+    if (a.is_static() && b.is_static())
+    {
+        return; // nothing to do, and the effective mass would be zero
+    }
+
+    // Discs are centred on the body ORIGIN, so a contact normal generally does
+    // not pass through the centre of mass. That offset is what creates torque.
+    const std::optional<collide::Contact> hit =
+        collide::contact(collide::Circle{a.position, a.radius},
+                         collide::Circle{b.position, b.radius});
+    if (!hit)
+    {
+        return;
+    }
+    apply_contact(a, b, *hit, restitution);
+}
+
+// Resolves one body against one immovable ground plane.
+//
+// The plane stands in as a body of infinite mass and inertia, which costs
+// nothing and keeps a single copy of the impulse formula. Its inverse mass and
+// inverse inertia are exactly zero, so it absorbs the impulse without moving,
+// takes no share of the positional correction, and its arm cannot matter:
+// wherever the stand-in nominally sits, its contribution to the effective mass
+// is multiplied by zero. No static early-out is needed either, because a body
+// that cannot be moved leaves the effective mass at zero and the guard inside
+// apply_contact returns.
+void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
+                    math::Real restitution)
+{
+    if (body.radius <= math::Real{0})
+    {
+        return; // a zero radius means the body does not take part in contacts
+    }
+
+    const std::optional<collide::Contact> hit =
+        collide::contact(collide::Circle{body.position, body.radius}, plane);
+    if (!hit)
+    {
+        return;
+    }
+
+    RigidBody2D ground;
+    ground.mass = std::numeric_limits<math::Real>::infinity();
+    ground.inertia = std::numeric_limits<math::Real>::infinity();
+    apply_contact(body, ground, *hit, restitution);
 }
 
 } // namespace
@@ -232,8 +275,19 @@ math::Real shift_inertia(math::Real inertia_about_com, math::Real mass,
 
 bool RigidSettings::is_valid() const
 {
-    return restitution >= math::Real{0} && restitution <= math::Real{1} &&
-           math::is_finite(restitution) && math::is_finite(gravity);
+    if (!(restitution >= math::Real{0}) || !(restitution <= math::Real{1}) ||
+        !math::is_finite(restitution) || !math::is_finite(gravity))
+    {
+        return false;
+    }
+    for (const collide::Halfplane& plane : ground)
+    {
+        if (!plane.is_valid())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 RigidWorld::RigidWorld(sim_core::SimulationSettings simulation_settings,
@@ -336,6 +390,16 @@ sim_core::StepResult RigidWorld::step()
         for (std::size_t j = i + 1; j < count; ++j)
         {
             resolve_contact(bodies_[i], bodies_[j], settings_.restitution);
+        }
+    }
+
+    // (5) then every body against every ground plane, in ascending body then
+    //     plane order. Fixed, so a run repeats (docs/04).
+    for (RigidBody2D& body : bodies_)
+    {
+        for (const collide::Halfplane& plane : settings_.ground)
+        {
+            resolve_ground(body, plane, settings_.restitution);
         }
     }
 

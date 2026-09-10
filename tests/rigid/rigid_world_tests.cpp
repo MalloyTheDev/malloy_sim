@@ -18,6 +18,7 @@ using malloy::math::Vec2;
 using malloy::rigid::center_of_mass;
 using malloy::rigid::mass_properties;
 using malloy::rigid::MassProperties;
+using malloy::collide::Halfplane;
 using malloy::rigid::RigidBody2D;
 using malloy::rigid::RigidSettings;
 using malloy::rigid::RigidWorld;
@@ -1238,6 +1239,220 @@ int main()
         // The platform contributes no momentum, being infinitely massive.
         MALLOY_CHECK_VEC2_NEAR(total_linear_momentum({w.bodies()[0]}), Vec2(0.0, 0.0),
                                0.0);
+    }
+
+    // --- M16: ground planes are validated with the settings, so a malformed
+    //     one is refused before it can produce a NaN normal. ---
+    {
+        RigidSettings ok;
+        ok.ground.push_back(Halfplane{Vec2{0.0, 1.0}, -2.0});
+        ok.ground.push_back(Halfplane{Vec2{0.6, 0.8}, 3.5});
+        MALLOY_CHECK_TRUE(ok.is_valid());
+
+        RigidSettings bad;
+        bad.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+        bad.ground.push_back(Halfplane{Vec2{1.0, 1.0}, 0.0}); // not a unit normal
+        MALLOY_CHECK_FALSE(bad.is_valid());
+
+        RigidBody2D b;
+        RigidWorld w{SimulationSettings{0.01}, {b}, bad};
+        MALLOY_CHECK_TRUE(w.validate() == StepStatus::InvalidSettings);
+        MALLOY_CHECK_FALSE(w.step().ok());
+    }
+
+    // --- No ground reproduces the pre-M16 trajectory exactly, so every world
+    //     written before planes existed is unaffected. ---
+    {
+        const std::vector<RigidBody2D> start = {awkward_body()};
+        RigidSettings without;
+        without.restitution = 0.8;
+        RigidSettings empty_ground = without;
+        empty_ground.ground.clear();
+
+        RigidWorld a{SimulationSettings{0.002}, start, without};
+        RigidWorld b{SimulationSettings{0.002}, start, empty_ground};
+        for (int i = 0; i < 300; ++i)
+        {
+            MALLOY_CHECK_TRUE(a.step().ok());
+            MALLOY_CHECK_TRUE(b.step().ok());
+        }
+        MALLOY_CHECK_VEC2_NEAR(a.bodies()[0].position, b.bodies()[0].position, 0.0);
+        MALLOY_CHECK_NEAR(a.bodies()[0].angle, b.bodies()[0].angle, 0.0);
+    }
+
+    // --- THE POINT OF THE MILESTONE. A body sliding along a flat floor keeps
+    //     its horizontal velocity EXACTLY and picks up no spin at all, because
+    //     the contact normal is the plane's own and never turns.
+    //
+    //     A floor built from discs cannot do this. Its normal points at
+    //     whichever disc centre is nearest, so it swings by up to 14 degrees
+    //     across the floor in dropped_bodies.scn, which steers the body and
+    //     spins it. The tolerance here is zero, not small. ---
+    {
+        RigidBody2D slider;
+        slider.mass = 1.5;
+        slider.inertia = 0.2;
+        slider.radius = 0.4;
+        slider.position = Vec2{-3.0, 0.4}; // resting on the floor at y = 0
+        slider.velocity = Vec2{2.0, 0.0};
+
+        RigidSettings g;
+        g.restitution = 0.0; // no bouncing, so it stays in contact
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.001}, {slider}, g};
+        for (int i = 0; i < 3000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const RigidBody2D& now = w.bodies()[0];
+        MALLOY_CHECK_NEAR(now.velocity.x, 2.0, 0.0);       // exactly, not nearly
+        MALLOY_CHECK_NEAR(now.angular_velocity, 0.0, 0.0); // no spin from a flat floor
+        MALLOY_CHECK_NEAR(now.position.x, -3.0 + 2.0 * 3.0, 1e-12);
+        // It stayed on the surface rather than sinking through or hopping.
+        MALLOY_CHECK_TRUE(now.position.y > 0.39);
+        MALLOY_CHECK_TRUE(now.position.y < 0.41);
+    }
+
+    // --- On a slanted plane a frictionless body accelerates exactly down the
+    //     slope at g sin(theta), and this is derivable in closed form for one
+    //     step. The plane is a 3-4-5 slope, normal (0.6, 0.8), so cos(theta) is
+    //     0.8 and sin(theta) is 0.6, and the body starts EXACTLY touching it.
+    //
+    //     With g = (0, -10) and dt = 0.01, gravity gives v = (0, -0.1). A
+    //     restitution-0 contact removes the normal component and leaves the
+    //     tangential one, so
+    //         v' = v - (v . n) n = (0, -0.1) - (-0.08)(0.6, 0.8)
+    //            = (0.048, -0.036)
+    //     whose magnitude is 0.06 = g dt sin(theta), pointing down the slope
+    //     along (0.8, -0.6). ---
+    {
+        RigidBody2D block;
+        block.mass = 1.0;
+        block.inertia = 0.5;
+        block.radius = 0.5;
+        // 0.6 * 1.5 + 0.8 * -0.5 = 0.5, exactly one radius clear of the plane.
+        block.position = Vec2{1.5, -0.5};
+
+        RigidSettings g;
+        g.restitution = 0.0;
+        g.gravity = Vec2{0.0, -10.0};
+        g.ground.push_back(Halfplane{Vec2{0.6, 0.8}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.01}, {block}, g};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        const RigidBody2D& now = w.bodies()[0];
+        MALLOY_CHECK_VEC2_NEAR(now.velocity, Vec2(0.048, -0.036), 1e-15);
+        MALLOY_CHECK_NEAR(malloy::math::length(now.velocity), 0.06, 1e-15);
+
+        // Frictionless and centred, so nothing turns it. The bound is rounding
+        // level rather than exactly zero, and the reason is worth stating: the
+        // arm is parallel to the impulse, so the true cross product is zero,
+        // but cross() computes arm.x * impulse.y - arm.y * impulse.x, and on a
+        // slanted normal those two products multiply 0.6 and 0.8 in opposite
+        // orders and round differently. The residue is about 7e-18. On the
+        // axis-aligned floor above, the same expression is exactly zero,
+        // because one factor in each product is a literal zero.
+        MALLOY_CHECK_NEAR(now.angular_velocity, 0.0, 1e-15);
+    }
+
+    // --- A perfectly elastic head-on bounce reverses the velocity exactly and
+    //     produces no spin, which is the control case for the slope above. ---
+    {
+        RigidBody2D ball;
+        ball.mass = 2.0;
+        ball.inertia = 0.3;
+        ball.radius = 0.5;
+        ball.position = Vec2{4.0, 0.5}; // exactly touching
+        ball.velocity = Vec2{0.0, -3.0};
+
+        RigidSettings g;
+        g.restitution = 1.0;
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.001}, {ball}, g};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(0.0, 3.0), 1e-15);
+        MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 0.0);
+    }
+
+    // --- An off-centre contact against a plane DOES generate spin, so the zero
+    //     above is a property of the geometry and not of planes being inert. ---
+    {
+        RigidBody2D wobbler;
+        wobbler.mass = 1.0;
+        wobbler.inertia = 0.05;
+        wobbler.radius = 0.5;
+        wobbler.local_center_of_mass = Vec2{0.3, 0.0}; // offset from the disc
+        wobbler.position = Vec2{0.0, 0.45};
+        wobbler.velocity = Vec2{0.0, -2.0};
+
+        RigidSettings g;
+        g.restitution = 0.6;
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.001}, {wobbler}, g};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angular_velocity) > 1e-6);
+
+        // Mirroring the offset mirrors the spin, so both signs occur.
+        RigidBody2D mirrored = wobbler;
+        mirrored.local_center_of_mass = Vec2{-0.3, 0.0};
+        RigidWorld m{SimulationSettings{0.001}, {mirrored}, g};
+        MALLOY_CHECK_TRUE(m.step().ok());
+        MALLOY_CHECK_NEAR(m.bodies()[0].angular_velocity,
+                          -w.bodies()[0].angular_velocity, 1e-15);
+    }
+
+    // --- A body of zero radius takes part in no contacts, planes included, so
+    //     it falls straight through the floor. ---
+    {
+        RigidBody2D ghost;
+        ghost.mass = 1.0;
+        ghost.inertia = 1.0;
+        ghost.radius = 0.0;
+        ghost.position = Vec2{0.0, 1.0};
+
+        RigidSettings g;
+        g.gravity = Vec2{0.0, -10.0};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+
+        RigidWorld w{SimulationSettings{0.01}, {ghost}, g};
+        for (int i = 0; i < 200; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        MALLOY_CHECK_TRUE(w.bodies()[0].position.y < -1.0);
+    }
+
+    // --- Two planes make a corner, and a body settles into it rather than
+    //     being fought over by them. Also exercises more than one plane, since
+    //     a loop that resolved only the first would pass every case above. ---
+    {
+        RigidBody2D ball;
+        ball.mass = 1.0;
+        ball.inertia = 0.4;
+        ball.radius = 0.5;
+        ball.position = Vec2{2.0, 3.0};
+
+        RigidSettings g;
+        g.restitution = 0.2;
+        g.gravity = Vec2{0.0, -9.81};
+        g.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});   // floor at y = 0
+        g.ground.push_back(Halfplane{Vec2{-1.0, 0.0}, -1.0}); // wall at x = 1
+
+        RigidWorld w{SimulationSettings{0.001}, {ball}, g};
+        for (int i = 0; i < 6000; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+        const RigidBody2D& now = w.bodies()[0];
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(now.position));
+        MALLOY_CHECK_TRUE(now.position.y > 0.49);  // resting on the floor
+        MALLOY_CHECK_TRUE(now.position.y < 0.55);
+        MALLOY_CHECK_TRUE(now.position.x < 0.51);  // and left of the wall
+        MALLOY_CHECK_TRUE(std::abs(now.velocity.y) < 0.2);
     }
 
     std::cout << "malloy_rigid_tests passed\n";

@@ -14,7 +14,7 @@ project.
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
 bodies, spring networks, rigid-body contact response and gravity for rigid
-bodies (milestones M1-M15).
+bodies and flat ground (milestones M1-M16).
 
 ## Locked baseline
 
@@ -35,7 +35,8 @@ The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 (**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
 **M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
 bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
-response**, **M15: gravity for rigid bodies**). The project builds clean under
+response**, **M15: gravity for rigid bodies**, **M16: halfplanes**). The
+project builds clean under
 MSVC (`/W4 /permissive-`), and all 11 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
@@ -48,7 +49,7 @@ reporting conserved system diagnostics alongside an ASCII view of the bodies.
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
 | `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
-| `malloy_collide` | STATIC | `Circle`, `Aabb`, overlap tests, contact normal/depth/point |
+| `malloy_collide` | STATIC | `Circle`, `Aabb`, `Halfplane`, overlap tests, contact normal/depth/point |
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
 | `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
@@ -72,7 +73,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 8 templates ship across four domains,
+and runnable with the shipped binary. 9 templates ship across four domains,
 and every one is parsed, validated and stepped by the test suite. That count
 is checked against the directory by the scenario tests, so it cannot go stale.
 
@@ -226,6 +227,7 @@ built-in scenarios shown above.
 | M13 | `malloy_springs`: spring networks + force accumulation | ✅ Done |
 | M14 | rigid-body contact response: statics, torque from impacts | ✅ Done |
 | M15 | gravity for rigid bodies: uniform field, potential energy | ✅ Done |
+| M16 | halfplanes: true flat ground, floors, walls and ramps | ✅ Done |
 
 ## Out of scope (gated)
 
@@ -234,7 +236,7 @@ milestone (`docs/07_POST_M5_ROADMAP.md`) -- never added speculatively:
 
 - graphical rendering (the M8 debug view is ASCII text only)
 - Raylib / SDL / GLFW / SFML
-- oriented-box contacts and SAT (M9 shipped circle and AABB geometry; M14 resolves disc against disc only)
+- oriented-box contacts and SAT (M9 shipped circle and AABB geometry, M16 added halfplanes; body-against-body contact is still disc against disc only)
 - friction: every contact in the project is normal-only, so bodies slide forever
 - persistent forces and force/torque accumulators (gravity is a setting applied as an acceleration, not a registered force producer)
 - vehicles

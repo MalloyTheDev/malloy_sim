@@ -34,6 +34,7 @@ struct Contact
 bool overlaps(const Circle& a, const Circle& b);
 bool overlaps(const Aabb& a, const Aabb& b);
 bool overlaps(const Circle& circle, const Aabb& box);
+bool overlaps(const Circle& circle, const Halfplane& plane);
 
 // Full contact queries. Return no value when the shapes do not overlap or when
 // either shape is invalid; these never throw (docs/04).
@@ -50,4 +51,10 @@ bool overlaps(const Circle& circle, const Aabb& box);
 std::optional<Contact> contact(const Circle& a, const Circle& b);
 std::optional<Contact> contact(const Aabb& a, const Aabb& b);
 std::optional<Contact> contact(const Circle& circle, const Aabb& box);
+
+// Circle against halfplane. This one has no fallback, because the normal is
+// the plane's own: it is exactly -plane.normal for every configuration,
+// including a circle whose centre lies exactly on the line. The convention
+// still holds, so it points from the circle toward the solid side.
+std::optional<Contact> contact(const Circle& circle, const Halfplane& plane);
 } // namespace malloy::collide

@@ -98,6 +98,15 @@ struct ScenarioParseResult
 //
 //   restitution <value>   bounciness in [0, 1]     (default 1.0)
 //   gravity <gx> <gy>     uniform acceleration     (default 0 0)
+//   ground <nx> <ny> <offset>   an immovable infinite plane
+//
+//     The plane is the line dot((nx, ny), p) == offset, and (nx, ny) points
+//     OUT of the solid side, into free space. A floor at y = -2 is
+//     `ground 0 1 -2`; a wall at x = 6 that keeps bodies to its left is
+//     `ground -1 0 -6`. The direction need not be unit length here: it is
+//     normalized once on load, and only a zero or non-finite one is refused.
+//     May appear more than once.
+//
 //   rigid_body <mass> <inertia> <radius> <comx> <comy> <px> <py> <angle> <vx> <vy> <omega>
 //
 //     mass and inertia are about the centre of mass; radius is the collision

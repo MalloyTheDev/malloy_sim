@@ -1,5 +1,8 @@
 #pragma once
 
+#include <vector>
+
+#include <malloy/collide/shapes.hpp>
 #include <malloy/math/real.hpp>
 #include <malloy/math/vec2.hpp>
 
@@ -27,7 +30,19 @@ struct RigidSettings
     // switched on rather than anything new here.
     math::Vec2 gravity{};
 
-    // Valid when restitution is in [0, 1] and finite, and gravity is finite.
+    // Immovable ground planes: floors, walls, ramps. Each resolves exactly as a
+    // body of infinite mass and inertia would, with one difference that is the
+    // whole reason the primitive exists. A floor built from discs has a contact
+    // normal that TURNS as a body rolls across it, by as much as 14 degrees for
+    // the floor in dropped_bodies.scn, because the normal points at whichever
+    // disc centre is nearest. A plane's normal is its own and never turns.
+    //
+    // Empty by default, so a world written before this existed behaves exactly
+    // as it did.
+    std::vector<collide::Halfplane> ground;
+
+    // Valid when restitution is in [0, 1] and finite, gravity is finite, and
+    // every ground plane is itself valid.
     bool is_valid() const;
 };
 } // namespace malloy::rigid

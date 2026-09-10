@@ -31,7 +31,44 @@ struct Aabb
     bool is_valid() const;
 };
 
+// A halfplane: everything on one side of an infinite straight line. Used for
+// ground and walls, where a disc is the wrong shape and an Aabb is a lie
+// (a floor is not 40 units thick, and a body that tunnels past its far face
+// should not pop out the bottom).
+//
+// The line is the set of points p with dot(normal, p) == offset, so the signed
+// distance from p to it is dot(normal, p) - offset. `normal` points OUT of the
+// solid side, into free space, so that distance is positive for a point in
+// free space and negative for one inside the solid. A floor at y = -2 is
+// normal (0, 1) with offset -2; a left wall at x = 3 that keeps bodies to its
+// left is normal (-1, 0) with offset -3.
+//
+// Unlike every other pair in this module, a circle against a halfplane has NO
+// degenerate case: the normal is the plane's own and never has to be inferred
+// from the relative position of two centres, so none of the documented
+// fallbacks in contact.hpp apply to it. That is the point of the primitive.
+struct Halfplane
+{
+    math::Vec2 normal{0.0, 1.0};
+    math::Real offset{0.0};
+
+    // Valid when the normal is finite, the offset is finite, and the normal is
+    // a UNIT vector.
+    //
+    // Unit length is required rather than normalized on use. Normalizing
+    // silently would make (0, 0) and (1e-300, 0) both look acceptable while
+    // meaning different things, and the signed distance above is only a
+    // distance at all when the normal is unit. Callers that accept arbitrary
+    // input, such as the scenario loader, normalize once at the boundary and
+    // reject what cannot be normalized.
+    bool is_valid() const;
+};
+
 // --- Area properties ---
+//
+// There is deliberately no area, centroid or second moment for a Halfplane.
+// All three are infinite, and returning 0 the way the invalid-shape path does
+// would be indistinguishable from a real answer.
 //
 // Pure geometry: no density and no mass appear here, so these are testable
 // against closed-form values with nothing physical involved. Converting them

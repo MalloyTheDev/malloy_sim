@@ -215,6 +215,35 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 scenario.rigid_settings.gravity = math::Vec2{gx, gy};
             }
         }
+        else if (key == "ground")
+        {
+            if (scenario.type != ScenarioType::Rigid)
+            {
+                return make_error(line_number, "ground belongs to type rigid");
+            }
+            saw_domain_key = true;
+            math::Real nx{};
+            math::Real ny{};
+            math::Real offset{};
+            if (!(tokens >> nx >> ny >> offset))
+            {
+                return make_error(line_number, "ground requires: nx ny offset");
+            }
+            // Normalized here, at the input boundary, so collide::Halfplane can
+            // keep a strict unit-normal invariant rather than normalizing on
+            // every query. A direction that cannot be normalized is refused
+            // rather than quietly turned into one.
+            const math::Vec2 direction{nx, ny};
+            const math::Real magnitude = math::length(direction);
+            if (!(magnitude > math::Real{0}) || !math::is_finite(magnitude) ||
+                !math::is_finite(offset))
+            {
+                return make_error(line_number,
+                                  "ground normal must be non-zero and finite");
+            }
+            scenario.rigid_settings.ground.push_back(
+                collide::Halfplane{direction / magnitude, offset});
+        }
         else if (key == "bounds")
         {
             if (scenario.type != ScenarioType::Particles)
