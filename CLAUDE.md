@@ -53,12 +53,12 @@ preparation for it, and someone reading the rules should know which of today's
 ## Current phase
 
 ```text
-M1-M17 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M18 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
-response, uniform gravity for rigid bodies, halfplane ground, and Coulomb
-friction.
+response, uniform gravity for rigid bodies, halfplane ground, Coulomb
+friction, and charged particles in electric and magnetic fields.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -66,11 +66,12 @@ geometry), M10 (colliding particles, which introduced the multi-domain `type`
 key), M11 (2D rigid bodies), M12 (ballistics, as uniform gravity in the particle
 domain), M13 (spring networks and deterministic force accumulation), M14
 (rigid-body contact response) and M15 (uniform gravity in the rigid domain)
-M16 (halfplanes, giving true flat ground) and M17 (Coulomb friction) are all
+M16 (halfplanes, giving true flat ground), M17 (Coulomb friction) and M18
+(charged particles, the first domain with a velocity-dependent force) are all
 done. See
 `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M18 or later) unless explicitly asked, and
+Do not start any further milestone (M19 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -118,7 +119,7 @@ Implemented in M10, once `malloy_particles` gave the format a second domain to
 dispatch to:
 
 ```text
-type nbody          # or: particles, rigid, springs
+type nbody          # or: particles, rigid, springs, charges
 dt 0.001
 steps 10000
 ```

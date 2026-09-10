@@ -500,6 +500,128 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M18] - 2026-09-10  (charged particles)
+
+### Added
+
+- `malloy_charges`, a fifth domain: point charges in electric and magnetic
+  fields.
+- `ChargedParticle2D`, whose charge is SIGNED and may be zero. No other body
+  model in this project has a quantity that decides whether an interaction
+  attracts or repels.
+- `ChargeSettings`: Coulomb constant, uniform electric field, uniform magnetic
+  field, and softening in the same sense as the N-body domain.
+- `ChargeWorld`, with `total_momentum`, `total_kinetic_energy`,
+  `total_potential_energy` and `total_energy`.
+- `type charges` in the scenario format, with `coulomb`, `efield`, `bfield`,
+  `charge <mass> <q> <px> <py> <vx> <vy>`, and `softening`, which now serves
+  two domains for the same reason: both have a 1/r^2 pair term that goes to
+  infinity for a coincident pair.
+- `scenarios/cyclotron.scn`.
+
+### Architecture Notes
+
+- This is the first domain in the project whose force depends on VELOCITY.
+  Everything before it was position-dependent (gravity, Coulomb, Hooke) or an
+  instantaneous impulse.
+- The magnetic term is applied as a ROTATION, not as another kick, and that is
+  a physical statement rather than an optimisation. A magnetic force is always
+  perpendicular to the velocity, so it does no work and cannot change a
+  particle's speed. Applying it the way every other force here is applied,
+  `v += (q/m)(v x B) dt`, adds a vector at right angles to v, so the two are
+  the legs of a right triangle and the speed becomes `|v| sqrt(1 + (q b dt/m)^2)`
+  every step, without bound. A cyclotron orbit integrated that way spirals
+  outward: at the template's parameters it grows 22 per cent in ten turns.
+
+  In two dimensions the magnetic sub-problem has an exact solution, because a
+  uniform out-of-plane field rotates the velocity at a constant rate and does
+  nothing else. So it is integrated exactly and the speed is preserved to the
+  last bit, which is stronger than the Boris push manages: Boris preserves the
+  speed exactly but carries an O(dt^2) frequency error, and an exact rotation
+  has neither.
+
+  The cost is operator splitting. The electric and magnetic parts are applied
+  in sequence rather than together, which is first order in dt in their
+  interaction, exactly as the single kick in every other domain is.
+- The magnetic field is a SCALAR, and that is a consequence of two dimensions
+  rather than a simplification: only the out-of-plane component of B produces
+  an in-plane force. In 3D it becomes a vector again and the force stops being
+  expressible this way (ADR 0009).
+- `malloy_sim_core` is unchanged, and the dispatch switch grew by exactly one
+  branch, which is the whole cost ADR 0006 said a new domain should have.
+
+### The rule-17 trigger fired, and the answer is still no
+
+ADR 0008 said to reassess extracting a shared translational integrator once a
+third domain independently needed the same path. There are now five. The
+reassessment is recorded in that ADR, and M18 turned out to be evidence AGAINST
+extraction rather than for it: `charges` puts a rotation between the kick and
+the move, so it does not share the path at all. What all five have in common is
+one line, `x += v * dt`, and extracting one line would create a coupling point
+that four domains would use differently and the fifth would not fit.
+
+### What conserves, and what does not
+
+Under a magnetic field alone, the speed of every particle is constant and so is
+the total energy. Not to some order in dt: exactly, up to the rounding of
+`cos^2 + sin^2`, which is about 2 ulp per step. Over 10000 steps that bounds the
+drift in `|v|^2` at 4.4e-12 relative, and the measured figure is -5.6e-13.
+
+The pairwise Coulomb interaction conserves momentum exactly, because both
+members of a pair are written in the same visit. A uniform field does not, and
+should not: it is external.
+
+Two discretisation results, both derived and then measured rather than bounded
+by a tolerance:
+
+- The discrete cyclotron orbit is a regular polygon, not a circle. Its
+  circumradius exceeds the true radius `m|v|/(|q| b)` by `(theta/2)/sin(theta/2)`,
+  about `1 + theta^2/24`. Measured by the separation of two vertices half a turn
+  apart, which is exactly the diameter wherever the centre happens to be.
+- The discrete E x B drift is the continuum drift `|E|/b` ROTATED by half a
+  step's angle and inflated by the same polygon factor. Both corrections carry
+  `theta = -q b dt/m`, so the continuum independence from charge and mass
+  survives only to order dt^2. The two particles in the test gyrate at rates
+  differing by a factor of three and their drifts differ in the seventh digit.
+
+Worth noting what the continuum guiding centre is NOT: `position + (m/qb)(v.y, -v.x)`
+is not the polygon's centre, it is off by about `|v| dt / 2`. Measuring the
+radius from it gives 2.99994 rather than 3.0000049, which looks like a failing
+radius and is really a wrong centre.
+
+### Tests
+
+- Validation, including that a charge of zero and a negative charge are both
+  legal while a mass of zero is not.
+- The speed is unchanged over 10000 steps, to a bound derived from the rounding
+  of `cos^2 + sin^2` rather than picked.
+- The orbit closes: after exactly one turn, chosen as a whole number of steps,
+  both position and velocity return to their starting values.
+- The period does not depend on speed: two particles with the same charge-to-
+  mass ratio and a ninefold speed difference return together.
+- The radius does depend on mass and charge, checked at three combinations
+  against the derived polygon circumradius.
+- Handedness: a positive charge in a positive field turns clockwise and a
+  negative one turns the other way, mirror images to the last bit. Invisible to
+  both speed and radius, so it needs its own assertion (docs/05).
+- E x B drift, asserted per particle against the derived discrete value, with
+  the continuum claim stated separately and correctly qualified.
+- Coulomb is signed: like charges repel, unlike attract, a neutral particle
+  does neither, and the potential energy of a like pair is POSITIVE, which
+  gravity's never is.
+- A uniform electric field is not gravity: three particles with different
+  charge-to-mass ratios accelerate by different amounts and in different
+  directions.
+- Softening enters the denominator squared, pinned at the same number the
+  N-body domain uses because it is the same contract.
+- Verified by mutation testing. Ten mutations were applied and nine were caught
+  at once: the turn applied as a kick, its sense flipped, the mass dropped from
+  the rotation rate, Coulomb's sign removed, the pair force applied to one
+  member only, the electric field treated as an acceleration, both potential
+  signs, and validation dropped. The tenth, un-squaring the softening, escaped
+  and exposed a real gap: the softening test asserted only that the result was
+  finite, never what it was. Now pinned, and now caught.
+
 ## [M17] - 2026-09-10  (Coulomb friction)
 
 ### Added

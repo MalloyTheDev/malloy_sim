@@ -19,7 +19,8 @@ for what that means for the code as it stands today.
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
 bodies, spring networks, rigid-body contact response and gravity for rigid
-bodies, flat ground and Coulomb friction (milestones M1-M17).
+bodies, flat ground, Coulomb friction and charged particles in electric and
+magnetic fields (milestones M1-M18).
 
 ## Locked baseline
 
@@ -41,9 +42,9 @@ The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 **M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
 bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
 response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
-**M17: friction**). The
+**M17: friction**, **M18: charged particles**). The
 project builds clean under
-MSVC (`/W4 /permissive-`), and all 11 test executables pass via CTest. The
+MSVC (`/W4 /permissive-`), and all 12 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
 
@@ -59,6 +60,7 @@ reporting conserved system diagnostics alongside an ASCII view of the bodies.
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
 | `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
+| `malloy_charges` | STATIC | `ChargedParticle2D`, signed Coulomb, uniform E and B fields |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
@@ -79,7 +81,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 10 templates ship across four domains,
+and runnable with the shipped binary. 11 templates ship across five domains,
 and every one is parsed, validated and stepped by the test suite. That count
 is checked against the directory by the scenario tests, so it cannot go stale.
 
@@ -98,7 +100,8 @@ particle 1.0  0.30  -2.0 -2.0   1.30 0.90
 `type` defaults to `nbody` when absent, so scenarios written before it existed
 keep working unchanged.
 
-The classical mechanics track is complete: collision geometry, colliding
+Electromagnetism joined the classical mechanics track in M18. That track is
+complete: collision geometry, colliding
 particles, rigid bodies, ballistics, spring networks, rigid-body contact
 response and gravity for rigid bodies have all shipped. Work is gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
@@ -235,6 +238,7 @@ built-in scenarios shown above.
 | M15 | gravity for rigid bodies: uniform field, potential energy | ✅ Done |
 | M16 | halfplanes: true flat ground, floors, walls and ramps | ✅ Done |
 | M17 | Coulomb friction: rolling, spin-down, static holding | ✅ Done |
+| M18 | `malloy_charges`: charged particles, E and B fields | ✅ Done |
 
 ## What is planned, and what is not
 

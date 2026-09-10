@@ -65,7 +65,8 @@ ScenarioParseResult parse_scenario(std::istream& input)
             std::string value;
             if (!(tokens >> value))
             {
-                return make_error(line_number, "type requires nbody, particles, rigid or springs");
+                return make_error(line_number,
+                                  "type requires nbody, particles, rigid, springs or charges");
             }
             if (value == "nbody")
             {
@@ -82,6 +83,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "springs")
             {
                 scenario.type = ScenarioType::Springs;
+            }
+            else if (value == "charges")
+            {
+                scenario.type = ScenarioType::Charges;
             }
             else
             {
@@ -133,14 +138,27 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "softening")
         {
-            if (scenario.type != ScenarioType::NBody)
+            // Two domains now, for the same reason: both have a 1/r^2 pair
+            // term that goes to infinity for a coincident pair.
+            if (scenario.type != ScenarioType::NBody &&
+                scenario.type != ScenarioType::Charges)
             {
-                return make_error(line_number, "softening belongs to type nbody");
+                return make_error(line_number,
+                                  "softening belongs to type nbody or charges");
             }
             saw_domain_key = true;
-            if (!(tokens >> scenario.nbody_settings.softening))
+            math::Real value{};
+            if (!(tokens >> value))
             {
                 return make_error(line_number, "softening requires a number");
+            }
+            if (scenario.type == ScenarioType::NBody)
+            {
+                scenario.nbody_settings.softening = value;
+            }
+            else
+            {
+                scenario.charge_settings.softening = value;
             }
         }
         else if (key == "steps")
@@ -214,6 +232,66 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 scenario.rigid_settings.gravity = math::Vec2{gx, gy};
             }
+        }
+        else if (key == "coulomb")
+        {
+            if (scenario.type != ScenarioType::Charges)
+            {
+                return make_error(line_number, "coulomb belongs to type charges");
+            }
+            saw_domain_key = true;
+            if (!(tokens >> scenario.charge_settings.k))
+            {
+                return make_error(line_number, "coulomb requires a value");
+            }
+        }
+        else if (key == "efield")
+        {
+            if (scenario.type != ScenarioType::Charges)
+            {
+                return make_error(line_number, "efield belongs to type charges");
+            }
+            saw_domain_key = true;
+            math::Real ex{};
+            math::Real ey{};
+            if (!(tokens >> ex >> ey))
+            {
+                return make_error(line_number, "efield requires: ex ey");
+            }
+            scenario.charge_settings.electric = math::Vec2{ex, ey};
+        }
+        else if (key == "bfield")
+        {
+            if (scenario.type != ScenarioType::Charges)
+            {
+                return make_error(line_number, "bfield belongs to type charges");
+            }
+            saw_domain_key = true;
+            if (!(tokens >> scenario.charge_settings.magnetic))
+            {
+                return make_error(line_number, "bfield requires a value");
+            }
+        }
+        else if (key == "charge")
+        {
+            if (scenario.type != ScenarioType::Charges)
+            {
+                return make_error(line_number, "charge belongs to type charges");
+            }
+            saw_domain_key = true;
+            charges::ChargedParticle2D particle;
+            math::Real px{};
+            math::Real py{};
+            math::Real vx{};
+            math::Real vy{};
+            if (!(tokens >> particle.mass >> particle.charge >> px >> py >> vx >> vy))
+            {
+                return make_error(line_number,
+                                  "charge requires: mass q px py vx vy");
+            }
+            particle.position = math::Vec2{px, py};
+            particle.velocity = math::Vec2{vx, vy};
+            scenario.charge_list.push_back(particle);
         }
         else if (key == "friction")
         {

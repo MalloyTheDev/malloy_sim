@@ -7,6 +7,8 @@
 #include <malloy/nbody/body2d.hpp>
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/particles/particle2d.hpp>
+#include <malloy/charges/charge_settings.hpp>
+#include <malloy/charges/charged_particle2d.hpp>
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/math/real.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
@@ -28,6 +30,7 @@ enum class ScenarioType
     Particles,
     Rigid,
     Springs,
+    Charges,
 };
 
 // A complete, runnable scenario for one domain.
@@ -55,6 +58,10 @@ struct Scenario
     // type == Rigid
     std::vector<rigid::RigidBody2D> rigid_bodies;
     rigid::RigidSettings rigid_settings{};
+
+    // type == Charges
+    std::vector<charges::ChargedParticle2D> charge_list;
+    charges::ChargeSettings charge_settings{};
 
     // type == Springs
     std::vector<springs::SpringBody2D> spring_bodies;
@@ -124,6 +131,20 @@ struct ScenarioParseResult
 //
 //     An immovable body: infinite mass and inertia. A separate key because
 //     MSVC's stream extraction does not accept the token "inf".
+//
+// type charges:
+//
+//   coulomb <k>           Coulomb constant         (default 1.0)
+//   efield <ex> <ey>      uniform electric field   (default 0 0)
+//   bfield <b>            uniform magnetic field, out of plane (default 0)
+//   softening <value>     enters the denominator SQUARED       (default 0)
+//   charge <mass> <q> <px> <py> <vx> <vy>
+//
+//     q is SIGNED, and may be zero: a neutral particle is carried by the
+//     fields of others while contributing nothing to them.
+//
+//     bfield is a scalar rather than a vector because in two dimensions only
+//     the out-of-plane component of B produces an in-plane force.
 //
 // type springs:
 //

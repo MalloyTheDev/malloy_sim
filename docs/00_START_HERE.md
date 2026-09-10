@@ -5,10 +5,10 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M17 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
-particles, rigid and springs libraries are built, and the terminal app runs all
-four domains. Gravity, colliding particles, rigid bodies and spring networks are
-the finished domains. See `README.md` and `CHANGELOG.md`.
+M1-M18 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+particles, rigid, springs and charges libraries are built, and the terminal app
+runs all five domains. Gravity, colliding particles, rigid bodies, spring
+networks and charged particles are the finished domains. See `README.md` and `CHANGELOG.md`.
 
 ## Where this is going
 
@@ -43,16 +43,17 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-All 11 test executables should pass, and
+All 12 test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
 completion.
 
 ## What's next
 
-M1-M17 are done. The classical mechanics track is complete, including the
+M1-M18 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
-halfplane ground of M16 and the Coulomb friction of M17. Four
+halfplane ground of M16 and the Coulomb friction of M17, and M18 added
+electromagnetism beside it. Five
 finished domains sit behind multi-domain dispatch. Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 

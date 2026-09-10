@@ -24,11 +24,11 @@ Before doing anything, read:
 
 Current status:
 
-M1-M17 are complete. Gravity, colliding particles (with ballistics as uniform
+M1-M18 are complete. Gravity, colliding particles (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
-uniform gravity field, halfplane ground and friction, and spring networks are
-the four
-finished domains, and the scenario format dispatches
+uniform gravity field, halfplane ground and friction, spring networks, and
+charged particles in electric and magnetic fields are the five finished
+domains, and the scenario format dispatches
 between them with a type key. The classical mechanics track is complete
 (docs/07_POST_M5_ROADMAP.md).
 

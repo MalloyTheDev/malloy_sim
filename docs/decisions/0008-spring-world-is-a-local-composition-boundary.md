@@ -87,6 +87,28 @@ same translational integration path, reassess extracting a shared translational
 integrator or a generic force-composition mechanism.** Two copies can be
 coincidence. Three copies are evidence of an abstraction.
 
+## Reassessment at M18, five domains in
+
+This ADR said to reassess extracting a shared translational integrator once a
+third domain independently needed the same path. There are now five: nbody,
+particles, rigid, springs and charges. The reassessment was done, and the answer
+is still no, for a reason M18 supplied rather than one assumed here.
+
+The five paths are not the same path. `nbody` computes accelerations from pairs
+and kicks once. `particles` kicks with gravity, moves, then resolves contacts
+and walls. `rigid` moves a centre of mass while advancing an angle, then
+resolves contacts and ground planes. `springs` accumulates forces through a
+network first. And `charges` puts a ROTATION between the kick and the move,
+because a magnetic force turns a velocity rather than adding to it.
+
+What is genuinely common across all five is one line, `x += v * dt`. Extracting
+one line would remove no meaningful duplication and would create a coupling
+point that four domains would use slightly differently and the fifth would not
+fit at all.
+
+M18 is therefore evidence AGAINST extraction rather than for it. The trigger
+fired, the question was asked, and the duplication stays.
+
 ## Deferred
 
 Rigid-body spring attachment points and the torque they generate stay deferred.

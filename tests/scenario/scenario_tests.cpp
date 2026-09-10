@@ -1,5 +1,6 @@
 #include <malloy/scenario/scenario.hpp>
 
+#include <malloy/charges/charges.hpp>
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/particles/particles.hpp>
 #include <malloy/rigid/rigid.hpp>
@@ -469,6 +470,23 @@ int main()
                     }
                 }
             }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Charges)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.charge_list.size() >= 1);
+                malloy::charges::ChargeWorld world{r.scenario.simulation,
+                                                   r.scenario.charge_settings,
+                                                   r.scenario.charge_list};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                for (int i = 0; i < r.scenario.steps; ++i)
+                {
+                    if (!world.step().ok())
+                    {
+                        std::cerr << "template " << name << " failed at step "
+                                  << i << '\n';
+                        return 1;
+                    }
+                }
+            }
             else
             {
                 MALLOY_CHECK_TRUE(r.scenario.particle_list.size() >= 2);
@@ -874,6 +892,95 @@ int main()
     }
     {
         std::istringstream in("type springs\nfriction 0.5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+
+    // --- M18: type charges parses into the charge fields. Every value is
+    //     distinct and the charges differ in SIGN, so a dropped or transposed
+    //     field shows. ---
+    {
+        std::istringstream in("type charges\n"
+                              "coulomb 2.5\n"
+                              "efield 0.5 -1.5\n"
+                              "bfield 3.25\n"
+                              "softening 0.125\n"
+                              "charge 2.0  1.5  3.0 -4.0  0.25 -0.75\n"
+                              "charge 0.5 -2.5 -6.0  7.0 -0.5   0.125\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Charges);
+
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.k, 2.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.electric.x, 0.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.electric.y, -1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.magnetic, 3.25, eps);
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.softening, 0.125, eps);
+        MALLOY_CHECK_TRUE(r.scenario.charge_settings.is_valid());
+
+        MALLOY_CHECK_EQ(r.scenario.charge_list.size(), std::size_t{2});
+        const auto& first = r.scenario.charge_list[0];
+        MALLOY_CHECK_NEAR(first.mass, 2.0, eps);
+        MALLOY_CHECK_NEAR(first.charge, 1.5, eps);
+        MALLOY_CHECK_NEAR(first.position.x, 3.0, eps);
+        MALLOY_CHECK_NEAR(first.position.y, -4.0, eps);
+        MALLOY_CHECK_NEAR(first.velocity.x, 0.25, eps);
+        MALLOY_CHECK_NEAR(first.velocity.y, -0.75, eps);
+        MALLOY_CHECK_TRUE(first.is_valid());
+
+        // The second charge is NEGATIVE, which no other domain's body can be.
+        MALLOY_CHECK_NEAR(r.scenario.charge_list[1].charge, -2.5, eps);
+        MALLOY_CHECK_TRUE(r.scenario.charge_list[1].is_valid());
+
+        // And nothing leaked into another domain's settings.
+        MALLOY_CHECK_NEAR(r.scenario.nbody_settings.softening, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.gravity.x, 0.0, 0.0);
+    }
+    {
+        // softening now serves two domains, and routes to the right one.
+        std::istringstream in("type nbody\nsoftening 0.75\nbody 1 0 0 0 0\nbody 1 1 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.nbody_settings.softening, 0.75, eps);
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.softening, 0.0, 0.0);
+    }
+    {
+        // A charge of exactly zero is legal: a neutral particle carried by the
+        // fields of others.
+        std::istringstream in("type charges\ncharge 1.0 0.0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.charge_list[0].charge, 0.0, 0.0);
+    }
+    {
+        // Six fields are required, not five.
+        std::istringstream in("type charges\ncharge 1.0 1.0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type charges\nefield 1.0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // Each key belongs to the charge domain and to no other.
+        std::istringstream in("type rigid\nbfield 1.0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type particles\ncharge 1 1 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type springs\ncoulomb 1.0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // And a key belonging to another domain is refused inside charges,
+        // which is what makes a typo in `type` surface immediately.
+        std::istringstream in("type charges\nrestitution 0.5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type charges\nground 0 1 0\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 

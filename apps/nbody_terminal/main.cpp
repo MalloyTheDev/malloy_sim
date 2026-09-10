@@ -1,5 +1,6 @@
 #include <malloy/ascii/grid.hpp>
 #include <malloy/math/math.hpp>
+#include <malloy/charges/charges.hpp>
 #include <malloy/nbody/nbody.hpp>
 #include <malloy/particles/particles.hpp>
 #include <malloy/rigid/rigid.hpp>
@@ -29,6 +30,9 @@ using malloy::math::Real;
 using malloy::math::Vec2;
 using malloy::nbody::Body2D;
 using malloy::nbody::NBodySettings;
+using malloy::charges::ChargedParticle2D;
+using malloy::charges::ChargeSettings;
+using malloy::charges::ChargeWorld;
 using malloy::nbody::NBodyWorld;
 using malloy::nbody::total_angular_momentum;
 using malloy::particles::Particle2D;
@@ -54,6 +58,8 @@ namespace
 constexpr auto& rigid_linear_momentum = malloy::rigid::total_linear_momentum;
 constexpr auto& rigid_angular_momentum = malloy::rigid::total_angular_momentum;
 constexpr auto& rigid_total_energy = malloy::rigid::total_energy;
+constexpr auto& charge_momentum = malloy::charges::total_momentum;
+constexpr auto& charge_total_energy = malloy::charges::total_energy;
 constexpr auto& spring_momentum = malloy::springs::total_momentum;
 constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
 constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
@@ -234,6 +240,43 @@ int run_rigid(const char* title, const SimulationSettings& sim,
     return drive(title, world, report, steps, output_every);
 }
 
+// Runs one charged-particle scenario. A fifth concrete runner, and the fifth
+// branch of the dispatch switch: no base class, exactly as ADR 0006 intends.
+int run_charges(const char* title, const SimulationSettings& sim,
+                ChargeSettings settings, std::vector<ChargedParticle2D> particles,
+                int steps, int output_every)
+{
+    ChargeWorld world{sim, settings, std::move(particles)};
+
+    std::cout << "\n== " << title << " ==  charges=" << world.particles().size()
+              << "  dt=" << sim.dt << "  steps=" << steps << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(positions_of(world.particles()));
+
+    const auto report = [&world, &view, &settings](std::int64_t step_index) {
+        const auto& now = world.particles();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        // Speed is reported because it is the quantity a magnetic field must
+        // leave alone: it is the column that shows the rotation is exact.
+        std::cout << "   E " << std::setw(16) << charge_total_energy(now, settings)
+                  << "   |v| " << std::setw(16)
+                  << malloy::math::length(now.front().velocity) << "   p "
+                  << std::setw(16) << charge_momentum(now).x << std::setw(16)
+                  << charge_momentum(now).y << '\n';
+        std::cout << std::fixed;
+        print_view(view, positions_of(now));
+    };
+
+    return drive(title, world, report, steps, output_every);
+}
+
 // Runs one spring scenario. A fourth concrete runner: SpringWorld shares no
 // base class with the other three (ADR 0006, ADR 0008).
 int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork network,
@@ -374,6 +417,9 @@ int main(int argc, char** argv)
         case ScenarioType::Springs:
             return run_springs(argv[1], s.simulation, s.spring_network,
                                s.spring_bodies, s.steps, s.output_every);
+        case ScenarioType::Charges:
+            return run_charges(argv[1], s.simulation, s.charge_settings,
+                               s.charge_list, s.steps, s.output_every);
         }
         return 1;
     }

@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M17 are complete, so this is the live roadmap for what comes next.
+M1-M18 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -31,6 +31,7 @@ M14 - rigid-body contact response       [done]
 M15 - gravity for rigid bodies          [done]
 M16 - halfplanes, for true flat ground  [done]
 M17 - Coulomb friction                  [done]
+M18 - charged particles (E and B)       [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -133,9 +134,10 @@ None of these is scheduled; the order will be revisited after Track 2.
 ```text
 fluids (SPH, 2D)
 thermodynamics / ideal gas
-electromagnetism (charged particles)
 vehicles, as an application of rigid bodies
 ```
+
+Electromagnetism came off this list and shipped as M18.
 
 Unnumbered on purpose. These were once written as M15 to M18, and M15 then
 shipped as gravity for rigid bodies, so the labels pointed at the wrong

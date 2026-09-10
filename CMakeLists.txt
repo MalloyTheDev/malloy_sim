@@ -94,6 +94,7 @@ add_library(malloy::scenario ALIAS malloy_scenario)
 target_include_directories(malloy_scenario PUBLIC include)
 target_link_libraries(malloy_scenario
     PUBLIC
+        malloy::charges
         malloy::nbody
         malloy::particles
         malloy::rigid
@@ -183,6 +184,22 @@ target_link_libraries(malloy_springs
         malloy::project_warnings
 )
 
+# malloy_charges (M18): charged particles in electric and magnetic fields.
+add_library(malloy_charges STATIC
+    src/charges/charges.cpp
+)
+add_library(malloy::charges ALIAS malloy_charges)
+target_include_directories(malloy_charges PUBLIC include)
+target_link_libraries(malloy_charges
+    PUBLIC
+        malloy::math
+        malloy::sim_core
+        malloy::time
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
 if(MALLOY_BUILD_APPS)
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
@@ -191,6 +208,7 @@ if(MALLOY_BUILD_APPS)
     target_link_libraries(malloy_nbody_terminal
         PRIVATE
             malloy::ascii
+            malloy::charges
             malloy::nbody
             malloy::scenario
             malloy::project_options
@@ -404,6 +422,24 @@ if(MALLOY_BUILD_TESTS)
     )
 
     add_test(NAME malloy_springs_tests COMMAND malloy_springs_tests)
+
+    add_executable(malloy_charges_tests
+        tests/charges/charge_world_tests.cpp
+    )
+
+    target_include_directories(malloy_charges_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_charges_tests
+        PRIVATE
+            malloy::charges
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_charges_tests COMMAND malloy_charges_tests)
 
     # The number of test executables is stated in README.md and
     # docs/00_START_HERE.md, and such counts go stale. This is the only

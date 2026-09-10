@@ -1,0 +1,97 @@
+# MalloySim scenario: charged particles in a magnetic field.
+#
+# This is what M18 adds, and it is the first domain in the project whose force
+# depends on VELOCITY rather than on position. Everything before it was either
+# position-dependent (gravity, Coulomb, Hooke) or an instantaneous impulse.
+#
+# A magnetic force is q(v x B), always perpendicular to the motion. It therefore
+# does no work at all: it turns a particle without ever changing its speed.
+#
+# That single fact is what the domain is built around, and it is easy to get
+# wrong. Applying the force the way every other force in this project is
+# applied, as v += (q/m)(v x B) dt, adds a vector at right angles to v, so the
+# two are the legs of a right triangle and the new speed is
+#
+#     |v| * sqrt(1 + (q b dt / m)^2)
+#
+# which is larger, every single step, without bound. A cyclotron orbit
+# integrated that way spirals outward forever. In two dimensions the magnetic
+# sub-problem has an exact solution, because a uniform out-of-plane field
+# rotates the velocity at a constant rate and does nothing else, so this domain
+# integrates it exactly and the speed is preserved to the last bit.
+#
+# Watch the |v| column. It belongs to the first particle and it should not move.
+#
+# Three particles, differing only in mass and charge, released with the same
+# speed from the same place. The cyclotron radius is m|v|/(|q| b), so they trace
+# three nested circles, and the period is 2*pi*m/(|q| b), so the first two share
+# a period while the third goes round twice as fast.
+#
+# The third has a NEGATIVE charge, which no other body model in this project
+# can express, and it turns the other way.
+
+type charges
+
+dt 0.0062831853071795865
+steps 4000
+output_every 500
+
+# No pairwise interaction: this scenario is about the field alone. Turn
+# `coulomb` up and the three will push each other around as well.
+coulomb 0.0
+
+bfield 1.0
+
+# charge <mass> <q> <px> <py> <vx> <vy>
+
+# radius m|v|/(|q|b) = 1*3/1 = 3, period 2*pi*1/1 = 2*pi, so 1000 steps.
+charge 1.0   1.0   0.0  0.0   3.0  0.0
+
+# Twice the mass: twice the radius, twice the period, so 2000 steps.
+charge 2.0   1.0   0.0  0.0   3.0  0.0
+
+# Twice the charge, and negative: half the radius, half the period, and the
+# opposite sense of rotation.
+charge 1.0  -2.0   0.0  0.0   3.0  0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   1.80000000e+01   |v|  3.00000000e+00   p   1.20000000e+01
+#   step    500   E   1.80000000e+01   |v|  3.00000000e+00   p   3.55271368e-15
+#   step   1000   E   1.80000000e+01   |v|  3.00000000e+00   p  -4.07229805e-13
+#   step   2000   E   1.80000000e+01   |v|  3.00000000e+00   p   1.20000000e+01
+#   step   4000   E   1.80000000e+01   |v|  3.00000000e+00   p   1.20000000e+01
+#
+# Four things there are exact rather than close.
+#
+# 1. |v| does not move. Not to nine digits, to every digit printed, at every
+#    report, over 4000 steps. That is the milestone: a magnetic force does no
+#    work, and the rotation that implements it cannot change a length. The
+#    naive kick would have grown it by sqrt(1 + (q b dt/m)^2) per step, which
+#    for the first particle is a factor of 1.0000197 each step and 1.22 over
+#    ten turns, so this column would read 3.66 by step 10000.
+#
+# 2. E does not move either, and follows from the same fact. There is no
+#    pairwise term here and no electric field, so the energy is purely
+#    kinetic: 0.5*1*9 + 0.5*2*9 + 0.5*1*9 = 18, exactly what step 0 prints.
+#
+# 3. The starting momentum is a hand sum: 1*3 + 2*3 + 1*3 = 12.
+#
+# 4. Momentum returns to exactly 12 at steps 2000 and 4000, and the reason is
+#    arithmetic rather than luck. dt was chosen as 2*pi/1000, so the periods
+#    are whole numbers of steps: 2*pi*m/(|q| b) is 1000 steps for the first
+#    particle, 2000 for the second and 500 for the third. Step 2000 is the
+#    first moment at which all three have completed a whole number of turns
+#    (2, 1 and 4), so every velocity is back where it started.
+#
+#    At step 1000 they have NOT all realigned: the first has done one turn and
+#    the third two, but the second is only halfway round and moving the other
+#    way, so the total is 3 - 6 + 3 = 0. The column reads -4e-13, which is the
+#    accumulated rounding of 1000 rotations and nothing else.
+#
+#    At step 500 the second particle is a quarter turn round, contributing
+#    2*(0, -3), and the other two cancel: p is exactly (0, -6).
+#
+# On the ASCII view: three nested circles, of radius 3, 6 and 1.5, which is
+# m|v|/(|q| b) for each. The smallest one belongs to the negative charge and it
+# goes round the other way.
