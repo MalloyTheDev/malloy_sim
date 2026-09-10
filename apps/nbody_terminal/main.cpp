@@ -69,28 +69,25 @@ namespace
 constexpr int view_width = 61;
 constexpr int view_height = 25;
 
-// The body positions, as the plain point list the ASCII view works with.
-std::vector<Vec2> positions_of(const std::vector<Body2D>& bodies)
+// The positions of any bodies that have one, as the plain point list the ASCII
+// view works with.
+//
+// At M10 this was two copies and a comment saying the duplication was three
+// lines and the abstraction would be a template or a base class, so the copies
+// won. It is now three copies, which is the threshold this project uses as
+// evidence rather than coincidence (ADR 0008). A template over "has a position"
+// is not a base class and invents no vocabulary, so rule 12 is untouched.
+//
+// malloy_rigid keeps its own extractor below, because it emits two points per
+// body rather than one and is genuinely a different function.
+template <typename Body>
+std::vector<Vec2> positions_of(const std::vector<Body>& bodies)
 {
     std::vector<Vec2> points;
     points.reserve(bodies.size());
-    for (const Body2D& body : bodies)
+    for (const Body& body : bodies)
     {
         points.push_back(body.position);
-    }
-    return points;
-}
-
-// The same, for the other domain. Two small loops rather than a shared
-// abstraction over "things with a position": the duplication is three lines and
-// the abstraction would be a template or a base class (ADR 0006).
-std::vector<Vec2> particle_positions(const std::vector<Particle2D>& particles)
-{
-    std::vector<Vec2> points;
-    points.reserve(particles.size());
-    for (const Particle2D& p : particles)
-    {
-        points.push_back(p.position);
     }
     return points;
 }
@@ -114,6 +111,41 @@ void print_view(Viewport& view, const std::vector<Vec2>& points)
               << view.max_y << "]\n";
 }
 
+// Drives one world to completion, reporting every output_every steps. Returns 0
+// on success, 1 on step failure.
+//
+// One copy rather than four. It is a template over the world type, not a base
+// class: RigidWorld, ParticleWorld, NBodyWorld and SpringWorld share nothing but
+// a step() returning StepResult, and giving them a common base is exactly what
+// CLAUDE.md rule 12 forbids. Duck typing here costs nothing and invents no
+// vocabulary.
+//
+// The int64 counter is the reason this is worth factoring at all. With
+// steps == INT_MAX an int counter reaches INT_MAX, passes the loop test, and
+// overflows on ++, which is undefined behaviour and in practice never
+// terminates. That fix was replicated in all four runners but explained in only
+// one, so three copies carried a correctness-critical detail with no note
+// saying why it mattered.
+template <typename World, typename Report>
+int drive(const char* title, World& world, const Report& report, int steps,
+          int output_every)
+{
+    report(0);
+    for (std::int64_t step = 1; step <= steps; ++step)
+    {
+        if (!world.step().ok())
+        {
+            std::cerr << title << ": step " << step << " failed\n";
+            return 1;
+        }
+        if (output_every > 0 && step % output_every == 0)
+        {
+            report(step);
+        }
+    }
+    return 0;
+}
+
 // Runs one particle scenario to completion, reporting the conserved quantities
 // this domain actually has. Deliberately a separate function from
 // run_scenario: ParticleWorld and NBodyWorld share no base class, and ADR 0006
@@ -134,7 +166,7 @@ int run_particles(const char* title, const SimulationSettings& sim,
         return 1;
     }
 
-    Viewport view = fit_viewport(particle_positions(world.particles()));
+    Viewport view = fit_viewport(positions_of(world.particles()));
 
     const auto report = [&world, &view, &settings](std::int64_t step_index) {
         const auto& now = world.particles();
@@ -144,23 +176,10 @@ int run_particles(const char* title, const SimulationSettings& sim,
                   << "   p " << std::setw(16) << total_momentum(now).x << std::setw(16)
                   << total_momentum(now).y << '\n';
         std::cout << std::fixed;
-        print_view(view, particle_positions(now));
+        print_view(view, positions_of(now));
     };
 
-    report(0);
-    for (std::int64_t step = 1; step <= steps; ++step)
-    {
-        if (!world.step().ok())
-        {
-            std::cerr << title << ": step " << step << " failed\n";
-            return 1;
-        }
-        if (output_every > 0 && step % output_every == 0)
-        {
-            report(step);
-        }
-    }
-    return 0;
+    return drive(title, world, report, steps, output_every);
 }
 
 // The points the ASCII view shows for a rigid body: its centre of mass and its
@@ -210,31 +229,7 @@ int run_rigid(const char* title, const SimulationSettings& sim,
         print_view(view, rigid_points(now));
     };
 
-    report(0);
-    for (std::int64_t step = 1; step <= steps; ++step)
-    {
-        if (!world.step().ok())
-        {
-            std::cerr << title << ": step " << step << " failed\n";
-            return 1;
-        }
-        if (output_every > 0 && step % output_every == 0)
-        {
-            report(step);
-        }
-    }
-    return 0;
-}
-
-std::vector<Vec2> spring_points(const std::vector<SpringBody2D>& bodies)
-{
-    std::vector<Vec2> points;
-    points.reserve(bodies.size());
-    for (const SpringBody2D& body : bodies)
-    {
-        points.push_back(body.position);
-    }
-    return points;
+    return drive(title, world, report, steps, output_every);
 }
 
 // Runs one spring scenario. A fourth concrete runner: SpringWorld shares no
@@ -254,7 +249,7 @@ int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork 
         return 1;
     }
 
-    Viewport view = fit_viewport(spring_points(world.bodies()));
+    Viewport view = fit_viewport(positions_of(world.bodies()));
 
     const auto report = [&world, &view](std::int64_t step_index) {
         const auto& now = world.bodies();
@@ -267,23 +262,10 @@ int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork 
                   << "   p " << std::setw(15) << spring_momentum(now).x << std::setw(15)
                   << spring_momentum(now).y << '\n';
         std::cout << std::fixed;
-        print_view(view, spring_points(now));
+        print_view(view, positions_of(now));
     };
 
-    report(0);
-    for (std::int64_t step = 1; step <= steps; ++step)
-    {
-        if (!world.step().ok())
-        {
-            std::cerr << title << ": step " << step << " failed\n";
-            return 1;
-        }
-        if (output_every > 0 && step % output_every == 0)
-        {
-            report(step);
-        }
-    }
-    return 0;
+    return drive(title, world, report, steps, output_every);
 }
 
 // Runs one scenario to completion, printing system diagnostics every
@@ -330,23 +312,7 @@ int run_scenario(const char* title, const SimulationSettings& sim,
         print_view(view, positions_of(bodies_now));
     };
 
-    report(0);
-    // int64 counter: with steps == INT_MAX an int counter reaches INT_MAX,
-    // passes the test, and overflows on ++, which is undefined behavior and
-    // in practice loops forever.
-    for (std::int64_t step = 1; step <= steps; ++step)
-    {
-        if (!world.step().ok())
-        {
-            std::cerr << title << ": step " << step << " failed\n";
-            return 1;
-        }
-        if (output_every > 0 && step % output_every == 0)
-        {
-            report(step);
-        }
-    }
-    return 0;
+    return drive(title, world, report, steps, output_every);
 }
 
 // The built-in scenarios, run when no scenario file is given.

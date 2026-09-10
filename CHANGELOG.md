@@ -44,6 +44,12 @@ All notable changes to MalloySim are recorded here. The format follows
 - Both worlds gained `elapsed_time()`, computed as ticks * dt rather than
   accumulated, so it cannot drift.
 
+- The terminal app drives every world through one `drive()` template instead of
+  four copies of the same loop, and extracts positions through one
+  `positions_of()` template instead of three. `rigid_points` stays separate
+  because it emits two points per body and is genuinely a different function.
+  414 lines down to 380, and output is byte-identical across the built-in demo
+  and all six templates.
 ### Fixed
 
 - `NBodyWorld::step()` now validates the state after the update as well as
@@ -195,6 +201,23 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ## [M13] - 2026-09-09  (spring networks and deterministic force accumulation)
 
+- The app refactor was triggered by a measurement rather than by taste. The
+  four driving loops differed only in a comment, and that comment was the
+  rationale for the int64 loop counter: with `steps == INT_MAX` an int counter
+  reaches INT_MAX, passes the loop test, and overflows on increment, which is
+  the confirmed infinite loop from #4. The fix was replicated four times and
+  explained once, so three copies carried a correctness-critical detail with
+  nothing saying why it mattered. That is the real cost of the duplication, not
+  the line count.
+- `drive()` and `positions_of()` are function templates over duck-typed worlds
+  and bodies, not base classes. The four worlds share nothing but a `step()`
+  returning `StepResult`, and giving them a common base is exactly what rule 12
+  forbids. At M10 a comment justified keeping two copies of the position
+  extractor; at three copies the project's own threshold says evidence rather
+  than coincidence (ADR 0008), and that comment has been replaced rather than
+  left contradicting the code.
+- The app still contains no physics: no timestep arithmetic, no velocity
+  updates, no trigonometry, no division by mass. Rule 14 holds in substance.
 ### Added
 
 - `malloy_springs` (STATIC, `malloy::springs`): `Spring`, `SpringNetwork`,
