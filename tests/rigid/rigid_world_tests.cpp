@@ -1198,6 +1198,48 @@ int main()
         MALLOY_CHECK_TRUE(malloy::math::is_finite(w.bodies()[0].position));
     }
 
+    // --- An immovable body with a velocity is a KINEMATIC body: a moving
+    //     platform. It is integrated like anything else, gravity does not
+    //     accelerate it, no impulse can slow it, and it carries no momentum in
+    //     the diagnostics, so it acts on the world without being part of it.
+    //
+    //     Nothing tested this in either direction, so adding a static skip to
+    //     the pose loop used to pass the suite just as well. ---
+    {
+        RigidBody2D platform;
+        platform.mass = inf;
+        platform.inertia = inf;
+        platform.radius = 0.5;
+        platform.position = Vec2{0.0, 0.0};
+        platform.velocity = Vec2{2.0, 0.0};
+
+        RigidBody2D ball;
+        ball.mass = 1.0;
+        ball.inertia = 0.5;
+        ball.radius = 0.5;
+        ball.position = Vec2{0.9, 0.0};
+
+        RigidSettings g;
+        g.restitution = 1.0;
+        g.gravity = Vec2{0.0, -9.81};
+        RigidWorld w{SimulationSettings{0.01}, {platform, ball}, g};
+        for (int i = 0; i < 50; ++i)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+        }
+
+        // It moved exactly as its velocity says, undisturbed by gravity, by the
+        // impact, or by anything else: 2.0 * 0.01 * 50.
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].position, Vec2(1.0, 0.0), 1e-12);
+        MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(2.0, 0.0), 0.0);
+        // And it drove the ball ahead of it rather than passing through.
+        MALLOY_CHECK_TRUE(w.bodies()[1].velocity.x > 0.5);
+        MALLOY_CHECK_TRUE(w.bodies()[1].position.x > 0.9);
+        // The platform contributes no momentum, being infinitely massive.
+        MALLOY_CHECK_VEC2_NEAR(total_linear_momentum({w.bodies()[0]}), Vec2(0.0, 0.0),
+                               0.0);
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

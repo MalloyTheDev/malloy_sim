@@ -39,11 +39,18 @@ public:
 
     // Advance by exactly one fixed step:
     //
-    //   1. add gravity * dt to every non-static velocity;
+    //   1. add gravity * dt to every velocity whose body has finite mass;
     //   2. move the centre of mass by the UPDATED velocity * dt, which keeps
     //      the integration semi-implicit (symplectic) Euler;
     //   3. advance the angle by angular_velocity * dt;
     //   4. resolve contacts in ascending pair order.
+    //
+    // Step 2 integrates EVERY body, including immovable ones. That is
+    // deliberate: an immovable body with a velocity you set is a kinematic
+    // body, a moving platform that pushes everything and is pushed by nothing.
+    // Gravity does not accelerate it, no impulse can slow it, and it carries no
+    // momentum in the diagnostics, so it acts as an external agent rather than
+    // part of the closed system. Leave its velocity at zero for a wall.
     //
     // The body origin follows from the centre of mass and the new angle, so a
     // body whose origin is offset from its centre of mass orbits correctly

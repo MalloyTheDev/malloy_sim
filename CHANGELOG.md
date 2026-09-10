@@ -217,6 +217,14 @@ All notable changes to MalloySim are recorded here. The format follows
   but it does mean a modelling mistake stays silent. Reporting non-finite state
   loudly is tracked separately (#3).
 
+- Immovable bodies with a velocity are now documented and tested as KINEMATIC
+  bodies: moving platforms that push everything and are pushed by nothing.
+  Gravity does not accelerate one, no impulse can slow it, and it carries no
+  momentum in the diagnostics, so it acts on the world without being part of
+  it. Nothing specified this in either direction, so adding a static skip to
+  the pose loop passed the suite just as well. Behaviour is unchanged; the
+  contract is now written down in the step description and pinned by a test.
+
 ### Fixed
 
 - `RigidBody2D::is_static()` was an OR over two independently inverted
