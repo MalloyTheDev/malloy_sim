@@ -99,6 +99,16 @@ inline bool approx_equal(const Mat3& a, const Mat3& b, Real epsilon)
            approx_equal(a.col2, b.col2, epsilon);
 }
 
+// A unit quaternion as its rotation matrix: the columns are the rotated basis
+// vectors, so `to_mat3(q) * v` equals `rotate(q, v)`. The inverse of `to_quat`
+// for a proper rotation. Used to turn a stored orientation back into the tensor
+// R diag(moments) R^T when combining mass properties.
+inline Mat3 to_mat3(const Quat& q)
+{
+    return Mat3{rotate(q, Vec3{1.0, 0.0, 0.0}), rotate(q, Vec3{0.0, 1.0, 0.0}),
+                rotate(q, Vec3{0.0, 0.0, 1.0})};
+}
+
 // The eigen-decomposition of a SYMMETRIC 3x3: three real eigenvalues (the
 // principal values) and an orthonormal set of eigenvectors (the principal
 // axes), returned as the columns of a proper rotation. Reconstructing the

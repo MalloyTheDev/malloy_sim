@@ -372,6 +372,43 @@ int main()
         }
     }
 
+    // --- M26: to_mat3, a unit quaternion as its rotation matrix. The columns
+    //     must be the rotated basis vectors, so to_mat3(q) * v == rotate(q, v)
+    //     for every v; that defining contract is checked column by column
+    //     against `rotate` (M20), so the two cannot drift. It is the inverse of
+    //     to_quat, and the piece that lets `combine` rebuild a part's inertia
+    //     tensor from its stored orientation. ---
+    {
+        using malloy::math::from_axis_angle;
+        using malloy::math::Mat3;
+        using malloy::math::Quat;
+        using malloy::math::rotate;
+        using malloy::math::to_mat3;
+        using malloy::math::to_quat;
+        using malloy::math::Vec3;
+
+        const Quat q = from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.9);
+        const Mat3 m = to_mat3(q);
+        // Each column is the corresponding basis vector, rotated: this pins the
+        // columns independently, so a swapped or wrong one shows.
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            m.col0, rotate(q, Vec3{1.0, 0.0, 0.0}), 1e-15));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            m.col1, rotate(q, Vec3{0.0, 1.0, 0.0}), 1e-15));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            m.col2, rotate(q, Vec3{0.0, 0.0, 1.0}), 1e-15));
+        // And so, for a generic vector, to_mat3(q) * v agrees with rotate(q, v).
+        const Vec3 probe{0.7, -1.3, 0.4};
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(m * probe, rotate(q, probe), 1e-14));
+        // Inverse of to_quat: matrix -> quat -> action returns the same rotation.
+        const Quat round = to_quat(m);
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            rotate(round, probe), rotate(q, probe), 1e-13));
+        // The identity quaternion is the identity matrix.
+        MALLOY_CHECK_TRUE(
+            malloy::math::approx_equal(to_mat3(Quat{}), malloy::math::identity3(), 1e-15));
+    }
+
     std::cout << "malloy_math_tests passed\n";
     return 0;
 }

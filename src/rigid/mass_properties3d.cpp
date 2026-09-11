@@ -11,11 +11,39 @@ namespace
 // 4/3 pi, the volume of a unit sphere.
 constexpr math::Real four_thirds_pi = math::Real{4.18879020478639098461685784437};
 
-bool part_is_valid(const SolidSphere& part)
+bool sphere_is_valid(const SolidSphere& part)
 {
     return part.radius > math::Real{0} && math::is_finite(part.radius) &&
            part.density > math::Real{0} && math::is_finite(part.density) &&
            math::is_squarable(part.center);
+}
+
+bool box_is_valid(const SolidBox& box)
+{
+    return box.half_extents.x > math::Real{0} && box.half_extents.y > math::Real{0} &&
+           box.half_extents.z > math::Real{0} && math::is_finite(box.half_extents) &&
+           box.density > math::Real{0} && math::is_finite(box.density) &&
+           math::is_unit(box.orientation) && math::is_squarable(box.center);
+}
+
+// Turn a mass, a centre of mass, and an inertia tensor about that centre into
+// principal moments and a principal frame. The one place the diagonalization
+// happens, shared by every builder.
+MassProperties3D finalize(math::Real mass, const math::Vec3& center_of_mass,
+                          const math::Mat3& tensor)
+{
+    const math::SymmetricEigen eigen = math::eigen_symmetric(tensor);
+    MassProperties3D result;
+    result.mass = mass;
+    result.center_of_mass = center_of_mass;
+    result.inertia = eigen.values;
+    result.orientation = math::to_quat(eigen.vectors);
+    return result;
+}
+
+math::Real sphere_mass(const SolidSphere& part)
+{
+    return part.density * four_thirds_pi * part.radius * part.radius * part.radius;
 }
 } // namespace
 
@@ -27,19 +55,17 @@ MassProperties3D mass_properties_3d(const std::vector<SolidSphere>& parts)
     }
     for (const SolidSphere& part : parts)
     {
-        if (!part_is_valid(part))
+        if (!sphere_is_valid(part))
         {
             return MassProperties3D{};
         }
     }
 
-    // Mass and centre of mass.
     math::Real total_mass = 0.0;
     math::Vec3 weighted_center{};
     for (const SolidSphere& part : parts)
     {
-        const math::Real mass =
-            part.density * four_thirds_pi * part.radius * part.radius * part.radius;
+        const math::Real mass = sphere_mass(part);
         total_mass += mass;
         weighted_center += part.center * mass;
     }
@@ -51,13 +77,11 @@ MassProperties3D mass_properties_3d(const std::vector<SolidSphere>& parts)
 
     // Inertia tensor about the centre of mass: each sphere's own isotropic
     // tensor, shifted to the common centre by the parallel-axis theorem
-    // I += I_own + m (|d|^2 I - d d^T), with d the offset from the common
-    // centre to the part's centre.
+    // I += I_own + m (|d|^2 I - d d^T).
     math::Mat3 tensor{};
     for (const SolidSphere& part : parts)
     {
-        const math::Real mass =
-            part.density * four_thirds_pi * part.radius * part.radius * part.radius;
+        const math::Real mass = sphere_mass(part);
         const math::Real own = math::Real{0.4} * mass * part.radius * part.radius;
         const math::Vec3 offset = part.center - center_of_mass;
         const math::Real distance_squared = math::dot(offset, offset);
@@ -68,16 +92,60 @@ MassProperties3D mass_properties_3d(const std::vector<SolidSphere>& parts)
             mass;
         tensor = tensor + math::diagonal3(math::Vec3{own, own, own}) + shift;
     }
+    return finalize(total_mass, center_of_mass, tensor);
+}
 
-    // Diagonalize: the principal moments and the orientation of the principal
-    // frame in the lab frame.
-    const math::SymmetricEigen eigen = math::eigen_symmetric(tensor);
-    MassProperties3D result;
-    result.mass = total_mass;
-    result.center_of_mass = center_of_mass;
-    result.inertia = eigen.values;
-    result.orientation = math::to_quat(eigen.vectors);
-    return result;
+MassProperties3D mass_properties_3d(const SolidBox& box)
+{
+    if (!box_is_valid(box))
+    {
+        return MassProperties3D{};
+    }
+    const math::Vec3 h = box.half_extents;
+    const math::Real mass = box.density * math::Real{8} * h.x * h.y * h.z;
+    // Solid box moments about its own axes: (1/12) m (w_j^2 + w_k^2) with w the
+    // FULL widths (2h), which is (1/3) m (h_j^2 + h_k^2).
+    const math::Real third = math::Real{1} / math::Real{3};
+    const math::Vec3 own{third * mass * (h.y * h.y + h.z * h.z),
+                         third * mass * (h.x * h.x + h.z * h.z),
+                         third * mass * (h.x * h.x + h.y * h.y)};
+    // Carry the box-frame diagonal into the lab frame: R diag(own) R^T.
+    const math::Mat3 rotation = math::to_mat3(box.orientation);
+    const math::Mat3 tensor =
+        rotation * math::diagonal3(own) * math::transpose(rotation);
+    return finalize(mass, box.center, tensor);
+}
+
+MassProperties3D combine(const MassProperties3D& a, const MassProperties3D& b)
+{
+    // A zero-mass operand is the identity, so a fold can start from nothing.
+    if (!(a.mass > math::Real{0}))
+    {
+        return b;
+    }
+    if (!(b.mass > math::Real{0}))
+    {
+        return a;
+    }
+
+    const math::Real total_mass = a.mass + b.mass;
+    const math::Vec3 center_of_mass =
+        (a.center_of_mass * a.mass + b.center_of_mass * b.mass) / total_mass;
+
+    // Each part's tensor about ITS OWN centre, reconstructed from its principal
+    // moments and frame, then shifted to the shared centre by parallel-axis.
+    const auto shifted = [&](const MassProperties3D& part) {
+        const math::Mat3 rotation = math::to_mat3(part.orientation);
+        const math::Mat3 own =
+            rotation * math::diagonal3(part.inertia) * math::transpose(rotation);
+        const math::Vec3 offset = part.center_of_mass - center_of_mass;
+        const math::Real distance_squared = math::dot(offset, offset);
+        return own + (math::diagonal3(math::Vec3{distance_squared, distance_squared,
+                                                 distance_squared}) -
+                      math::outer(offset, offset)) *
+                         part.mass;
+    };
+    return finalize(total_mass, center_of_mass, shifted(a) + shifted(b));
 }
 
 RigidBody3D rigid_body_from(const MassProperties3D& properties)

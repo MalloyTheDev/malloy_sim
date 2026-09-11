@@ -3960,7 +3960,8 @@ int main()
         // --- Validation: an empty body or an invalid part yields nothing
         //     usable, rather than a meaningless number. ---
         {
-            MALLOY_CHECK_NEAR(mass_properties_3d({}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(std::vector<SolidSphere>{}).mass,
+                              0.0, 0.0);
             MALLOY_CHECK_NEAR(mass_properties_3d(
                                   {SolidSphere{Vec3{}, -1.0, 1.0}}).mass, 0.0, 0.0);
             MALLOY_CHECK_NEAR(mass_properties_3d(
@@ -4047,6 +4048,251 @@ int main()
                 {
                     MALLOY_CHECK_TRUE(world.step().ok());
                     lowest = std::fmin(lowest, world.bodies()[0].angular_velocity.x);
+                }
+                MALLOY_CHECK_TRUE(lowest > 0.9 * spin); // held: stable axis
+            }
+        }
+    }
+
+    // --- M26: box mass properties and combine. A solid box is the second mass
+    //     primitive (three distinct moments and a real orientation, where a
+    //     sphere had one moment and no orientation), and `combine` assembles a
+    //     compound body from primitives of any kind. Both are validated against
+    //     closed forms; combine is then pinned against the M25 list path, which
+    //     never calls it, and the box is run through M20's dynamics. ---
+    {
+        using malloy::math::approx_equal;
+        using malloy::math::diagonal3;
+        using malloy::math::from_axis_angle;
+        using malloy::math::Mat3;
+        using malloy::math::Quat;
+        using malloy::math::to_mat3;
+        using malloy::math::transpose;
+        using malloy::math::Vec3;
+        using malloy::rigid::combine;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::MassProperties3D;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::SolidBox;
+        using malloy::rigid::SolidSphere;
+
+        // The full inertia tensor in the lab frame, reconstructed from a
+        // result's principal moments and frame: R diag(I) R^T. Two results
+        // describe the SAME body exactly when their masses, centres and these
+        // tensors agree, no matter how the eigenvalues happened to be ordered,
+        // so this is what commutativity and consistency should compare.
+        const auto tensor_of = [](const MassProperties3D& mp) {
+            const Mat3 rotation = to_mat3(mp.orientation);
+            return rotation * diagonal3(mp.inertia) * transpose(rotation);
+        };
+
+        // --- A single axis-aligned box: the closed forms. Half-extents made
+        //     strictly decreasing (hx > hy > hz), so the box-frame tensor is
+        //     ALREADY ascending on the diagonal; the principal frame is then the
+        //     identity and each moment lands on a known axis. Off the origin, so
+        //     the centre of mass is the box centre and not zero by accident. ---
+        {
+            const Real hx = 3.0, hy = 2.0, hz = 1.0, density = 1.0;
+            const MassProperties3D mp = mass_properties_3d(
+                SolidBox{Vec3{2.0, -1.0, 0.5}, Vec3{hx, hy, hz}, Quat{}, density});
+            const Real mass = density * 8.0 * hx * hy * hz; // 48
+            MALLOY_CHECK_NEAR(mp.mass, mass, 1e-9);
+            MALLOY_CHECK_TRUE(
+                approx_equal(mp.center_of_mass, Vec3{2.0, -1.0, 0.5}, 1e-12));
+            // I_i = (1/3) m (h_j^2 + h_k^2): the two OTHER half-extents, so the
+            // axis with the smallest extent carries the LARGEST moment.
+            const Real third = 1.0 / 3.0;
+            const Real ix = third * mass * (hy * hy + hz * hz); // 80
+            const Real iy = third * mass * (hx * hx + hz * hz); // 160
+            const Real iz = third * mass * (hx * hx + hy * hy); // 208
+            MALLOY_CHECK_NEAR(mp.inertia.x, ix, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.y, iy, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.z, iz, 1e-9);
+            MALLOY_CHECK_TRUE(approx_equal(mp.orientation, Quat{}, 1e-12));
+        }
+
+        // --- The same box, turned by a non-trivial rotation. A rotation cannot
+        //     change the principal MOMENTS, but the inertia tensor in the lab
+        //     frame is now genuinely off-diagonal and the returned frame has to
+        //     carry it. The invariant: the reconstructed tensor equals
+        //     R_tilt diag(own) R_tilt^T built independently from the closed-form
+        //     moments. A builder that ignored the orientation would return a
+        //     diagonal tensor and fail this. ---
+        {
+            const Real hx = 3.0, hy = 2.0, hz = 1.0, density = 1.0;
+            const Real mass = density * 8.0 * hx * hy * hz;
+            const Real third = 1.0 / 3.0;
+            // Already ascending (80 < 160 < 208), so this IS the sorted result.
+            const Vec3 own{third * mass * (hy * hy + hz * hz),
+                           third * mass * (hx * hx + hz * hz),
+                           third * mass * (hx * hx + hy * hy)};
+            const Quat tilt = from_axis_angle(Vec3{1.0, 2.0, -0.5}, 0.7);
+            const MassProperties3D mp = mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{hx, hy, hz}, tilt, density});
+            MALLOY_CHECK_NEAR(mp.mass, mass, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.x, own.x, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.y, own.y, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.z, own.z, 1e-9);
+            const Mat3 rotation = to_mat3(tilt);
+            const Mat3 expected =
+                rotation * diagonal3(own) * transpose(rotation);
+            MALLOY_CHECK_TRUE(approx_equal(tensor_of(mp), expected, 1e-9));
+            // The configuration is non-trivial: the lab tensor really is not the
+            // box-frame diagonal, so the check above exercises the rotation.
+            MALLOY_CHECK_TRUE(!approx_equal(expected, diagonal3(own), 1e-6));
+        }
+
+        // --- combine against the M25 list path: two spheres combined one at a
+        //     time must equal the same two built together in one list. The list
+        //     path never calls combine, so this pins combine's tensor
+        //     reconstruction and its parallel-axis shift against an independent
+        //     route. The spheres are apart and unequal, so a dropped shift or a
+        //     mis-weighted centre shows. ---
+        {
+            const SolidSphere a{Vec3{0.0, 0.0, 0.0}, 1.0, 1.0};
+            const SolidSphere b{Vec3{3.0, 0.0, 0.0}, 0.7, 4.0};
+            const MassProperties3D together =
+                mass_properties_3d(std::vector<SolidSphere>{a, b});
+            const MassProperties3D piecewise =
+                combine(mass_properties_3d(std::vector<SolidSphere>{a}),
+                        mass_properties_3d(std::vector<SolidSphere>{b}));
+            MALLOY_CHECK_NEAR(piecewise.mass, together.mass, 1e-9);
+            MALLOY_CHECK_TRUE(approx_equal(piecewise.center_of_mass,
+                                           together.center_of_mass, 1e-12));
+            MALLOY_CHECK_TRUE(
+                approx_equal(tensor_of(piecewise), tensor_of(together), 1e-9));
+        }
+
+        // --- combine is commutative up to eigenvalue ordering, and a zero-mass
+        //     body is its identity (so a fold over parts can start from
+        //     nothing). A box and a sphere, unequal masses and centres apart, so
+        //     the mass sum and the mass-weighted centre are both pinned. ---
+        {
+            const MassProperties3D a = mass_properties_3d(
+                SolidBox{Vec3{-1.0, 0.0, 0.0}, Vec3{1.0, 2.0, 0.5}, Quat{}, 3.0});
+            const MassProperties3D b =
+                mass_properties_3d(std::vector<SolidSphere>{
+                    SolidSphere{Vec3{2.0, 1.0, 0.0}, 0.8, 2.0}});
+            const MassProperties3D ab = combine(a, b);
+            const MassProperties3D ba = combine(b, a);
+            // Closed forms for the compound's mass and centre of mass.
+            const Real ma = 3.0 * 8.0 * 1.0 * 2.0 * 0.5;               // 24
+            const Real mb = 2.0 * (4.0 / 3.0) * pi * 0.8 * 0.8 * 0.8;  // sphere
+            MALLOY_CHECK_NEAR(ab.mass, ma + mb, 1e-9);
+            MALLOY_CHECK_NEAR(ab.center_of_mass.x,
+                              (ma * (-1.0) + mb * 2.0) / (ma + mb), 1e-9);
+            MALLOY_CHECK_NEAR(ab.center_of_mass.y, (mb * 1.0) / (ma + mb), 1e-9);
+            // Commutative: the two orders describe the same body.
+            MALLOY_CHECK_NEAR(ab.mass, ba.mass, 1e-12);
+            MALLOY_CHECK_TRUE(
+                approx_equal(ab.center_of_mass, ba.center_of_mass, 1e-12));
+            MALLOY_CHECK_TRUE(approx_equal(tensor_of(ab), tensor_of(ba), 1e-9));
+            MALLOY_CHECK_TRUE(rigid_body_from(ab).is_valid());
+            // Identity: a zero-mass operand on either side returns the other
+            // unchanged, exactly (not diagonalized again).
+            const MassProperties3D zero{};
+            const MassProperties3D left = combine(zero, a);
+            const MassProperties3D right = combine(a, zero);
+            MALLOY_CHECK_NEAR(left.mass, a.mass, 0.0);
+            MALLOY_CHECK_TRUE(approx_equal(left.center_of_mass, a.center_of_mass, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(left.inertia, a.inertia, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(left.orientation, a.orientation, 0.0));
+            MALLOY_CHECK_NEAR(right.mass, a.mass, 0.0);
+            MALLOY_CHECK_TRUE(approx_equal(right.center_of_mass, a.center_of_mass, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(right.inertia, a.inertia, 0.0));
+        }
+
+        // --- combine is associative up to eigenvalue ordering: three parts of
+        //     different kinds fold to the same body either way. A tilted box in
+        //     the middle, so the reconstruction is not a diagonal special
+        //     case. ---
+        {
+            const MassProperties3D a =
+                mass_properties_3d(std::vector<SolidSphere>{
+                    SolidSphere{Vec3{0.0, 0.0, 0.0}, 1.0, 1.0}});
+            const MassProperties3D b = mass_properties_3d(
+                SolidBox{Vec3{2.0, 0.0, 0.0}, Vec3{0.5, 1.0, 1.5},
+                         from_axis_angle(Vec3{0.0, 0.0, 1.0}, 0.5), 2.0});
+            const MassProperties3D c =
+                mass_properties_3d(std::vector<SolidSphere>{
+                    SolidSphere{Vec3{0.0, 3.0, 1.0}, 0.6, 5.0}});
+            const MassProperties3D left = combine(combine(a, b), c);
+            const MassProperties3D right = combine(a, combine(b, c));
+            MALLOY_CHECK_NEAR(left.mass, right.mass, 1e-9);
+            MALLOY_CHECK_TRUE(
+                approx_equal(left.center_of_mass, right.center_of_mass, 1e-12));
+            MALLOY_CHECK_TRUE(approx_equal(tensor_of(left), tensor_of(right), 1e-9));
+        }
+
+        // --- Validation: a box with a negative or non-finite half-extent or
+        //     density, a non-unit orientation, or a non-squarable centre yields
+        //     nothing usable (zero mass), rather than a meaningless number. A
+        //     NEGATIVE extent on each axis in turn pins all three positivity
+        //     checks: a dropped one lets a negative width through and the mass
+        //     goes negative rather than staying zero. ---
+        {
+            const Vec3 ok{1.0, 1.0, 1.0};
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{-1.0, 1.0, 1.0}, Quat{}, 1.0}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{1.0, -1.0, 1.0}, Quat{}, 1.0}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{1.0, 1.0, -1.0}, Quat{}, 1.0}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{1.0, inf, 1.0}, Quat{}, 1.0}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, ok, Quat{}, -1.0}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, ok, Quat{}, inf}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{0.0, nan, 0.0}, ok, Quat{}, 1.0}).mass, 0.0, 0.0);
+            // A non-unit orientation is malformed input: every rotation formula
+            // assumes a unit quaternion, so it is rejected, not rescaled.
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                SolidBox{Vec3{}, ok, Quat{2.0, Vec3{0.0, 0.0, 0.0}}, 1.0}).mass,
+                0.0, 0.0);
+        }
+
+        // --- The whole chain through M20's dynamics. A solid box already has
+        //     three distinct principal moments, so it is a natural
+        //     intermediate-axis object. Built axis-aligned, its body y is the
+        //     intermediate axis (moment 160, between 80 and 208): spun there it
+        //     flips, spun about the largest axis it holds. The derived moments,
+        //     their ordering and rigid_body_from all have to be right for the
+        //     flip to land on the middle axis. ---
+        {
+            using malloy::rigid::Rigid3DWorld;
+            const MassProperties3D mp = mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{3.0, 2.0, 1.0}, Quat{}, 1.0});
+            MALLOY_CHECK_TRUE(mp.inertia.x < mp.inertia.y - 1.0);
+            MALLOY_CHECK_TRUE(mp.inertia.y < mp.inertia.z - 1.0);
+            MALLOY_CHECK_TRUE(approx_equal(mp.orientation, Quat{}, 1e-12));
+
+            const Real spin = 5.0, nudge = 1e-3;
+            // Spun about y (intermediate): it flips.
+            {
+                RigidBody3D body = rigid_body_from(mp);
+                body.angular_velocity = Vec3{nudge, spin, 0.0};
+                Rigid3DWorld world{SimulationSettings{0.0005}, {body}};
+                Real lowest = spin;
+                for (int i = 0; i < 40000; ++i)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                    lowest = std::fmin(lowest, world.bodies()[0].angular_velocity.y);
+                }
+                MALLOY_CHECK_TRUE(lowest < -0.9 * spin); // reversed: a real flip
+            }
+            // Spun about z (largest): it does NOT flip.
+            {
+                RigidBody3D body = rigid_body_from(mp);
+                body.angular_velocity = Vec3{nudge, 0.0, spin};
+                Rigid3DWorld world{SimulationSettings{0.0005}, {body}};
+                Real lowest = spin;
+                for (int i = 0; i < 40000; ++i)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                    lowest = std::fmin(lowest, world.bodies()[0].angular_velocity.z);
                 }
                 MALLOY_CHECK_TRUE(lowest > 0.9 * spin); // held: stable axis
             }

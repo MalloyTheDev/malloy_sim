@@ -115,6 +115,28 @@ is what the body already carries, so the body's dynamics are unchanged and no
 `RigidBody3D` gained a 3x3. The tensor is a construction intermediate, not a
 stored state: exactly the split ADR 0009 predicted.
 
+### Amendment at M26: the assembly step, step 2 finished
+
+Step 2 of the responsibility split above is "body mass-property construction,
+including the parallel-axis theorem". M25 did it for solid spheres. M26 finished
+it. `SolidBox` is the second mass primitive, and the first that is not
+isotropic: a box has three distinct moments and a real orientation, so a single
+tilted box already produces an inertia tensor that is not diagonal in the lab
+frame. That is what forces the general machinery, rather than leaving it
+exercised only by multi-part compounds as it was at M25.
+
+`combine` is the assembly the split named but neither M25 nor this ADR had yet
+written: it merges two mass-property sets into one, reconstructing each part's
+tensor from its stored moments and orientation (`math::to_mat3`, the inverse of
+M25's `to_quat`), shifting each to the shared centre by the parallel-axis
+theorem, summing, and diagonalizing again. Because the reconstruction and the
+shift are explicit, a mistake in either fails against the M25 list path, which
+computes the same compound without ever calling `combine`, exactly the
+"an error in one cannot masquerade as an error in another" separation this ADR
+asked for. The prediction still holds: nothing about M26 made a body store a
+tensor. The result of `combine` is diagonalized, and what drops into a
+`RigidBody3D` is still three moments and an orientation.
+
 ## Testing consequence
 
 The first rotational tests must break symmetry on every axis at once: body

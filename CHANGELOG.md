@@ -827,6 +827,72 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M26] - 2026-09-11  (box mass properties and combine)
+
+### Added
+
+- `rigid::SolidBox` and `mass_properties_3d(const SolidBox&)`, the second mass
+  primitive: a solid uniform box with three distinct principal moments,
+  (1/3) m (h_j^2 + h_k^2) about each of its own axes, carried into the lab frame
+  by its orientation.
+- `rigid::combine`, which merges two mass-property sets into one compound body,
+  so a body can be assembled from primitives of any kind (spheres, boxes, and
+  whatever comes next) one at a time.
+- `math::to_mat3`, a unit quaternion as its rotation matrix, the inverse of
+  M25's `to_quat`. It is what lets `combine` rebuild a part's inertia tensor
+  from the orientation the part stores.
+
+### A second primitive, and assembly from primitives
+
+M25 computed mass properties for a body made of solid spheres. A sphere is the
+easy case: it is isotropic, so its inertia is one number and it has no
+orientation. A box is the first primitive that is neither, so it is what forces
+the general machinery to be right. Its three moments differ, and a tilted box
+already has an inertia tensor that is not diagonal in the lab frame, which is
+exactly the case M25's diagonalization was built for but could not yet exercise
+from a single part.
+
+`combine` is the assembly step ADR 0007 always implied. Masses add, the centre
+of mass is their mass-weighted mean, and each part's inertia tensor is
+reconstructed from its stored principal moments and orientation
+(R diag(moments) R^T, which is where `to_mat3` comes in), shifted to the shared
+centre by the parallel-axis theorem, summed, and diagonalized again. It is
+commutative and associative up to the ordering of the eigenvalues, so the order
+parts are folded in does not matter, and a zero-mass body is its identity, so a
+fold over parts can start from nothing.
+
+### Validated against closed forms, then pinned against the list path
+
+The box moments are checked against (1/3) m (h_j^2 + h_k^2) with the half-extents
+chosen so the principal frame is the identity and each moment lands on a known
+axis; a tilted box then checks that the full lab-frame tensor, reconstructed
+from the result, equals the one built independently from the closed-form moments
+and the tilt, so a builder that ignored the orientation is caught.
+
+`combine` is pinned against M25's list path, which never calls it: two spheres
+combined one at a time must equal the same two built together in one list, which
+ties combine's reconstruction and its parallel-axis shift to an independent
+route. Commutativity, associativity and the zero-mass identity are checked
+directly. A box already has three distinct principal moments, so it is run
+through M20's dynamics as an intermediate-axis object: spun about its middle
+axis it flips, spun about an extreme one it holds.
+
+Like M25, this is a construction layer rather than a domain (rule 16 does not
+apply): no world, no scenario key, no template. The M20 integration is its
+demonstration.
+
+### Mutation testing
+
+Twenty mutations. Nineteen caught: the box mass coefficient, the (1/3) factor,
+the moment-to-axis pairing, the orientation dropped from the box tensor and its
+transpose removed; in combine, the mass sum, the mass-weighted centre, the
+per-part reconstruction, the parallel-axis shift and its d d^T term, and both
+zero-mass identity branches; the box validation of each half-extent, of
+finiteness, density and unit orientation; and `to_mat3`'s columns and its sense
+of rotation. The twentieth is a documented equivalent: flipping the sign of the
+offset in the parallel-axis shift changes nothing, because m (|d|^2 I - d d^T)
+is even in d.
+
 ## [M25] - 2026-09-11  (3D mass properties: inertia from geometry)
 
 ### Added

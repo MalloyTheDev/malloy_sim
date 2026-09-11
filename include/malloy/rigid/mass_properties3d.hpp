@@ -18,6 +18,19 @@ struct SolidSphere
     math::Real density{1.0};
 };
 
+// One solid uniform box, the second mass primitive (M26). Centred at `center`,
+// with half-widths `half_extents` along its OWN axes, turned by `orientation`.
+// Unlike a sphere, a box has three distinct principal moments and a definite
+// orientation, so a single tilted box already gives an inertia tensor that is
+// not diagonal in the lab frame.
+struct SolidBox
+{
+    math::Vec3 center{};
+    math::Vec3 half_extents{}; // half the width along each of the box's own axes
+    math::Quat orientation{};  // the box frame in the lab frame
+    math::Real density{1.0};
+};
+
 // The mass distribution of a compound body, ready to drop into a RigidBody3D.
 // The 3D sibling of MassProperties (ADR 0007's step 2), and the piece that lets
 // a body's physical properties be COMPUTED from its geometry rather than typed
@@ -53,6 +66,24 @@ struct MassProperties3D
 // has a non-positive or non-finite radius or density, rather than a meaningless
 // number. This mirrors the 2D convention.
 MassProperties3D mass_properties_3d(const std::vector<SolidSphere>& parts);
+
+// The mass properties of a single solid box. Three distinct moments,
+// (1/12) m (w_j^2 + w_k^2) about each of its own axes (w the full widths),
+// carried into the lab frame by its orientation. Invalid input yields a
+// zero-mass result. A single sphere goes through the list overload above (a
+// one-element vector); only the box, a distinct type, needs its own.
+MassProperties3D mass_properties_3d(const SolidBox& box);
+
+// Merge two mass-property sets into one body, the way a compound is assembled
+// from primitives of any kind. Masses add, the centre of mass is their
+// mass-weighted mean, and each tensor is reconstructed (R diag(moments) R^T),
+// shifted to the shared centre by the parallel-axis theorem, summed, and
+// diagonalized again. Combining is commutative and associative up to the
+// eigenvalue ordering, so the order parts are given in does not matter.
+//
+// A zero-mass operand is the identity: it returns the other unchanged, so a
+// fold over parts can start from an empty body.
+MassProperties3D combine(const MassProperties3D& a, const MassProperties3D& b);
 
 // Build a RigidBody3D at rest (no velocity, no spin) from mass properties: the
 // position is the centre of mass, and the inertia and orientation are the
