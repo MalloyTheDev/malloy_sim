@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M26 are complete, so this is the live roadmap for what comes next.
+M1-M27 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -40,6 +40,7 @@ M23 - Coulomb friction for 3D contacts     [done]
 M24 - sphere against sphere                [done]
 M25 - 3D mass properties (inertia tensor)  [done]
 M26 - box mass properties and combine      [done]
+M27 - mesh mass properties (any shape)     [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -165,8 +166,8 @@ friction for 3D contacts                [done, M23]
 sphere against sphere                   [done, M24]
 a general inertia tensor               [done, M25: compound spheres, parallel axis, diagonalized]
 a box mass primitive, and combine      [done, M26: three moments, tilt, compound assembly]
+mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume integrals]
 a translational force on a 3D body     (the other half of a wrench)
-mass properties of other 3D shapes     (meshes; volume integrals)
 more 3D contact geometry               (what replaces SAT for boxes)
 3D versions of particles, springs and charges
 rendering              (terminal-first holds until then, ADR 0002)

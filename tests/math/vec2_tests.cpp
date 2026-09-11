@@ -409,6 +409,22 @@ int main()
             malloy::math::approx_equal(to_mat3(Quat{}), malloy::math::identity3(), 1e-15));
     }
 
+    // --- M27: trace, the sum of the diagonal. It is what turns a covariance
+    //     tensor C = integral x x^T into an inertia tensor, I = trace(C) I - C,
+    //     which is how the mesh mass properties get their inertia. ---
+    {
+        using malloy::math::diagonal3;
+        using malloy::math::identity3;
+        using malloy::math::Mat3;
+        using malloy::math::trace;
+        using malloy::math::Vec3;
+        // Columns (1,2,3), (4,5,6), (7,8,9): the diagonal is 1, 5, 9.
+        const Mat3 m{Vec3{1.0, 2.0, 3.0}, Vec3{4.0, 5.0, 6.0}, Vec3{7.0, 8.0, 9.0}};
+        MALLOY_CHECK_NEAR(trace(m), 15.0, 0.0);
+        MALLOY_CHECK_NEAR(trace(identity3()), 3.0, 0.0);
+        MALLOY_CHECK_NEAR(trace(diagonal3(Vec3{2.0, -3.0, 7.0})), 6.0, 0.0);
+    }
+
     std::cout << "malloy_math_tests passed\n";
     return 0;
 }

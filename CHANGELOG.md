@@ -827,6 +827,64 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M27] - 2026-09-11  (mesh mass properties)
+
+### Added
+
+- `rigid::SolidMesh` and `mass_properties_3d(const SolidMesh&)`, the general
+  mass primitive: a solid uniform body bounded by a closed, outward-wound
+  triangle mesh. Its mass, centre of mass and inertia are the volume integrals
+  over the enclosed solid.
+- `math::trace`, the diagonal sum, which turns a covariance tensor into an
+  inertia tensor (I = trace(C) I - C).
+
+### The general shape, not a third special case
+
+M25 did spheres and M26 did boxes; both are shapes a mesh can also describe, so
+M27 is the general one. A closed triangle mesh's volume integrals are computed
+without meshing the interior, by the divergence theorem: each triangle spans a
+signed tetrahedron with the origin, and summing the per-tetrahedron integrals
+gives the integral over the enclosed solid wherever the origin sits relative to
+the body, because the parts outside the solid cancel between overlapping signed
+tetrahedra. The volume is the signed sum of det/6 (det = a . (b x c)); the
+centre of mass is the signed sum of the tetrahedra centroids; and the second
+moments come from the canonical-tetrahedron covariance mapped to each
+tetrahedron, (det/120)(a a^T + b b^T + c c^T + (a+b+c)(a+b+c)^T). The covariance
+about the origin becomes an inertia tensor (trace(C) I - C), is shifted to the
+centre of mass by the parallel-axis theorem, and diagonalized by the same
+`finalize` M25 and M26 use, so a mesh drops into a `RigidBody3D` exactly as they
+do.
+
+Winding carries the sign: a mesh wound outward has positive volume, one wound
+inward has negative volume and is rejected, along with a degenerate or
+non-closed mesh (non-positive volume) and the usual malformed input.
+
+### Validated against closed forms, then run through the dynamics
+
+The anchor is exact: an axis-aligned box mesh reproduces the M26 `SolidBox` down
+to the full tensor, which ties the general integral to a known result. A cube
+placed far from the origin pins the centre of mass and the large parallel-axis
+cancellation; a tetrahedron with one vertex at the origin pins the volume and
+centroid while exercising the degenerate (zero-signed-volume) faces; a tilted
+box mesh matches the M26 box turned the same way; a mesh result composes with
+`combine`; and a box mesh, having three distinct principal moments, is run
+through M20's dynamics as an intermediate-axis object that flips. Like M25 and
+M26 this is a construction layer, not a domain (rule 16 does not apply): no
+world, no scenario key, no template.
+
+### Mutation testing
+
+Eighteen mutations. Sixteen caught: the signed-volume triple product, the
+volume, centroid and covariance constants, the covariance's outer-of-sum term,
+the covariance-to-inertia conversion, the parallel-axis shift, the density
+factor on both mass and inertia, the density and volume-positivity gates, the
+face-count minimum, the triangle-index bounds check (whose removal faults the
+out-of-range mesh under the checked runtime instead of returning zero), and
+`trace` reading the wrong entries. Two are documented equivalents: dropping the
+vertex-count minimum and dropping the per-vertex finiteness check, because a
+body of fewer than four vertices or one with a non-finite vertex has no
+positive, finite volume, so the volume gate rejects it either way.
+
 ## [M26] - 2026-09-11  (box mass properties and combine)
 
 ### Added

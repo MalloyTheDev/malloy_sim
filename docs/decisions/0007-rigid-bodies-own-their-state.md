@@ -137,6 +137,25 @@ asked for. The prediction still holds: nothing about M26 made a body store a
 tensor. The result of `combine` is diagonalized, and what drops into a
 `RigidBody3D` is still three moments and an orientation.
 
+### Amendment at M27: the general shape, step 1 finished too
+
+Step 1 of the split, "shape-local centroid and second moment", was written for
+2D polygons. M27 is its 3D form: `SolidMesh` computes the mass properties of a
+solid bounded by a closed triangle mesh, by the divergence theorem, so any shape
+a mesh can describe now has an inertia tensor. The sphere (M25) and the box
+(M26) become special cases of it, which is the honest reading of "the general
+one": a box mesh reproduces the `SolidBox` result down to the full tensor, and
+that equality is a test.
+
+The split still holds at the seam it was drawn for. The mesh integrals are pure
+geometry and density (step 1 and step 2), producing a tensor about the centre of
+mass; that tensor is diagonalized by the same `finalize` the sphere and box use,
+into the three moments and orientation the body stores (step 3's input). No mesh
+is kept on a `RigidBody3D`, no tensor is stored, and the diagonalization is still
+a construction step rather than state. The prediction from M20, restated at M25
+and M26, has now survived the general case: three principal moments and an
+orientation are enough, whatever the shape.
+
 ## Testing consequence
 
 The first rotational tests must break symmetry on every axis at once: body

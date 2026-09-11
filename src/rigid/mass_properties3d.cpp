@@ -26,6 +26,36 @@ bool box_is_valid(const SolidBox& box)
            math::is_unit(box.orientation) && math::is_squarable(box.center);
 }
 
+bool mesh_is_valid(const SolidMesh& mesh)
+{
+    // A closed mesh needs at least a tetrahedron: four vertices, four faces.
+    if (mesh.vertices.size() < 4 || mesh.triangles.size() < 4)
+    {
+        return false;
+    }
+    if (!(mesh.density > math::Real{0}) || !math::is_finite(mesh.density))
+    {
+        return false;
+    }
+    for (const math::Vec3& vertex : mesh.vertices)
+    {
+        if (!math::is_squarable(vertex))
+        {
+            return false;
+        }
+    }
+    for (const MeshTriangle& triangle : mesh.triangles)
+    {
+        if (triangle.v0 >= mesh.vertices.size() ||
+            triangle.v1 >= mesh.vertices.size() ||
+            triangle.v2 >= mesh.vertices.size())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Turn a mass, a centre of mass, and an inertia tensor about that centre into
 // principal moments and a principal frame. The one place the diagonalization
 // happens, shared by every builder.
@@ -114,6 +144,70 @@ MassProperties3D mass_properties_3d(const SolidBox& box)
     const math::Mat3 tensor =
         rotation * math::diagonal3(own) * math::transpose(rotation);
     return finalize(mass, box.center, tensor);
+}
+
+MassProperties3D mass_properties_3d(const SolidMesh& mesh)
+{
+    if (!mesh_is_valid(mesh))
+    {
+        return MassProperties3D{};
+    }
+
+    // Signed sums over the tetrahedra (origin, a, b, c), one per triangle. Each
+    // is weighted by six times its signed volume, det = a . (b x c). A closed
+    // outward-wound mesh makes these sums equal the integrals over the enclosed
+    // solid, whichever side of the origin the mesh lies on: the parts outside
+    // the solid cancel between overlapping signed tetrahedra.
+    math::Real volume_times_six = 0.0;      // sum det           = 6 V
+    math::Vec3 centroid_numerator{};        // sum det (a+b+c)   = 24 V c
+    math::Mat3 covariance_times_120{};      // sum det (...)     = 120 C
+
+    for (const MeshTriangle& triangle : mesh.triangles)
+    {
+        const math::Vec3& a = mesh.vertices[triangle.v0];
+        const math::Vec3& b = mesh.vertices[triangle.v1];
+        const math::Vec3& c = mesh.vertices[triangle.v2];
+        const math::Real det = math::dot(a, math::cross(b, c));
+        const math::Vec3 sum = a + b + c;
+        volume_times_six += det;
+        centroid_numerator += sum * det;
+        // The canonical-tetrahedron covariance, mapped to this tetrahedron:
+        // integral x x^T over (0,a,b,c) is (det / 120) (a a^T + b b^T + c c^T +
+        // (a+b+c)(a+b+c)^T).
+        const math::Mat3 moment = math::outer(a, a) + math::outer(b, b) +
+                                  math::outer(c, c) + math::outer(sum, sum);
+        covariance_times_120 = covariance_times_120 + moment * det;
+    }
+
+    const math::Real volume = volume_times_six / math::Real{6};
+    if (!(volume > math::Real{0}) || !math::is_finite(volume))
+    {
+        return MassProperties3D{};
+    }
+    const math::Vec3 center_of_mass =
+        centroid_numerator / (math::Real{24} * volume);
+
+    // Covariance about the origin, C = integral x x^T dV, then the inertia
+    // tensor about the origin, I = trace(C) I - C.
+    const math::Mat3 covariance =
+        covariance_times_120 * (math::Real{1} / math::Real{120});
+    const math::Mat3 inertia_origin =
+        math::identity3() * math::trace(covariance) - covariance;
+    // Parallel-axis to the centre of mass. These are geometric integrals, so
+    // the "mass" in the shift is the volume: I_com = I_origin - V (|d|^2 I - d d^T).
+    const math::Vec3 offset = center_of_mass;
+    const math::Real distance_squared = math::dot(offset, offset);
+    const math::Mat3 shift =
+        (math::diagonal3(math::Vec3{distance_squared, distance_squared,
+                                    distance_squared}) -
+         math::outer(offset, offset)) *
+        volume;
+    const math::Mat3 inertia_com_geometric = inertia_origin - shift;
+
+    // Density scales the mass and every second moment linearly.
+    const math::Real mass = mesh.density * volume;
+    const math::Mat3 tensor = inertia_com_geometric * mesh.density;
+    return finalize(mass, center_of_mass, tensor);
 }
 
 MassProperties3D combine(const MassProperties3D& a, const MassProperties3D& b)

@@ -87,6 +87,14 @@ inline Mat3 outer(const Vec3& a, const Vec3& b)
     return Mat3{a * b.x, a * b.y, a * b.z};
 }
 
+// The sum of the diagonal, m00 + m11 + m22. For a covariance tensor
+// C = integral of x x^T, this is the integral of |x|^2, which is what turns a
+// covariance into an inertia tensor: I = trace(C) I - C.
+inline Real trace(const Mat3& m)
+{
+    return m.col0.x + m.col1.y + m.col2.z;
+}
+
 inline bool is_finite(const Mat3& m)
 {
     return is_finite(m.col0) && is_finite(m.col1) && is_finite(m.col2);

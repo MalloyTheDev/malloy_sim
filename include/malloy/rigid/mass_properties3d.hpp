@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include <malloy/math/quat.hpp>
@@ -28,6 +29,31 @@ struct SolidBox
     math::Vec3 center{};
     math::Vec3 half_extents{}; // half the width along each of the box's own axes
     math::Quat orientation{};  // the box frame in the lab frame
+    math::Real density{1.0};
+};
+
+// One triangle of a mesh: three indices into the vertex list, wound
+// counter-clockwise as seen from OUTSIDE, so the face normal (v1-v0) x (v2-v0)
+// points out of the solid. Winding is what carries the sign in the volume
+// integral, so a mesh wound the wrong way describes negative volume and is
+// rejected rather than silently giving a body inside out.
+struct MeshTriangle
+{
+    std::size_t v0{};
+    std::size_t v1{};
+    std::size_t v2{};
+};
+
+// A solid uniform body bounded by a closed, outward-wound triangle mesh (M26's
+// third mass primitive, and the general one: the sphere and the box are shapes
+// this could also describe). Its mass properties are the volume integrals over
+// the enclosed solid, computed as a signed sum of tetrahedra from the origin to
+// each triangle, so the origin need not be inside the mesh and need not be the
+// centre of mass.
+struct SolidMesh
+{
+    std::vector<math::Vec3> vertices;
+    std::vector<MeshTriangle> triangles;
     math::Real density{1.0};
 };
 
@@ -73,6 +99,21 @@ MassProperties3D mass_properties_3d(const std::vector<SolidSphere>& parts);
 // zero-mass result. A single sphere goes through the list overload above (a
 // one-element vector); only the box, a distinct type, needs its own.
 MassProperties3D mass_properties_3d(const SolidBox& box);
+
+// The mass properties of a solid uniform body bounded by a closed triangle
+// mesh, the general primitive. Mass is density times the enclosed volume; the
+// centre of mass and the inertia tensor are the volume integrals of position
+// and of position-squared, each accumulated as a signed sum over the tetrahedra
+// spanned by the origin and every triangle (the divergence theorem), then the
+// tensor is shifted to the centre of mass and diagonalized. An axis-aligned box
+// mesh reproduces `SolidBox` exactly.
+//
+// Returns a zero-mass result for a malformed mesh (fewer than four vertices or
+// triangles, a triangle index out of range, a non-finite vertex, a
+// non-positive or non-finite density) or one whose enclosed volume is not
+// positive and finite, which is what an inside-out winding or a degenerate or
+// non-closed mesh produces. This mirrors the sphere and box convention.
+MassProperties3D mass_properties_3d(const SolidMesh& mesh);
 
 // Merge two mass-property sets into one body, the way a compound is assembled
 // from primitives of any kind. Masses add, the centre of mass is their

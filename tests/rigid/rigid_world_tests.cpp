@@ -4299,6 +4299,255 @@ int main()
         }
     }
 
+    // --- M27: mesh mass properties. The general primitive: a solid uniform
+    //     body bounded by a closed triangle mesh, with mass, centre of mass and
+    //     inertia computed as signed-tetrahedron volume integrals. The sphere
+    //     and box were special cases; this handles any closed shape, and an
+    //     axis-aligned box mesh must reproduce the M26 box exactly. Validated
+    //     against closed forms, then run through M20's dynamics. ---
+    {
+        using malloy::math::approx_equal;
+        using malloy::math::diagonal3;
+        using malloy::math::from_axis_angle;
+        using malloy::math::Mat3;
+        using malloy::math::Quat;
+        using malloy::math::to_mat3;
+        using malloy::math::transpose;
+        using malloy::math::Vec3;
+        using malloy::rigid::combine;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::MassProperties3D;
+        using malloy::rigid::MeshTriangle;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::SolidBox;
+        using malloy::rigid::SolidMesh;
+        using malloy::rigid::SolidSphere;
+
+        // The full inertia tensor in the lab frame, reconstructed from a
+        // result's principal moments and frame (as in M26): the ordering-proof
+        // way to compare two mass-property sets.
+        const auto tensor_of = [](const MassProperties3D& mp) {
+            const Mat3 rotation = to_mat3(mp.orientation);
+            return rotation * diagonal3(mp.inertia) * transpose(rotation);
+        };
+
+        // Orient a convex mesh's triangles outward: flip any whose normal points
+        // toward the mesh centroid. Lets the builders below list faces without
+        // fussing over winding, and the builder proper still rejects a mesh that
+        // is genuinely inside out.
+        const auto orient_outward = [](SolidMesh& mesh) {
+            Vec3 center{};
+            for (const Vec3& v : mesh.vertices)
+            {
+                center += v;
+            }
+            center = center / static_cast<Real>(mesh.vertices.size());
+            for (MeshTriangle& t : mesh.triangles)
+            {
+                const Vec3& a = mesh.vertices[t.v0];
+                const Vec3& b = mesh.vertices[t.v1];
+                const Vec3& c = mesh.vertices[t.v2];
+                const Vec3 normal = malloy::math::cross(b - a, c - a);
+                const Vec3 outward = (a + b + c) * (1.0 / 3.0) - center;
+                if (malloy::math::dot(normal, outward) < 0.0)
+                {
+                    const std::size_t tmp = t.v1;
+                    t.v1 = t.v2;
+                    t.v2 = tmp;
+                }
+            }
+        };
+
+        // A box as a mesh: eight corners, twelve triangles, wound outward.
+        const auto box_mesh = [&](const Vec3& center, const Vec3& he, const Quat& q,
+                                  Real density) {
+            SolidMesh mesh;
+            mesh.density = density;
+            for (int i = 0; i < 8; ++i)
+            {
+                const Real sx = (i & 1) ? 1.0 : -1.0;
+                const Real sy = (i & 2) ? 1.0 : -1.0;
+                const Real sz = (i & 4) ? 1.0 : -1.0;
+                mesh.vertices.push_back(
+                    center +
+                    malloy::math::rotate(q, Vec3{sx * he.x, sy * he.y, sz * he.z}));
+            }
+            const std::size_t face[6][4] = {{0, 2, 6, 4}, {1, 3, 7, 5},
+                                            {0, 1, 5, 4}, {2, 3, 7, 6},
+                                            {0, 1, 3, 2}, {4, 5, 7, 6}};
+            for (const auto& f : face)
+            {
+                mesh.triangles.push_back(MeshTriangle{f[0], f[1], f[2]});
+                mesh.triangles.push_back(MeshTriangle{f[0], f[2], f[3]});
+            }
+            orient_outward(mesh);
+            return mesh;
+        };
+
+        const auto tet_mesh = [&](const Vec3& p0, const Vec3& p1, const Vec3& p2,
+                                  const Vec3& p3, Real density) {
+            SolidMesh mesh;
+            mesh.density = density;
+            mesh.vertices = {p0, p1, p2, p3};
+            mesh.triangles = {MeshTriangle{0, 1, 2}, MeshTriangle{0, 1, 3},
+                              MeshTriangle{0, 2, 3}, MeshTriangle{1, 2, 3}};
+            orient_outward(mesh);
+            return mesh;
+        };
+
+        // --- An axis-aligned box mesh reproduces the M26 box exactly: same
+        //     mass, centre, principal moments and full tensor. This is the
+        //     anchor, tying the general integral to a known closed form. ---
+        {
+            const Vec3 center{2.0, -1.0, 0.5};
+            const Vec3 he{3.0, 2.0, 1.0};
+            const MassProperties3D mesh = mass_properties_3d(box_mesh(center, he, Quat{}, 1.0));
+            const MassProperties3D box =
+                mass_properties_3d(SolidBox{center, he, Quat{}, 1.0});
+            MALLOY_CHECK_NEAR(mesh.mass, box.mass, 1e-9);
+            MALLOY_CHECK_TRUE(approx_equal(mesh.center_of_mass, box.center_of_mass, 1e-9));
+            MALLOY_CHECK_TRUE(approx_equal(mesh.inertia, box.inertia, 1e-7));
+            MALLOY_CHECK_TRUE(approx_equal(tensor_of(mesh), tensor_of(box), 1e-7));
+        }
+
+        // --- A cube far from the origin. The signed tetrahedra are spanned from
+        //     the origin, which is nowhere near the body, so this pins that the
+        //     centre of mass comes out right and the parallel-axis shift undoes
+        //     the large origin offset (a big cancellation) to leave the correct
+        //     central, isotropic moment. ---
+        {
+            const MassProperties3D mp =
+                mass_properties_3d(box_mesh(Vec3{10.0, -5.0, 7.0}, Vec3{1.0, 1.0, 1.0},
+                                            Quat{}, 2.0));
+            MALLOY_CHECK_NEAR(mp.mass, 16.0, 1e-9); // 2 * 8
+            MALLOY_CHECK_TRUE(approx_equal(mp.center_of_mass, Vec3{10.0, -5.0, 7.0}, 1e-8));
+            const Real iso = (2.0 / 3.0) * 16.0; // (1/3) m (h^2 + h^2), h = 1
+            MALLOY_CHECK_NEAR(mp.inertia.x, iso, 1e-6);
+            MALLOY_CHECK_NEAR(mp.inertia.y, iso, 1e-6);
+            MALLOY_CHECK_NEAR(mp.inertia.z, iso, 1e-6);
+        }
+
+        // --- A tetrahedron: the volume is det/6 and the centre of mass is the
+        //     mean of the four vertices. One vertex sits AT the origin, so three
+        //     of the four face-tetrahedra are degenerate and only the far face
+        //     contributes, which is exactly the signed decomposition working. ---
+        {
+            const MassProperties3D mp = mass_properties_3d(tet_mesh(
+                Vec3{0.0, 0.0, 0.0}, Vec3{2.0, 0.0, 0.0}, Vec3{0.0, 3.0, 0.0},
+                Vec3{0.0, 0.0, 4.0}, 3.0));
+            MALLOY_CHECK_NEAR(mp.mass, 12.0, 1e-9); // 3 * (2*3*4/6) = 3 * 4
+            MALLOY_CHECK_TRUE(
+                approx_equal(mp.center_of_mass, Vec3{0.5, 0.75, 1.0}, 1e-12));
+            MALLOY_CHECK_TRUE(rigid_body_from(mp).is_valid());
+        }
+
+        // --- A tilted box mesh: the principal moments are unchanged (a rotation
+        //     cannot change them) and the full tensor matches the M26 box turned
+        //     the same way. Ties the mesh path to M26's tilted case. ---
+        {
+            const Vec3 he{3.0, 2.0, 1.0};
+            const Quat tilt = from_axis_angle(Vec3{1.0, 2.0, -0.5}, 0.7);
+            const MassProperties3D mesh = mass_properties_3d(box_mesh(Vec3{}, he, tilt, 1.0));
+            const MassProperties3D axis =
+                mass_properties_3d(SolidBox{Vec3{}, he, Quat{}, 1.0});
+            MALLOY_CHECK_TRUE(approx_equal(mesh.inertia, axis.inertia, 1e-7));
+            const MassProperties3D box =
+                mass_properties_3d(SolidBox{Vec3{}, he, tilt, 1.0});
+            MALLOY_CHECK_TRUE(approx_equal(tensor_of(mesh), tensor_of(box), 1e-7));
+        }
+
+        // --- Winding carries the sign: a mesh wound inward describes negative
+        //     volume and is rejected, rather than yielding a body inside out. ---
+        {
+            SolidMesh reversed = box_mesh(Vec3{}, Vec3{1.0, 1.0, 1.0}, Quat{}, 1.0);
+            for (MeshTriangle& t : reversed.triangles)
+            {
+                const std::size_t tmp = t.v1;
+                t.v1 = t.v2;
+                t.v2 = tmp;
+            }
+            MALLOY_CHECK_NEAR(mass_properties_3d(reversed).mass, 0.0, 0.0);
+        }
+
+        // --- A mesh result composes with combine like any other primitive: a
+        //     box mesh and a sphere, unequal masses, centres apart. The box mesh
+        //     mass also cross-checks the box closed form (3 * 8 * 1 * 2 * 0.5). ---
+        {
+            const MassProperties3D box =
+                mass_properties_3d(box_mesh(Vec3{-1.0, 0.0, 0.0}, Vec3{1.0, 2.0, 0.5},
+                                            Quat{}, 3.0));
+            const MassProperties3D sphere = mass_properties_3d(
+                std::vector<SolidSphere>{SolidSphere{Vec3{2.0, 1.0, 0.0}, 0.8, 2.0}});
+            const Real mbox = 3.0 * 8.0 * 1.0 * 2.0 * 0.5;             // 24
+            const Real msph = 2.0 * (4.0 / 3.0) * pi * 0.8 * 0.8 * 0.8;
+            MALLOY_CHECK_NEAR(box.mass, mbox, 1e-9);
+            const MassProperties3D both = combine(box, sphere);
+            MALLOY_CHECK_NEAR(both.mass, mbox + msph, 1e-9);
+            MALLOY_CHECK_NEAR(both.center_of_mass.x,
+                              (mbox * (-1.0) + msph * 2.0) / (mbox + msph), 1e-9);
+            MALLOY_CHECK_NEAR(both.center_of_mass.y, (msph * 1.0) / (mbox + msph), 1e-9);
+        }
+
+        // --- Validation: a malformed or degenerate mesh yields nothing usable. ---
+        {
+            const SolidMesh good = box_mesh(Vec3{}, Vec3{1.0, 1.0, 1.0}, Quat{}, 1.0);
+            MALLOY_CHECK_TRUE(mass_properties_3d(good).mass > 0.0);
+            // Fewer than four vertices, or four faces: not a closed solid.
+            SolidMesh few_vertices = good;
+            few_vertices.vertices.resize(3);
+            MALLOY_CHECK_NEAR(mass_properties_3d(few_vertices).mass, 0.0, 0.0);
+            SolidMesh few_faces = good;
+            few_faces.triangles.resize(3);
+            MALLOY_CHECK_NEAR(mass_properties_3d(few_faces).mass, 0.0, 0.0);
+            // A triangle index past the vertex list.
+            SolidMesh bad_index = good;
+            bad_index.triangles[0].v0 = good.vertices.size();
+            MALLOY_CHECK_NEAR(mass_properties_3d(bad_index).mass, 0.0, 0.0);
+            // A non-finite vertex, a non-positive and a non-finite density.
+            SolidMesh nan_vertex = good;
+            nan_vertex.vertices[0] = Vec3{0.0, nan, 0.0};
+            MALLOY_CHECK_NEAR(mass_properties_3d(nan_vertex).mass, 0.0, 0.0);
+            SolidMesh negative_density = good;
+            negative_density.density = -1.0;
+            MALLOY_CHECK_NEAR(mass_properties_3d(negative_density).mass, 0.0, 0.0);
+            SolidMesh infinite_density = good;
+            infinite_density.density = inf;
+            MALLOY_CHECK_NEAR(mass_properties_3d(infinite_density).mass, 0.0, 0.0);
+            // A flat (coplanar) mesh encloses no volume.
+            SolidMesh flat = good;
+            for (Vec3& v : flat.vertices)
+            {
+                v.z = 0.0;
+            }
+            MALLOY_CHECK_NEAR(mass_properties_3d(flat).mass, 0.0, 0.0);
+        }
+
+        // --- The whole chain through M20's dynamics. A box mesh has three
+        //     distinct principal moments, so like the M26 box it is an
+        //     intermediate-axis object: spun about its middle (body y) axis it
+        //     flips. The derived moments and their ordering all have to be right
+        //     for the flip to land there. ---
+        {
+            using malloy::rigid::Rigid3DWorld;
+            const MassProperties3D mp =
+                mass_properties_3d(box_mesh(Vec3{}, Vec3{3.0, 2.0, 1.0}, Quat{}, 1.0));
+            MALLOY_CHECK_TRUE(mp.inertia.x < mp.inertia.y - 1.0);
+            MALLOY_CHECK_TRUE(mp.inertia.y < mp.inertia.z - 1.0);
+            const Real spin = 5.0, nudge = 1e-3;
+            RigidBody3D body = rigid_body_from(mp);
+            body.angular_velocity = Vec3{nudge, spin, 0.0};
+            Rigid3DWorld world{SimulationSettings{0.0005}, {body}};
+            Real lowest = spin;
+            for (int i = 0; i < 40000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                lowest = std::fmin(lowest, world.bodies()[0].angular_velocity.y);
+            }
+            MALLOY_CHECK_TRUE(lowest < -0.9 * spin); // reversed: a real flip
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }
