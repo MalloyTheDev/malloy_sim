@@ -1,0 +1,83 @@
+# MalloySim scenario: a gyroscope under a constant torque.
+#
+# This is what M21 adds. M20 was torque-free: a body spun and tumbled, but
+# nothing acted on the rotation, so a body spinning about a principal axis
+# stayed on that axis forever. M21 applies a torque, and the point of the
+# scenario is what a torque does to a fast spin that is NOT what intuition from
+# a non-spinning object expects.
+#
+# Push on a book lying still and it moves the way you push. Push on a fast
+# gyroscope and it moves at right angles to the push. That is the whole reason a
+# spinning top does not fall over: gravity's torque, instead of tipping it,
+# makes the spin axis travel sideways.
+#
+# The body below spins fast about its z axis. The torque is about x, across the
+# spin. The physical law is dL/dt = torque, and it holds in the WORLD frame no
+# matter what the body does, so the world-frame angular momentum moves along an
+# exactly straight line:
+#
+#   L(t) = L(0) + torque * t.
+#
+# L starts along z at (0, 0, 15) and the torque is (0.4, 0, 0), so the tip of L
+# travels in the +x direction at 0.4 per second while its z stays put. The spin
+# axis tilts toward x. It does not speed up about z and it does not tip toward
+# the torque the way a still body would; it precesses.
+
+type rigid3d
+
+dt 0.001
+steps 12000
+output_every 3000
+
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <px> <py> <pz>
+#              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# A symmetric top: Ix = Iy, so it is round about its z spin axis. Iz = 2.5. It
+# sits at the origin, not moving, so its angular momentum is pure spin and the
+# view stays put while the axis tilts. wz = 6 is a fast spin.
+rigid_body3d 1.0   1.0 1.0 2.5   0.0 0.0 0.0   0.0 0.0 0.0 0.0   0.0 0.0 0.0   0.0 0.0 6.0
+
+# torque <tx> <ty> <tz>, a constant world-frame torque on the body.
+torque 0.4 0.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   4.50000000e+01   |L|   1.50000000e+01   |p|   0.00000000e+00
+#   step   3000   E   4.52883005e+01   |L|   1.50479316e+01   |p|   0.00000000e+00
+#   step   6000   E   4.61530725e+01   |L|   1.51908048e+01   |p|   0.00000000e+00
+#   step   9000   E   4.75930772e+01   |L|   1.54259830e+01   |p|   0.00000000e+00
+#   step  12000   E   4.96086482e+01   |L|   1.57493323e+01   |p|   0.00000000e+00
+#
+# 1. |p| is zero throughout. Nothing acts on the translation: the torque turns
+#    the body, it does not push it. The body stays at the origin.
+#
+# 2. The world-frame angular momentum grows along a straight line. Its x
+#    component is torque_x * t exactly (to the integration's first-order
+#    tracking): 0.4 * 3, 6, 9, 12 = 1.2, 2.4, 3.6, 4.8. Its z stays at 15, the
+#    starting spin angular momentum Iz * wz = 2.5 * 6. So |L| = sqrt(15^2 +
+#    (0.4 t)^2) grows from 15 as the axis tilts: 15.048, 15.191, 15.426,
+#    15.749. That is the gyroscope precessing, read off a single column.
+#
+# 3. E rises. A torque does work at rate omega . torque, so unlike the
+#    torque-free M20 case (where energy only drifted at second order) the
+#    kinetic energy climbs steadily as the torque feeds the rotation.
+#
+# The body-frame spin tells the same story from the body's point of view. wz
+# stays near 6 (the torque barely touches the fast spin), while wx and wy
+# oscillate at a few percent as the body nutates under the steadily tilting
+# angular momentum.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step. `angular_*` is the world-frame
+# total angular momentum; `spin_*` is the body-frame angular velocity of the
+# first body. Tolerances are absolute: 1e-15 where the value is exact,
+# looser where it is the first-order tracking of the continuum line.
+# check step 0     angular_x     0.00000000e+00   tol 1e-15
+# check step 0     angular_z     1.50000000e+01   tol 1e-15
+# check step 0     spin_z        6.00000000e+00   tol 1e-15
+# check step 0     energy        4.50000000e+01   tol 1e-13
+# check step 0     momentum_x    0.00000000e+00   tol 1e-15
+# check step 12000 angular_x     4.79994216e+00   tol 1e-4
+# check step 12000 angular_z     1.50000648e+01   tol 1e-4
+# check step 12000 momentum_x    0.00000000e+00   tol 1e-15
+# check step 12000 energy        4.96086482e+01   tol 1e-5

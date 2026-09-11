@@ -638,7 +638,8 @@ int main()
             {
                 MALLOY_CHECK_TRUE(!r.scenario.rigid_bodies3d.empty());
                 malloy::rigid::Rigid3DWorld world{r.scenario.simulation,
-                                                  r.scenario.rigid_bodies3d};
+                                                  r.scenario.rigid_bodies3d,
+                                                  r.scenario.rigid3d_settings};
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
                 const auto value_of = [&](const std::string& q) -> std::optional<Real> {
                     const auto& b = world.bodies();
@@ -1435,7 +1436,62 @@ int main()
         MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidState);
     }
     {
-        // An unknown type is still an error, and the message names rigid3d
+    // --- M21: the torque key, a world-frame setting for type rigid3d. ---
+    {
+        std::istringstream in("type rigid3d\n"
+                              "torque 0.5 -1.5 2.5\n"
+                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid3D);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.x, 0.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.y, -1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.z, 2.5, eps);
+        MALLOY_CHECK_TRUE(r.scenario.rigid3d_settings.is_valid());
+
+        std::istringstream none("type rigid3d\n"
+                                "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r2 = parse_scenario(none);
+        MALLOY_CHECK_TRUE(r2.ok);
+        MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.torque.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.torque.y, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.torque.z, 0.0, 0.0);
+    }
+    {
+        std::istringstream in("type rigid3d\ntorque 1 2\n"); // three fields, not two
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type rigid3d\ntorque 1 2 3 4\n"); // trailing token refused
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type rigid3d\ntorque 1 two 3\n"); // not a number
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // torque belongs to rigid3d and to no other domain.
+        for (const char* head : {"type rigid\n", "type nbody3d\n", "type springs\n",
+                                 "type charges\n"})
+        {
+            std::istringstream in(std::string(head) + "torque 1 2 3\n");
+            MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+        }
+    }
+    {
+        // A torque whose square overflows is refused by the settings.
+        std::istringstream in("type rigid3d\n"
+                              "torque 1e200 0 0\n"
+                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_FALSE(r.scenario.rigid3d_settings.is_valid());
+        malloy::rigid::Rigid3DWorld world{r.scenario.simulation,
+                                          r.scenario.rigid_bodies3d,
+                                          r.scenario.rigid3d_settings};
+        MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidSettings);
+    }
+    // An unknown type is still an error, and the message names rigid3d
         // among the ones it could have meant.
         std::istringstream in("type rigid4d\n");
         const ScenarioParseResult r = parse_scenario(in);

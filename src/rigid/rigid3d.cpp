@@ -40,8 +40,10 @@ math::Real rotational_energy(const RigidBody3D& body)
 }
 
 Rigid3DWorld::Rigid3DWorld(sim_core::SimulationSettings simulation_settings,
-                           std::vector<RigidBody3D> bodies)
+                           std::vector<RigidBody3D> bodies,
+                           Rigid3DSettings settings)
     : simulation_settings_{simulation_settings},
+      settings_{settings},
       bodies_{std::move(bodies)},
       step_{time::FixedStep::create(simulation_settings.dt)}
 {
@@ -49,7 +51,8 @@ Rigid3DWorld::Rigid3DWorld(sim_core::SimulationSettings simulation_settings,
 
 sim_core::StepStatus Rigid3DWorld::validate() const
 {
-    if (!simulation_settings_.is_valid()) // dt > 0, finite
+    if (!simulation_settings_.is_valid() || // dt > 0, finite
+        !settings_.is_valid())              // torque squarable
     {
         return sim_core::StepStatus::InvalidSettings;
     }
@@ -78,21 +81,28 @@ sim_core::StepResult Rigid3DWorld::step()
     for (RigidBody3D& body : bodies_)
     {
         // (1) Euler's equations, in the body frame, stepped with FORWARD
-        //     Euler: the rate is evaluated wholly at the old angular velocity,
-        //     because it depends on omega and on nothing else. That is where
-        //     the exact second-order drift in |L|^2 and in the energy comes
-        //     from (see rigid3d_world.hpp); the semi-implicit part of this
-        //     world is the COUPLING in step (2), not this line.
+        //     Euler: the rate is evaluated wholly at the old angular velocity
+        //     and orientation, so there is no older state to evaluate it at.
+        //     That is where the exact second-order drift in |L|^2 and in the
+        //     energy comes from (see rigid3d_world.hpp); the semi-implicit part
+        //     of this world is the COUPLING in step (2), not this line.
         //
-        //     Every right-hand side is a DIFFERENCE of principal moments, so a
+        //     The applied torque is a WORLD-frame setting, and Euler's
+        //     equations are diagonal only in the body frame, so it is rotated
+        //     in by the body's CURRENT orientation, before step (2) changes it.
+        //     T_body = R^-1 T_world is `rotate` by the conjugate quaternion.
+        //
+        //     The gyroscopic term is a DIFFERENCE of principal moments, so a
         //     sphere cannot precess and a body with three distinct moments can
-        //     tumble. This term is identically zero in two dimensions, which is
-        //     why none of this physics exists there.
+        //     tumble; it is identically zero in two dimensions, which is why
+        //     none of that physics exists there. The torque is what M21 adds.
         const math::Vec3& w = body.angular_velocity;
         const math::Vec3& I = body.inertia;
-        const math::Vec3 rate{(I.y - I.z) * w.y * w.z / I.x,
-                              (I.z - I.x) * w.z * w.x / I.y,
-                              (I.x - I.y) * w.x * w.y / I.z};
+        const math::Vec3 torque_body =
+            math::rotate(math::conjugate(body.orientation), settings_.torque);
+        const math::Vec3 rate{((I.y - I.z) * w.y * w.z + torque_body.x) / I.x,
+                              ((I.z - I.x) * w.z * w.x + torque_body.y) / I.y,
+                              ((I.x - I.y) * w.x * w.y + torque_body.z) / I.z};
         body.angular_velocity += rate * dt;
 
         // (2) the orientation, from the UPDATED angular velocity, which keeps

@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M20 are complete, so this is the live roadmap for what comes next.
+M1-M21 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -34,6 +34,7 @@ M17 - Coulomb friction                  [done]
 M18 - charged particles (E and B)       [done]
 M19 - Vec3 and 3D gravity               [done]
 M20 - Quat and torque-free 3D rotation  [done]
+M21 - constant applied torque on a 3D body [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -153,8 +154,9 @@ saying so is that it changes how the current code should be read.
 ```text
 Vec3 and 3D gravity    [done, M19]
 quaternions and torque-free 3D rotation [done, M20]
+a constant applied torque on a 3D body [done, M21]
+a translational force on a 3D body     (the other half of a wrench)
 a general inertia tensor               (composed shapes, parallel axis)
-forces and torques on a 3D body        (gravity, then anything else)
 3D contact geometry                    (spheres, planes, and what replaces SAT)
 3D versions of particles, springs and charges
 rendering              (terminal-first holds until then, ADR 0002)

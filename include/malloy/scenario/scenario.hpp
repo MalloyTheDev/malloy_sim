@@ -14,6 +14,7 @@
 #include <malloy/math/real.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/rigid/rigid_body3d.hpp>
+#include <malloy/rigid/rigid3d_world.hpp>
 #include <malloy/rigid/rigid_settings.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/springs/springs.hpp>
@@ -68,6 +69,7 @@ struct Scenario
 
     // type == Rigid3D
     std::vector<rigid::RigidBody3D> rigid_bodies3d;
+    rigid::Rigid3DSettings rigid3d_settings{};
 
     // type == Charges
     std::vector<charges::ChargedParticle2D> charge_list;
@@ -147,6 +149,14 @@ struct ScenarioParseResult
 //     wx, wy and wz are the angular velocity in the BODY frame, not the world
 //     frame. That is the frame in which Euler's equations are diagonal, and for
 //     a body loaded unrotated the two coincide.
+//
+//   torque <tx> <ty> <tz>   a constant WORLD-frame torque on every body
+//                           (default 0 0 0, the torque-free M20 case)
+//
+//     World frame, not body frame: an external couple fixed in the lab. Under
+//     it each body's world-frame angular momentum grows along the straight line
+//     L(t) = L(0) + torque t. There is one torque for the whole world, the way
+//     there is one gravity in the 2D rigid domain.
 //
 // type particles:
 //

@@ -311,6 +311,22 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.orientation = math::from_axis_angle(math::Vec3{ax, ay, az}, angle);
             scenario.rigid_bodies3d.push_back(body);
         }
+        else if (key == "torque")
+        {
+            if (scenario.type != ScenarioType::Rigid3D)
+            {
+                return make_error(line_number, "torque belongs to type rigid3d");
+            }
+            saw_domain_key = true;
+            math::Real tx{};
+            math::Real ty{};
+            math::Real tz{};
+            if (!(tokens >> tx >> ty >> tz))
+            {
+                return make_error(line_number, "torque requires: tx ty tz");
+            }
+            scenario.rigid3d_settings.torque = math::Vec3{tx, ty, tz};
+        }
         else if (key == "coulomb")
         {
             if (scenario.type != ScenarioType::Charges)

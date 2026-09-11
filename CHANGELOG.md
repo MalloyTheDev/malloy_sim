@@ -827,6 +827,111 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M21] - 2026-09-11  (a constant applied torque on a 3D body)
+
+### Added
+
+- `rigid::Rigid3DSettings`, a settings type for the 3D rigid world, holding a
+  single constant `torque`. Valid when the torque is SQUARABLE, the same bound
+  positions, velocities and M18's softening carry, because it enters |u|^2 in
+  the drift law.
+- `Rigid3DWorld` gains that settings argument (defaulted, so a world built
+  without it is the torque-free M20 world bit for bit) and applies the torque
+  each step through Euler's equations.
+- `type rigid3d` gains a `torque <tx> <ty> <tz>` key: one world-frame torque for
+  the whole world, the way the 2D rigid domain has one gravity.
+- `scenarios/gyroscope.scn`, a fast top under a torque across its spin.
+
+### What torque adds, and why it is the smallest next step
+
+M20 was torque-free. A body spun and tumbled, but nothing acted on the
+rotation, so a body on a principal axis stayed there forever. M21 makes
+something act on it, and does so the way M15 made gravity act on a 2D body: a
+constant field in the settings, applied as forcing, NOT a force/torque
+accumulator (rule 5, rule 17). No contacts, no collision geometry, no
+translational force and no solver had to be built to reach it.
+
+The physics it reaches is the one a torque does that has no 2D analogue: it
+moves the spin AXIS, not just the spin rate. Push a still body and it moves the
+way you push; push a fast gyroscope and the axis travels at right angles to the
+push. In two dimensions a torque can only speed a spin up or slow it down,
+because there is only one rotation axis.
+
+### The torque is world-frame, and that is what makes the invariant clean
+
+The setting is a torque in the WORLD frame, an external couple fixed in the lab.
+Euler's equations are diagonal only in the body frame, so it is rotated in by
+the body's current orientation, T_body = R^-1 T_world, before the forward-Euler
+angular step. A body-fixed torque (a thruster bolted to the body, constant in
+the body frame) is a different thing and is deferred; it is not reachable from
+this one without knowing the body.
+
+World-frame is the choice that gives the headline invariant. The physical law
+dL/dt = torque holds in the WORLD frame whatever the body does, so under a
+constant torque the world-frame angular momentum grows along a straight line:
+
+```text
+L(t) = L(0) + T_world t
+```
+
+exactly in the continuum, and tracked to first order by the scheme. The
+gyroscope template reads that off a single column: L starts at (0, 0, 15), the
+torque is (0.4, 0, 0), and L_x grows as 0.4 t (1.2, 2.4, 3.6, 4.8 at the four
+reports) while L_z holds at 15, so |L| climbs from 15 as the axis tilts.
+
+### One case is exact, not merely first order
+
+A body at rest, unrotated, with the torque along a principal axis, spins up
+EXACTLY. The body only ever rotates about that axis, a rotation about an axis
+fixes it, so the body-frame torque stays equal to the world torque bit for bit;
+the gyroscopic term is zero because omega stays on the axis; and what remains is
+I wx' = T, which forward Euler integrates without error because the right side
+is constant. So
+
+```text
+wx(n) = n dt T / Ix,   wy = wz = 0,   L_world = (T t, 0, 0)
+```
+
+to rounding, with the transverse components not merely small but zero and the
+axis not nearly fixed but fixed. That is the test's anchor: an exact invariant,
+not a tolerance.
+
+### The forced discrete laws, derived and asserted every step
+
+With L = I omega and u = L x omega + T_body, the forward-Euler step
+omega' = omega + dt I^-1 u gives, exactly,
+
+```text
+|L'|^2 = |L|^2 + 2 dt (L . T_body) + dt^2 |u|^2
+T'     = T     +     dt (omega . T_body) + dt^2 (I^-1 u) . u / 2
+```
+
+The cross term is orthogonal to both L and omega, so it drops out of the
+first-order part and only the torque survives there. With T_body = 0 these are
+exactly the M20 laws, which is why the torque-free world is recovered bit for
+bit. Both are checked every step in the tests against a torque and a tilted,
+tumbling body, to about 1e-13. Note L . T_body = L_world . T_world and
+omega . T_body = omega_world . T_world: the work a torque does is frame
+independent.
+
+### Mutation testing
+
+Every torque path caught: the torque dropped from Euler's equations; applied in
+the world frame without rotating to the body; rotated by the orientation
+instead of its conjugate (backwards); its components swapped; negated; the
+settings validation weakened to accept a non-squarable or a merely-finite
+torque; the world's validate no longer checking the settings; the parser
+reading two components or dropping the third; and two mutations of the
+template's own `# check` values.
+
+A methodology note: one header-only mutation (weakening the inline
+`Rigid3DSettings::is_valid`) first appeared to escape, but that was a stale test
+binary, not a gap. Changing an inline function in a header did not trigger a
+rebuild of a test translation unit that only includes it, so the harness ran the
+old binary. Rebuilding the test unit, the mutation is caught. The mutation
+harness now touches the test units before building so a header-only change
+propagates.
+
 ## [M20] - 2026-09-10  (quaternions and torque-free rotation in three dimensions)
 
 ### Added

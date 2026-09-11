@@ -324,10 +324,11 @@ std::vector<Vec2> projected(const std::vector<malloy::rigid::RigidBody3D>& bodie
 // rotation is in the diagnostics columns, not the picture, which is the honest
 // limit of an ASCII view of a 3D scene until rendering has its own milestone.
 int run_rigid3d(const char* title, const SimulationSettings& sim,
-                std::vector<malloy::rigid::RigidBody3D> bodies, int steps,
+                std::vector<malloy::rigid::RigidBody3D> bodies,
+                malloy::rigid::Rigid3DSettings settings, int steps,
                 int output_every)
 {
-    malloy::rigid::Rigid3DWorld world{sim, std::move(bodies)};
+    malloy::rigid::Rigid3DWorld world{sim, std::move(bodies), settings};
 
     std::cout << "\n\n== " << title << " ==  bodies=" << world.bodies().size()
               << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
@@ -546,8 +547,8 @@ int main(int argc, char** argv)
             return run_nbody3d(argv[1], s.simulation, s.nbody_settings, s.bodies3d,
                                s.steps, s.output_every);
         case ScenarioType::Rigid3D:
-            return run_rigid3d(argv[1], s.simulation, s.rigid_bodies3d, s.steps,
-                               s.output_every);
+            return run_rigid3d(argv[1], s.simulation, s.rigid_bodies3d,
+                               s.rigid3d_settings, s.steps, s.output_every);
         }
         return 1;
     }

@@ -2741,6 +2741,278 @@ int main()
         }
     }
 
+    // --- M21: a constant applied torque, in the world frame.
+    //
+    //     M20 was torque-free: nothing acted on the rotation, so a body
+    //     spinning about a principal axis stayed there forever. M21 adds a
+    //     torque, and with it the one thing 2D cannot do with a torque, which
+    //     is move the spin axis rather than only speed the spin up.
+    //
+    //     The torque is a WORLD-frame setting. That is what makes the headline
+    //     invariant exact: dL/dt = torque holds in the world frame, so the
+    //     world-frame angular momentum grows along a straight line. ---
+    {
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::rotational_energy;
+        using malloy::rigid::spin_angular_momentum;
+        using malloy::rigid::total_angular_momentum3d;
+
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Vec3 asymmetric{1.0, 2.0, 3.0};
+
+        // --- The torque setting is validated, and squarable rather than merely
+        //     finite: it enters |u|^2 in the drift law, so one whose square
+        //     overflows is refused up front, the bound softening carries. ---
+        {
+            MALLOY_CHECK_TRUE(Rigid3DSettings{}.is_valid());          // zero
+            MALLOY_CHECK_TRUE((Rigid3DSettings{Vec3{1.0, -2.0, 3.0}}.is_valid()));
+            MALLOY_CHECK_FALSE((Rigid3DSettings{Vec3{inf3, 0.0, 0.0}}.is_valid()));
+            MALLOY_CHECK_FALSE((Rigid3DSettings{Vec3{0.0, nan3, 0.0}}.is_valid()));
+            MALLOY_CHECK_FALSE((Rigid3DSettings{Vec3{0.0, 0.0, 1.4e154}}.is_valid()));
+
+            RigidBody3D body;
+            body.inertia = asymmetric;
+            Rigid3DWorld bad{SimulationSettings{0.001}, {body},
+                             Rigid3DSettings{Vec3{inf3, 0.0, 0.0}}};
+            MALLOY_CHECK_TRUE(bad.validate() == StepStatus::InvalidSettings);
+            MALLOY_CHECK_TRUE(bad.step().status == StepStatus::InvalidSettings);
+            MALLOY_CHECK_EQ(bad.tick_count(), std::uint64_t{0});
+        }
+
+        // --- Zero torque is the M20 world, bit for bit. A defaulted settings
+        //     and an explicit zero must both reproduce the torque-free run
+        //     exactly, or the torque term is doing something when it should do
+        //     nothing. ---
+        {
+            RigidBody3D body;
+            body.inertia = asymmetric;
+            body.angular_velocity = Vec3{0.4, 1.1, -0.9};
+            body.orientation = malloy::math::from_axis_angle(Vec3{1.0, 1.0, 1.0}, 0.9);
+
+            Rigid3DWorld defaulted{SimulationSettings{0.001}, {body}};
+            Rigid3DWorld zeroed{SimulationSettings{0.001}, {body},
+                                Rigid3DSettings{Vec3{}}};
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(defaulted.step().ok());
+                MALLOY_CHECK_TRUE(zeroed.step().ok());
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    defaulted.bodies()[0].angular_velocity,
+                    zeroed.bodies()[0].angular_velocity, 0.0));
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    defaulted.bodies()[0].orientation, zeroed.bodies()[0].orientation, 0.0));
+            }
+        }
+
+        // --- Spin-up about a principal axis, EXACTLY.
+        //
+        //     A body at rest, unrotated, with the torque along a principal
+        //     axis. The torque is world-frame, but the body only ever rotates
+        //     about that same axis, and a rotation about an axis fixes it, so
+        //     the body-frame torque stays equal to the world one bit for bit.
+        //     The gyroscopic term is zero because omega stays along the axis.
+        //     What is left is I wx' = T, integrated exactly by forward Euler
+        //     because the right side is constant:
+        //
+        //       wx(n) = n dt T / Ix,   wy = wz = 0,   L_world = (T t, 0, 0).
+        //
+        //     The transverse components are not just small, they are zero, and
+        //     the axis is not just nearly fixed, it is fixed. ---
+        {
+            const Real T = 0.5;
+            const Real dt = 0.001;
+            const int steps = 5000;
+            RigidBody3D body;
+            body.inertia = asymmetric;
+            Rigid3DWorld world{SimulationSettings{dt}, {body},
+                               Rigid3DSettings{Vec3{T, 0.0, 0.0}}};
+
+            for (int n = 1; n <= steps; ++n)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const RigidBody3D& out = world.bodies()[0];
+
+                // Transverse components exactly zero: the axis never moves.
+                MALLOY_CHECK_NEAR(out.angular_velocity.y, 0.0, 0.0);
+                MALLOY_CHECK_NEAR(out.angular_velocity.z, 0.0, 0.0);
+
+                // The spin grows linearly. The bound is the N-half-ulp
+                // accumulation of a repeated constant addition, the same one
+                // the 2D angle test uses.
+                const Real expected = static_cast<Real>(n) * dt * T / asymmetric.x;
+                const Real bound =
+                    (1.0 / 9007199254740992.0) * expected * static_cast<Real>(n) / 2.0;
+                MALLOY_CHECK_NEAR(out.angular_velocity.x, expected, bound);
+
+                // The world-frame angular momentum is (T t, 0, 0) exactly: the
+                // transverse parts are zero, and the x part is Ix wx unrotated.
+                const Vec3 lw = total_angular_momentum3d(world.bodies());
+                MALLOY_CHECK_NEAR(lw.x, T * static_cast<Real>(n) * dt,
+                                  asymmetric.x * bound);
+                MALLOY_CHECK_NEAR(lw.y, 0.0, 0.0);
+                MALLOY_CHECK_NEAR(lw.z, 0.0, 0.0);
+            }
+
+            // It really spun up: from rest to 2.5 rad/s, not a body sitting
+            // still under a torque that quietly did nothing.
+            MALLOY_CHECK_TRUE(world.bodies()[0].angular_velocity.x > 2.0);
+        }
+
+        // --- The forced per-step laws, derived and asserted every step.
+        //
+        //     With L = I omega and u = L x omega + T_body, the forward-Euler
+        //     step omega' = omega + dt I^-1 u gives, exactly,
+        //
+        //       |L'|^2 = |L|^2 + 2 dt (L . T_body) + dt^2 |u|^2
+        //       T'     = T     +     dt (omega . T_body) + dt^2 (I^-1 u).u / 2
+        //
+        //     The cross term drops out of both first-order parts because it is
+        //     orthogonal to L and to omega; only the torque survives there.
+        //     With T_body = 0 these are the M20 laws. A tumbling body, a tilted
+        //     start and an off-axis torque, so no term is accidentally zero. ---
+        {
+            const Vec3 torque{0.7, -0.4, 0.9};
+            const Real dt = 0.01;
+            RigidBody3D body;
+            body.inertia = asymmetric;
+            body.angular_velocity = Vec3{0.9, 1.4, -0.6};
+            body.orientation = malloy::math::from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.8);
+
+            Rigid3DWorld world{SimulationSettings{dt}, {body}, Rigid3DSettings{torque}};
+            Real worst_momentum = 0.0;
+            Real worst_energy = 0.0;
+            for (int i = 0; i < 200; ++i)
+            {
+                const RigidBody3D& s = world.bodies()[0];
+                const Vec3 tb =
+                    malloy::math::rotate(malloy::math::conjugate(s.orientation), torque);
+                const Vec3 w = s.angular_velocity;
+                const Vec3 l{asymmetric.x * w.x, asymmetric.y * w.y, asymmetric.z * w.z};
+                const Vec3 u = malloy::math::cross(l, w) + tb;
+                const Vec3 iu{u.x / asymmetric.x, u.y / asymmetric.y, u.z / asymmetric.z};
+                const Real momentum_before = malloy::math::length_squared(l);
+                const Real energy_before = rotational_energy(s);
+
+                MALLOY_CHECK_TRUE(world.step().ok());
+
+                const RigidBody3D& s1 = world.bodies()[0];
+                const Vec3 w1 = s1.angular_velocity;
+                const Vec3 l1{asymmetric.x * w1.x, asymmetric.y * w1.y,
+                              asymmetric.z * w1.z};
+
+                const Real pred_momentum =
+                    momentum_before + 2.0 * dt * malloy::math::dot(l, tb) +
+                    dt * dt * malloy::math::length_squared(u);
+                const Real pred_energy = energy_before + dt * malloy::math::dot(w, tb) +
+                                         0.5 * dt * dt * malloy::math::dot(iu, u);
+                worst_momentum = std::fmax(
+                    worst_momentum, std::abs(malloy::math::length_squared(l1) - pred_momentum));
+                worst_energy =
+                    std::fmax(worst_energy, std::abs(rotational_energy(s1) - pred_energy));
+            }
+            MALLOY_CHECK_TRUE(worst_momentum < 1e-13);
+            MALLOY_CHECK_TRUE(worst_energy < 1e-13);
+
+            // The torque did net work here, so the energy is not merely
+            // drifting at second order as it did in M20.
+            MALLOY_CHECK_TRUE(rotational_energy(world.bodies()[0]) !=
+                              rotational_energy(body));
+        }
+
+        // --- The world-frame linear law, for a body that is NOT spinning up
+        //     cleanly: a fast symmetric top with a torque across its spin.
+        //
+        //     dL/dt = torque holds in the world frame no matter what the body
+        //     does, so L_world(t) = L_world(0) + torque t is the continuum law
+        //     and the discrete scheme tracks it to FIRST order. Measuring the
+        //     deviation at two step sizes separates the law (exact) from the
+        //     integration error (falls with dt), the same way M20 separated the
+        //     world frame from the body frame. ---
+        {
+            const Real T = 0.3;
+            const Real spin = 8.0;
+            Real deviation[2] = {0.0, 0.0};
+            Real tilt[2] = {0.0, 0.0};
+            const Real steps[2] = {1e-3, 1e-4};
+            for (int k = 0; k < 2; ++k)
+            {
+                RigidBody3D top;
+                top.inertia = Vec3{1.0, 1.0, 2.0};
+                top.angular_velocity = Vec3{0.0, 0.0, spin};
+                Rigid3DWorld world{SimulationSettings{steps[k]}, {top},
+                                   Rigid3DSettings{Vec3{T, 0.0, 0.0}}};
+                const Vec3 start = total_angular_momentum3d(world.bodies());
+
+                const int count = static_cast<int>(4.0 / steps[k]);
+                for (int n = 1; n <= count; ++n)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                    const Vec3 lw = total_angular_momentum3d(world.bodies());
+                    const Vec3 exact{start.x + T * static_cast<Real>(n) * steps[k],
+                                     start.y, start.z};
+                    deviation[k] = std::fmax(deviation[k], malloy::math::length(lw - exact));
+                    tilt[k] = std::fmax(tilt[k], std::abs(lw.x));
+                }
+            }
+
+            // First order: ten times the step, ten times the deviation.
+            const Real ratio = deviation[0] / deviation[1];
+            MALLOY_CHECK_TRUE(ratio > 9.5);
+            MALLOY_CHECK_TRUE(ratio < 10.5);
+
+            // The angular momentum really did tilt into x, by more than a
+            // radian's worth, so the law is being tracked over real motion and
+            // not a body sitting still.
+            MALLOY_CHECK_TRUE(tilt[0] > 1.0);
+        }
+
+        // --- The gyroscopic response: a torque across the spin MOVES the spin
+        //     axis, where in 2D a torque can only change the rate.
+        //
+        //     Two runs of the same fast top. One torque is along the spin axis
+        //     and only speeds it up; the transverse spin stays put. The other
+        //     is across the spin and swings the axis over. Same body, same
+        //     torque magnitude, the only difference is direction, and the
+        //     responses differ by orders of magnitude. ---
+        {
+            const Real magnitude = 0.5;
+            const Real spin = 10.0;
+            const Real dt = 0.001;
+            const int steps = 3000;
+
+            const auto transverse_swing = [&](const Vec3& torque) {
+                RigidBody3D top;
+                top.inertia = Vec3{1.0, 1.0, 2.0};
+                top.angular_velocity = Vec3{0.0, 0.0, spin};
+                Rigid3DWorld world{SimulationSettings{dt}, {top},
+                                   Rigid3DSettings{torque}};
+                Real worst = 0.0;
+                for (int i = 0; i < steps; ++i)
+                {
+                    world.step();
+                    const Vec3 lw = spin_angular_momentum(world.bodies()[0]);
+                    worst = std::fmax(worst, std::sqrt(lw.x * lw.x + lw.y * lw.y));
+                }
+                return worst;
+            };
+
+            // Along z, the spin axis: the momentum stays along z, so the
+            // transverse part barely moves.
+            const Real along = transverse_swing(Vec3{0.0, 0.0, magnitude});
+            // Across the spin, along x: the axis swings over.
+            const Real across = transverse_swing(Vec3{magnitude, 0.0, 0.0});
+
+            MALLOY_CHECK_TRUE(across > 1.0);        // a full radian of momentum
+            MALLOY_CHECK_TRUE(along < 0.05);        // essentially unmoved
+            MALLOY_CHECK_TRUE(across > 50.0 * along); // and the two are not close
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }
