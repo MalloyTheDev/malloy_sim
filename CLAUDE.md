@@ -40,10 +40,11 @@ rejected, but not adopted until real access-pattern pressure exists (rule 3).
 ### Where it is going
 
 **MalloySim is intended to become a 3D simulator, and as of M19 it has
-started.** `math::Vec3` and `nbody::NBody3DWorld` exist and ship with a
-template, so gravity runs in three dimensions. Everything else is still 2D, and
-that is the bulk of the project: four of the five domains, all of the contact
-geometry, and the whole of rigid-body rotation.
+started.** `math::Vec3`, `math::Quat`, `nbody::NBody3DWorld` and
+`rigid::Rigid3DWorld` exist and ship with templates, so gravity and torque-free
+rigid-body rotation both run in three dimensions. Everything else is still 2D,
+and that is still the bulk of the project: three of the five domains, all of
+the contact geometry, and every force and constraint acting on a 3D body.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -54,13 +55,13 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M19 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M20 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
 response, uniform gravity for rigid bodies, halfplane ground, Coulomb
-friction, charged particles in electric and magnetic fields, and the first
-three-dimensional domain.
+friction, charged particles in electric and magnetic fields, the first
+three-dimensional domain, and quaternions with torque-free 3D rotation.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -69,11 +70,12 @@ key), M11 (2D rigid bodies), M12 (ballistics, as uniform gravity in the particle
 domain), M13 (spring networks and deterministic force accumulation), M14
 (rigid-body contact response) and M15 (uniform gravity in the rigid domain)
 M16 (halfplanes, giving true flat ground), M17 (Coulomb friction) and M18
-(charged particles, the first domain with a velocity-dependent force) and M19
-(Vec3 and 3D gravity, the first step off the plane) are all done. See
+(charged particles, the first domain with a velocity-dependent force), M19
+(Vec3 and 3D gravity, the first step off the plane) and M20 (quaternions and
+torque-free rotation in three dimensions) are all done. See
 `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M20 or later) unless explicitly asked, and
+Do not start any further milestone (M21 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -94,7 +96,7 @@ M5: terminal N-body demo               [done]
 3. Do not add ECS (wait for real access-pattern pressure).
 4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. Body against body is still disc against disc; oriented boxes and SAT are not implemented. Friction is in `malloy_rigid` only: particle contacts remain normal-only.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force. Gravity is a setting applied as an acceleration, not a force: do not add persistent forces or force/torque accumulators to `malloy_rigid` until their dedicated milestone.
-6. 3D began in M19 with `math::Vec3` and `nbody::NBody3DWorld`. Quaternions, inertia tensors, 3D contact geometry and 3D versions of the other four domains are NOT started and each needs its own milestone. Do not add them speculatively; the 2D types stay supported.
+6. 3D began in M19 with `math::Vec3` and `nbody::NBody3DWorld`, and M20 added `math::Quat` and `rigid::Rigid3DWorld`. A general inertia TENSOR, 3D contact geometry, forces and torques on a 3D body, and 3D versions of the remaining domains are NOT started and each needs its own milestone. `RigidBody3D` stores three principal moments rather than a 3x3 matrix, deliberately. Do not add any of it speculatively; the 2D types stay supported.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
 9. Do not add Catch2/GoogleTest unless explicitly asked.
@@ -121,7 +123,8 @@ Implemented in M10, once `malloy_particles` gave the format a second domain to
 dispatch to:
 
 ```text
-type nbody          # or: particles, rigid, springs, charges, nbody3d
+type nbody          # or: particles, rigid, springs, charges, nbody3d,
+                    #     rigid3d
 dt 0.001
 steps 10000
 ```

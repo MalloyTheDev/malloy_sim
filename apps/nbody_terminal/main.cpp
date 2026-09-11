@@ -302,6 +302,66 @@ int run_nbody3d(const char* title, const SimulationSettings& sim,
     return drive(title, world, report, steps, output_every);
 }
 
+// The same orthographic flattening for rigid bodies. A second overload rather
+// than a template, for the same reason the worlds are separate types: Body3D
+// and RigidBody3D share a field name and nothing else.
+std::vector<Vec2> projected(const std::vector<malloy::rigid::RigidBody3D>& bodies)
+{
+    std::vector<Vec2> points;
+    points.reserve(bodies.size());
+    for (const auto& body : bodies)
+    {
+        points.push_back(Vec2{body.position.x, body.position.y});
+    }
+    return points;
+}
+
+// Runs one 3D rigid-body scenario. A seventh concrete runner and a seventh
+// branch of the dispatch switch: ADR 0006 again, and still no base class.
+//
+// Worth knowing while reading a frame: the view plots the CENTRES of the
+// bodies, so a body tumbling in place does not move on screen at all. The
+// rotation is in the diagnostics columns, not the picture, which is the honest
+// limit of an ASCII view of a 3D scene until rendering has its own milestone.
+int run_rigid3d(const char* title, const SimulationSettings& sim,
+                std::vector<malloy::rigid::RigidBody3D> bodies, int steps,
+                int output_every)
+{
+    malloy::rigid::Rigid3DWorld world{sim, std::move(bodies)};
+
+    std::cout << "\n\n== " << title << " ==  bodies=" << world.bodies().size()
+              << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(projected(world.bodies()));
+
+    const auto report = [&world, &view](std::int64_t step_index) {
+        const auto& now = world.bodies();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        // |L| and E are conserved by the continuum equations and creep upward
+        // in the discrete ones, by exactly dt^2 |L x omega|^2 per step in
+        // |L|^2. Movement in these columns is therefore that term, not
+        // rounding, and it is zero for a body spinning about a principal axis.
+        std::cout << "   E " << std::setw(16)
+                  << malloy::rigid::total_kinetic_energy3d(now) << "   |L| "
+                  << std::setw(16)
+                  << malloy::math::length(malloy::rigid::total_angular_momentum3d(now))
+                  << "   |p| " << std::setw(16)
+                  << malloy::math::length(malloy::rigid::total_linear_momentum3d(now))
+                  << '\n';
+        std::cout << std::fixed;
+        print_view(view, projected(now));
+    };
+
+    return drive(title, world, report, steps, output_every);
+}
+
 // Runs one charged-particle scenario. A fifth concrete runner, and the fifth
 // branch of the dispatch switch: no base class, exactly as ADR 0006 intends.
 int run_charges(const char* title, const SimulationSettings& sim,
@@ -485,6 +545,9 @@ int main(int argc, char** argv)
         case ScenarioType::NBody3D:
             return run_nbody3d(argv[1], s.simulation, s.nbody_settings, s.bodies3d,
                                s.steps, s.output_every);
+        case ScenarioType::Rigid3D:
+            return run_rigid3d(argv[1], s.simulation, s.rigid_bodies3d, s.steps,
+                               s.output_every);
         }
         return 1;
     }

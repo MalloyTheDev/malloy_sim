@@ -76,6 +76,30 @@ deferred to the 3D milestone (`docs/04`, `CLAUDE.md` rule 6,
 here are those quantities in two dimensions, not a different model, which is why
 this is a deferral rather than a decision to be undone later.
 
+### Amendment at M20: the deferral came due, and held
+
+M20 built `RigidBody3D` beside `RigidBody2D`, so the claim above can be checked
+rather than asserted. It held in both halves.
+
+The scalar angle became a quaternion and the scalar inertia became three
+principal moments, and neither 2D form had to be undone: `RigidBody2D` is
+unchanged, and every 2D template still runs. Quaternion normalization did
+arrive with the 3D body, exactly where this ADR said it would, and it turned out
+to cost nothing physically: scaling a quaternion does not change the rotation it
+represents, so renormalizing restores a magnitude rather than correcting a pose.
+
+The inertia is the more interesting half. A general 3x3 tensor is still NOT
+here, and M20 did not build one. Three principal moments are not a
+simplification of a tensor: a symmetric tensor is always diagonalizable, so
+storing the diagonal is a choice of axes rather than a restriction. A general
+tensor is needed once bodies are built from composed shapes and the
+parallel-axis step moves inertia off the principal axes, which arrives with 3D
+mass properties and 3D contacts. Until then it would be three extra zeros.
+
+So the scope boundary above is now the boundary between `RigidBody2D` and
+`RigidBody3D` rather than between this project and a later one, and one clause
+of it, the inertia tensor, is deferred again on its own terms.
+
 ## Testing consequence
 
 The first rotational tests must break symmetry on every axis at once: body

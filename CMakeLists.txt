@@ -156,6 +156,7 @@ target_link_libraries(malloy_particles
 # malloy_rigid (M11): 2D rigid bodies, pose and mass distribution (STATIC).
 add_library(malloy_rigid STATIC
     src/rigid/rigid.cpp
+    src/rigid/rigid3d.cpp
 )
 add_library(malloy::rigid ALIAS malloy_rigid)
 target_include_directories(malloy_rigid PUBLIC include)

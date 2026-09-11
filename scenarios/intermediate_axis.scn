@@ -1,0 +1,133 @@
+# MalloySim scenario: the intermediate axis theorem.
+#
+# This is what M20 adds, and it is the one piece of three-dimensional physics
+# that cannot be reached from the 2D code by widening a type.
+#
+# In two dimensions a rigid body's inertia is a single number and its angular
+# velocity lies along a fixed axis, so a body with no torque on it spins at a
+# constant rate about that axis forever. There is nothing else it could do. In
+# three dimensions the inertia has three principal moments, and Euler's
+# equations carry a term that is identically zero in the plane:
+#
+#   Ix wx' = (Iy - Iz) wy wz
+#   Iy wy' = (Iz - Ix) wz wx
+#   Iz wz' = (Ix - Iy) wx wy
+#
+# Every right-hand side is a DIFFERENCE of principal moments. A sphere, with
+# all three equal, still cannot do anything but spin. A body with three
+# distinct moments can tumble with no torque applied at all.
+#
+# The theorem is about which axis. Spun about the axis of LARGEST moment, or
+# about the axis of SMALLEST moment, a body is stable: nudge it and the
+# disturbance goes round in a small ellipse and comes back. Spun about the axis
+# in between, it is unstable: the same nudge grows exponentially until the body
+# turns over, and then it turns over again, and again.
+#
+# Both bodies below have the same moments, (1, 2, 3), and the same nudge, one
+# part in two thousand. The only difference is the axis they were spun about.
+#
+# On the view: it is an orthographic projection along z of the body CENTRES,
+# and nothing cleverer. Rotation does not move a centre, so the tumble is not
+# in the picture at all; it is in the diagnostics columns and in the checks at
+# the bottom. Drawing a rotating body properly is a different problem rather
+# than a wider one, and is deferred with the rest of rendering (ADR 0009). The
+# two dots do drift toward each other, which is the other half of the physics
+# here: nothing couples the rotation to the motion of the centre of mass, so a
+# tumbling body flies perfectly straight.
+
+type rigid3d
+
+dt 0.001
+steps 20000
+output_every 2500
+
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <px> <py> <pz>
+#              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# The axis and angle set the starting orientation, and a zero axis means
+# unrotated whatever the angle says. The last three are the angular velocity in
+# the BODY frame, which is the frame Euler's equations above are written in.
+
+# Spun about y, the INTERMEDIATE moment, with a nudge along x. This one flips.
+rigid_body3d 1.0   1.0 2.0 3.0   -2.0 0.0 0.0   0.0 0.0 0.0 0.0    0.02 0.0 0.0   0.001 2.0 0.0
+
+# Spun about z, the LARGEST moment, with the identical nudge along x. This one
+# does not flip, and never will. Change its last three fields to
+# `0.001 2.0 0.0` and it becomes the first body; change the first body's to
+# `0.001 0.0 2.0` and the flipping stops.
+rigid_body3d 1.5   1.0 2.0 3.0    2.0 0.0 0.0   0.0 0.0 0.0 0.0   -0.02 0.0 0.0   0.001 0.0 2.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   1.00005010e+01   |L|   7.21110283e+00   |p|   1.00000000e-02
+#   step   2500   E   1.00005011e+01   |L|   7.21109821e+00   |p|   1.00000000e-02
+#   step   5000   E   1.00005158e+01   |L|   7.21091168e+00   |p|   1.00000000e-02
+#   step   7500   E   1.00036432e+01   |L|   7.21205392e+00   |p|   1.00000000e-02
+#   step  10000   E   1.00096995e+01   |L|   7.21471487e+00   |p|   1.00000000e-02
+#   step  12500   E   1.00097545e+01   |L|   7.21452641e+00   |p|   1.00000000e-02
+#   step  15000   E   1.00097547e+01   |L|   7.21450777e+00   |p|   1.00000000e-02
+#   step  17500   E   1.00097547e+01   |L|   7.21450524e+00   |p|   1.00000000e-02
+#   step  20000   E   1.00097587e+01   |L|   7.21460437e+00   |p|   1.00000000e-02
+#
+# 1. |p| does not move at all. Nothing here applies a force, so the velocities
+#    are untouched and the momentum is bit-identical at every report. It is
+#    1.0e-02, the magnitude of 1.0*(0.02) + 1.5*(-0.02) = -0.01.
+#
+# 2. E and |L| sit still, then jump, then sit still again. That is not noise,
+#    and the jump is where the flip is. Semi-implicit Euler changes |L|^2 by
+#    exactly dt^2 |L x omega|^2 per step, which is ZERO whenever omega lies
+#    along a principal axis and large only while the body is turning over. So
+#    these two columns are a readout of when the tumble happened: flat through
+#    step 5000, climbing hard between 5000 and 10000, flat again afterwards.
+#
+#    The second body contributes nothing to that jump. It is spinning about a
+#    principal axis and stays there, so its own contribution is constant to the
+#    last digit for the whole run.
+#
+# 3. The body-frame angular velocity of the FIRST body is what the checks
+#    below follow, because that is where the theorem lives:
+#
+#      step      0   wx  0.00100000   wy   2.00000000
+#      step   2500   wx  0.00898034   wy   1.99998010
+#      step   5000   wx  0.16004161   wy   1.99359035
+#      step   7500   wx  1.89569316   wy   0.63991457
+#      step  10000   wx  0.30802244   wy  -1.97846446
+#      step  20000   wx  0.08308021   wy  -2.00058898
+#
+#    wx grows by a factor of 160 in the first five seconds and by 1900 in the
+#    next two and a half, which is what exponential growth from one part in two
+#    thousand looks like. wy then passes through zero and comes out the other
+#    side: the body is spinning the other way round. By step 20000 wx is
+#    growing again, on its way to the next flip.
+#
+#    The growth rate is not a fitted number. Linearizing about a spin W along
+#    the intermediate axis gives a rate of
+#
+#      W sqrt((I2 - I1)(I2 - I3) / (I1 I3))   which is W/sqrt(3) here,
+#
+#    and it is the sign under that square root, positive for the intermediate
+#    axis and negative for the other two, that is the entire theorem. The
+#    discrete version of that rate is asserted to fifteen significant figures in
+#    tests/rigid/rigid_world_tests.cpp, along with the fact that the two stable
+#    axes hold the identical nudge to within a part in a hundred.
+#
+# 4. The peak angular speed during the tumble is also derivable rather than
+#    observed. Starting on the separatrix fixes |L| and the energy, and where
+#    the body passes through wy = 0 those two together give |omega| = 2W/sqrt(3)
+#    = 2.3094. That is asserted in the tests too.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, matching the column the app
+# prints, and the tolerance is absolute. `spin_*` names the FIRST body's
+# body-frame angular velocity.
+# check step 0     spin_x        1.00000000e-03   tol 1e-15
+# check step 0     spin_y        2.00000000e+00   tol 1e-15
+# check step 0     spin_z        0.00000000e+00   tol 1e-15
+# check step 0     angular_y     4.00000000e+00   tol 1e-15
+# check step 0     angular_z     6.00000000e+00   tol 1e-15
+# check step 0     momentum_x   -1.00000000e-02   tol 1e-15
+# check step 5000  spin_x        1.60041610e-01   tol 1e-6
+# check step 5000  spin_y        1.99359035e+00   tol 1e-6
+# check step 10000 spin_y       -1.97846446e+00   tol 1e-6
+# check step 20000 spin_y       -2.00058898e+00   tol 1e-6
+# check step 20000 momentum_x   -1.00000000e-02   tol 1e-15

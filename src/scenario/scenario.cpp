@@ -66,7 +66,8 @@ ScenarioParseResult parse_scenario(std::istream& input)
             if (!(tokens >> value))
             {
                 return make_error(line_number,
-                                  "type requires nbody, particles, rigid, springs, charges or nbody3d");
+                                  "type requires nbody, particles, rigid, springs, "
+                                  "charges, nbody3d or rigid3d");
             }
             if (value == "nbody")
             {
@@ -91,6 +92,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "nbody3d")
             {
                 scenario.type = ScenarioType::NBody3D;
+            }
+            else if (value == "rigid3d")
+            {
+                scenario.type = ScenarioType::Rigid3D;
             }
             else
             {
@@ -264,6 +269,47 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.position = math::Vec3{px, py, pz};
             body.velocity = math::Vec3{vx, vy, vz};
             scenario.bodies3d.push_back(body);
+        }
+        else if (key == "rigid_body3d")
+        {
+            if (scenario.type != ScenarioType::Rigid3D)
+            {
+                return make_error(line_number,
+                                  "rigid_body3d belongs to type rigid3d");
+            }
+            saw_domain_key = true;
+            rigid::RigidBody3D body;
+            math::Real ix{};
+            math::Real iy{};
+            math::Real iz{};
+            math::Real px{};
+            math::Real py{};
+            math::Real pz{};
+            math::Real ax{};
+            math::Real ay{};
+            math::Real az{};
+            math::Real angle{};
+            math::Real vx{};
+            math::Real vy{};
+            math::Real vz{};
+            math::Real wx{};
+            math::Real wy{};
+            math::Real wz{};
+            if (!(tokens >> body.mass >> ix >> iy >> iz >> px >> py >> pz >> ax >>
+                  ay >> az >> angle >> vx >> vy >> vz >> wx >> wy >> wz))
+            {
+                return make_error(line_number,
+                                  "rigid_body3d requires: mass Ix Iy Iz px py pz "
+                                  "axisx axisy axisz angle vx vy vz wx wy wz");
+            }
+            body.inertia = math::Vec3{ix, iy, iz};
+            body.position = math::Vec3{px, py, pz};
+            body.velocity = math::Vec3{vx, vy, vz};
+            body.angular_velocity = math::Vec3{wx, wy, wz};
+            // Always a unit quaternion, which is why the file gives an axis and
+            // an angle rather than four components.
+            body.orientation = math::from_axis_angle(math::Vec3{ax, ay, az}, angle);
+            scenario.rigid_bodies3d.push_back(body);
         }
         else if (key == "coulomb")
         {

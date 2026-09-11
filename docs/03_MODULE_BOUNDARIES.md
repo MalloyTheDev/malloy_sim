@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M19). These boundaries are in force
+> All modules below are implemented (M2-M20). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -70,7 +70,9 @@ Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to 
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 
-Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, oriented-box contacts, orientation in 3D, or scenario loading. Inertia is a scalar and orientation is a scalar angle. Those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them, and replacing them is part of the planned 3D milestone (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, oriented-box contacts, or scenario loading. In `RigidBody2D` the inertia is a scalar and the orientation is a scalar angle; those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+
+Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: torque-free rotation in three dimensions, with a quaternion orientation and three principal moments of inertia. It lives here rather than in a library of its own because rigid-body dynamics is one domain and the dimension is not a domain, the same reasoning M19 used for 3D gravity. It carries no contacts, no forces and no torques, and the inertia is a diagonal rather than a general 3x3 tensor; each of those is its own later milestone.
 
 ## `malloy_springs`
 

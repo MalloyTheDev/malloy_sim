@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M19 are complete, so this is the live roadmap for what comes next.
+M1-M20 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -33,6 +33,7 @@ M16 - halfplanes, for true flat ground  [done]
 M17 - Coulomb friction                  [done]
 M18 - charged particles (E and B)       [done]
 M19 - Vec3 and 3D gravity               [done]
+M20 - Quat and torque-free 3D rotation  [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -151,7 +152,9 @@ saying so is that it changes how the current code should be read.
 
 ```text
 Vec3 and 3D gravity    [done, M19]
-quaternions and inertia tensors        (for 3D rigid bodies)
+quaternions and torque-free 3D rotation [done, M20]
+a general inertia tensor               (composed shapes, parallel axis)
+forces and torques on a 3D body        (gravity, then anything else)
 3D contact geometry                    (spheres, planes, and what replaces SAT)
 3D versions of particles, springs and charges
 rendering              (terminal-first holds until then, ADR 0002)
@@ -161,6 +164,16 @@ M19 took the first step and deliberately took the smallest one. N-body is the
 only domain with no contacts and no orientation, so it needed `Vec3` and
 nothing else, which let quaternions and inertia tensors stay deferred rather
 than be built speculatively.
+
+M20 scoped the same way and got the sharper physics for it. Torque-free
+rotation needs no contacts, no collision geometry, no forces and no solver, so
+none of those had to be built ahead of their milestone; what it does need is
+the one thing 3D has that 2D does not. `RigidBody3D` therefore stores three
+principal moments rather than a 3x3 matrix. A general tensor is needed once
+bodies are built from composed shapes and the parallel-axis step moves inertia
+off the principal axes, which arrives with 3D mass properties and 3D contacts.
+Until then it would be three extra zeros and a speculative abstraction
+(rule 11).
 
 Unnumbered, like Tracks 2 and 3, for the same reason: a milestone gets a number
 when it starts. These were once M19 to M21, and other work has since shipped

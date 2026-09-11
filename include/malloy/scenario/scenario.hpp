@@ -13,6 +13,7 @@
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/math/real.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
+#include <malloy/rigid/rigid_body3d.hpp>
 #include <malloy/rigid/rigid_settings.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/springs/springs.hpp>
@@ -33,6 +34,7 @@ enum class ScenarioType
     Springs,
     Charges,
     NBody3D,
+    Rigid3D,
 };
 
 // A complete, runnable scenario for one domain.
@@ -64,6 +66,9 @@ struct Scenario
     // type == NBody3D
     std::vector<nbody::Body3D> bodies3d;
 
+    // type == Rigid3D
+    std::vector<rigid::RigidBody3D> rigid_bodies3d;
+
     // type == Charges
     std::vector<charges::ChargedParticle2D> charge_list;
     charges::ChargeSettings charge_settings{};
@@ -93,8 +98,8 @@ struct ScenarioParseResult
 //
 // Common to every domain:
 //
-//   type <nbody|particles|rigid|springs|charges|nbody3d>  which domain
-//                         (default nbody)
+//   type <nbody|particles|rigid|springs|charges|nbody3d|rigid3d>
+//                           which domain           (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
@@ -112,6 +117,36 @@ struct ScenarioParseResult
 //   dimension, and differs only in the body line.
 //
 //   body3 <mass> <px> <py> <pz> <vx> <vy> <vz>
+//
+// type rigid3d:
+//
+//   Torque-free rotation of rigid bodies in three dimensions. Takes no
+//   restitution, gravity, friction or ground keys, because M20 has no contacts
+//   and no forces: a body here tumbles and flies straight, and that is all.
+//
+//   rigid_body3d <mass> <Ix> <Iy> <Iz>
+//                <px> <py> <pz>
+//                <axisx> <axisy> <axisz> <angle>
+//                <vx> <vy> <vz>
+//                <wx> <wy> <wz>
+//
+//     Seventeen fields, written above in the five groups they form, though the
+//     line itself is a single line like every other.
+//
+//     Ix, Iy and Iz are the PRINCIPAL moments of inertia about the centre of
+//     mass, so the body frame is already the one in which the inertia is
+//     diagonal. Three equal moments are a sphere, two a symmetric top, three
+//     distinct ones a body that can tumble.
+//
+//     The orientation is given as an axis and an angle in radians rather than
+//     as a quaternion, because a hand-written quaternion is almost never a unit
+//     one and an invalid body is a worse error message than a converted one.
+//     The axis is normalized on load and need not be unit; a zero axis means no
+//     rotation, whatever the angle says.
+//
+//     wx, wy and wz are the angular velocity in the BODY frame, not the world
+//     frame. That is the frame in which Euler's equations are diagonal, and for
+//     a body loaded unrotated the two coincide.
 //
 // type particles:
 //

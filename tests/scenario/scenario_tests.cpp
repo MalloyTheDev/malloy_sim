@@ -16,6 +16,7 @@
 #include <cctype>
 #include <iterator>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -330,6 +331,21 @@ int main()
                     std::stoul(text.substr(first, at - first)));
             };
 
+            // How many DOMAINS the templates cover, counted from the
+            // templates themselves rather than from memory. The README's
+            // figure for this went stale once already, silently, because only
+            // the template count was derived and this one was prose.
+            std::set<malloy::scenario::ScenarioType> domains;
+            for (const std::string& name : templates)
+            {
+                const ScenarioParseResult r = malloy::scenario::parse_scenario_file(
+                    std::string(MALLOY_SCENARIO_DIR) + "/" + name);
+                if (r.ok)
+                {
+                    domains.insert(r.scenario.type);
+                }
+            }
+
             const std::string root = std::string(MALLOY_SCENARIO_DIR) + "/..";
             struct Claim
             {
@@ -339,6 +355,7 @@ int main()
             };
             const std::vector<Claim> claims = {
                 {root + "/README.md", " templates ship across", templates.size()},
+                {root + "/README.md", " domains, and", domains.size()},
 #ifdef MALLOY_TEST_EXECUTABLE_COUNT
                 {root + "/README.md", " test executables",
                  static_cast<std::size_t>(MALLOY_TEST_EXECUTABLE_COUNT)},
@@ -434,9 +451,11 @@ int main()
                     }
                 }
 
-                // The ADR range in docs/00 is the same kind of claim, and it
-                // went stale the moment ADR 0009 was written. The highest
-                // number on disk is the truth.
+                // The ADR range is the same kind of claim, and it went
+                // stale the moment ADR 0009 was written. The highest number on
+                // disk is the truth. Checked in BOTH documents that state it:
+                // fixing only the one that was guarded let the other drift
+                // through two milestones before anyone noticed.
                 {
                     std::size_t highest = 0;
                     for (const auto& entry : std::filesystem::directory_iterator(
@@ -458,20 +477,24 @@ int main()
                     }
                     MALLOY_CHECK_TRUE(highest >= 9);
 
-                    const std::string start_here =
-                        read_all(root + "/docs/00_START_HERE.md");
-                    const std::string marker = "ADRs 0001-";
-                    const std::size_t at = start_here.find(marker);
-                    MALLOY_CHECK_TRUE(at != std::string::npos);
-                    const std::string claimed_adr =
-                        digits_at(start_here, at + marker.size());
-                    MALLOY_CHECK_TRUE(!claimed_adr.empty());
-                    if (static_cast<std::size_t>(std::stoul(claimed_adr)) != highest)
+                    for (const char* document : {"/docs/00_START_HERE.md",
+                                                 "/docs/08_AI_HANDOFF_PROMPT.md"})
                     {
-                        std::cerr << "docs/00_START_HERE.md claims ADRs up to "
-                                  << claimed_adr << " but " << highest
-                                  << " exist" << '\n';
-                        return 1;
+                        const std::string text = read_all(root + document);
+                        const std::string marker = "ADRs 0001-";
+                        const std::size_t at = text.find(marker);
+                        MALLOY_CHECK_TRUE(at != std::string::npos);
+                        const std::string claimed_adr =
+                            digits_at(text, at + marker.size());
+                        MALLOY_CHECK_TRUE(!claimed_adr.empty());
+                        if (static_cast<std::size_t>(std::stoul(claimed_adr)) !=
+                            highest)
+                        {
+                            std::cerr << document << " claims ADRs up to "
+                                      << claimed_adr << " but " << highest
+                                      << " exist" << '\n';
+                            return 1;
+                        }
                     }
                 }
             }
@@ -604,6 +627,45 @@ int main()
                         return malloy::nbody::total_angular_momentum(b).y;
                     if (q == "angular_z")
                         return malloy::nbody::total_angular_momentum(b).z;
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
+                {
+                    return 1;
+                }
+            }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Rigid3D)
+            {
+                MALLOY_CHECK_TRUE(!r.scenario.rigid_bodies3d.empty());
+                malloy::rigid::Rigid3DWorld world{r.scenario.simulation,
+                                                  r.scenario.rigid_bodies3d};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.bodies();
+                    if (q == "energy") return malloy::rigid::total_kinetic_energy3d(b);
+                    if (q == "momentum_x")
+                        return malloy::rigid::total_linear_momentum3d(b).x;
+                    if (q == "momentum_y")
+                        return malloy::rigid::total_linear_momentum3d(b).y;
+                    if (q == "momentum_z")
+                        return malloy::rigid::total_linear_momentum3d(b).z;
+                    if (q == "angular_x")
+                        return malloy::rigid::total_angular_momentum3d(b).x;
+                    if (q == "angular_y")
+                        return malloy::rigid::total_angular_momentum3d(b).y;
+                    if (q == "angular_z")
+                        return malloy::rigid::total_angular_momentum3d(b).z;
+                    // The FIRST body's angular velocity, in its own body frame.
+                    // A total would be meaningless here: the interesting claim
+                    // in this domain is what one body's spin does, and summing
+                    // body-frame vectors across differently-oriented bodies
+                    // adds quantities that live in different frames.
+                    if (b.empty()) return std::nullopt;
+                    if (q == "spin_x") return b.front().angular_velocity.x;
+                    if (q == "spin_y") return b.front().angular_velocity.y;
+                    if (q == "spin_z") return b.front().angular_velocity.z;
+                    if (q == "rotational")
+                        return malloy::rigid::rotational_energy(b.front());
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -1255,6 +1317,130 @@ int main()
     {
         std::istringstream in("type nbody3d\nground 0 1 0\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    // --- M20: type rigid3d parses into the 3D rigid fields. Seventeen values,
+    //     every one of them distinct and none of them zero except where zero is
+    //     the thing being tested, so a dropped or transposed field shows. ---
+    {
+        std::istringstream in(
+            "type rigid3d\n"
+            "rigid_body3d 2.5  1.5 2.5 3.5   1.0 -2.0 4.0   0.0 0.0 1.0 "
+            "1.5707963267948966   -0.5 0.25 -0.75   0.125 -0.375 0.625\n"
+            "rigid_body3d 0.75  1.0 1.0 1.0   -6.0 7.5 -8.5   0.0 0.0 0.0 0.0   "
+            "1.5 -2.5 3.5   -1.25 2.25 -3.25\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid3D);
+        MALLOY_CHECK_EQ(r.scenario.rigid_bodies3d.size(), std::size_t{2});
+
+        const auto& first = r.scenario.rigid_bodies3d[0];
+        MALLOY_CHECK_NEAR(first.mass, 2.5, eps);
+        MALLOY_CHECK_NEAR(first.inertia.x, 1.5, eps);
+        MALLOY_CHECK_NEAR(first.inertia.y, 2.5, eps);
+        MALLOY_CHECK_NEAR(first.inertia.z, 3.5, eps);
+        MALLOY_CHECK_NEAR(first.position.x, 1.0, eps);
+        MALLOY_CHECK_NEAR(first.position.y, -2.0, eps);
+        MALLOY_CHECK_NEAR(first.position.z, 4.0, eps);
+        MALLOY_CHECK_NEAR(first.velocity.x, -0.5, eps);
+        MALLOY_CHECK_NEAR(first.velocity.y, 0.25, eps);
+        MALLOY_CHECK_NEAR(first.velocity.z, -0.75, eps);
+        MALLOY_CHECK_NEAR(first.angular_velocity.x, 0.125, eps);
+        MALLOY_CHECK_NEAR(first.angular_velocity.y, -0.375, eps);
+        MALLOY_CHECK_NEAR(first.angular_velocity.z, 0.625, eps);
+
+        // The orientation was given as an axis and an angle, so what lands in
+        // the body is the quarter turn about z that they name, and it is a unit
+        // quaternion because from_axis_angle cannot produce anything else.
+        MALLOY_CHECK_TRUE(malloy::math::is_unit(first.orientation));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            malloy::math::rotate(first.orientation, malloy::math::Vec3{1.0, 0.0, 0.0}),
+            malloy::math::Vec3{0.0, 1.0, 0.0}, 1e-15));
+        MALLOY_CHECK_TRUE(first.is_valid());
+
+        // A zero axis is the identity, whatever the angle says, which is how a
+        // template writes an unrotated body without having to know quaternions.
+        const auto& second = r.scenario.rigid_bodies3d[1];
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(second.orientation,
+                                                     malloy::math::Quat{}, 0.0));
+        MALLOY_CHECK_TRUE(second.is_valid());
+
+        // Nothing leaked into the 2D rigid state or any other domain.
+        MALLOY_CHECK_TRUE(r.scenario.rigid_bodies.empty());
+        MALLOY_CHECK_TRUE(r.scenario.bodies3d.empty());
+        MALLOY_CHECK_TRUE(r.scenario.bodies.empty());
+    }
+    {
+        // Seventeen fields are required. Sixteen is not a body with a default
+        // somewhere, it is an error.
+        std::istringstream in("type rigid3d\n"
+                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // Eighteen is an error too: a trailing token is refused rather than
+        // ignored, so a line written for some later format does not silently
+        // run as this one.
+        std::istringstream in(
+            "type rigid3d\n"
+            "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0  9\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // Not a number where a number belongs.
+        std::istringstream in(
+            "type rigid3d\n"
+            "rigid_body3d 1  1 2 three  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // The 2D rigid body line is not accepted here, and the 3D one is not
+        // accepted there, so a scenario cannot half-convert.
+        std::istringstream in("type rigid3d\nrigid_body 1 1 0.5 0 0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type rigid\n"
+                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type nbody3d\n"
+                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // M20 has no contacts and no forces, so every key that implies one
+        // belongs to type rigid and not here. A scenario that expects gravity
+        // to act on a tumbling body is told so rather than being run without
+        // it.
+        for (const char* line : {"restitution 0.5\n", "gravity 0 -9.81\n",
+                                 "friction 0.3\n", "ground 0 1 -2\n",
+                                 "bfield 1.0\n", "spring 0 1 1 1 0\n"})
+        {
+            std::istringstream in(std::string("type rigid3d\n") + line);
+            MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+        }
+    }
+    {
+        // A body with a non-positive principal moment parses, because the
+        // parser checks syntax only, and is then refused by the domain. Each
+        // rule lives in exactly one place.
+        std::istringstream in("type rigid3d\n"
+                              "rigid_body3d 1  1 0 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_FALSE(r.scenario.rigid_bodies3d[0].is_valid());
+        malloy::rigid::Rigid3DWorld world{r.scenario.simulation,
+                                          r.scenario.rigid_bodies3d};
+        MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidState);
+    }
+    {
+        // An unknown type is still an error, and the message names rigid3d
+        // among the ones it could have meant.
+        std::istringstream in("type rigid4d\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_FALSE(r.ok);
+        MALLOY_CHECK_TRUE(r.error.find("rigid4d") != std::string::npos);
     }
     {
         // A softening whose square overflows is refused by the settings, the

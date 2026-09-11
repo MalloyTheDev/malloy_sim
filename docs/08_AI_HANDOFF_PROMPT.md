@@ -20,16 +20,17 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0008)
+- docs/decisions/ (ADRs 0001-0009)
 
 Current status:
 
-M1-M19 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
+M1-M20 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
-uniform gravity field, halfplane ground and friction, spring networks, and
+uniform gravity field, halfplane ground and friction, torque-free rigid-body
+rotation in three dimensions, spring networks, and
 charged particles in electric and magnetic fields are the five finished
 domains, and the scenario format dispatches
-between them with a type key. The classical mechanics track is complete
+between them with a type key across seven scenario types. The classical mechanics track is complete
 (docs/07_POST_M5_ROADMAP.md).
 
 Do not start any further milestone unless I explicitly ask, and then work only

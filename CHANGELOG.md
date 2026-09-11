@@ -785,6 +785,197 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M20] - 2026-09-10  (quaternions and torque-free rotation in three dimensions)
+
+### Added
+
+- `math::Quat`, a quaternion, used only ever as a UNIT quaternion representing
+  an orientation. Hamilton product, conjugate, norm, `normalize`, `rotate`,
+  `from_axis_angle`, and an `is_unit` that is deliberately stricter than
+  `is_finite`.
+- `rigid::RigidBody3D`: position, velocity, a quaternion orientation, a
+  BODY-frame angular velocity, mass, and three PRINCIPAL moments of inertia.
+- `rigid::Rigid3DWorld`, torque-free rotation, inside `malloy_rigid` rather
+  than a library of its own, on the same reasoning M19 used for 3D gravity:
+  rigid-body dynamics is one domain and the dimension is not a domain.
+- `rigid::angular_momentum` and `rigid::rotational_energy` for a single body,
+  plus `total_linear_momentum3d`, `total_angular_momentum3d` and
+  `total_kinetic_energy3d` for a world.
+- `type rigid3d` in the scenario format, with a seventeen-field
+  `rigid_body3d` line. The orientation is given as an axis and an angle rather
+  than as four quaternion components, because a hand-written quaternion is
+  almost never a unit one and `from_axis_angle` cannot produce anything else.
+- `scenarios/intermediate_axis.scn`, and a seventh branch of the app's dispatch
+  switch.
+
+### What is actually new here
+
+This is the first 3D milestone whose physics has no 2D form at all. M19 widened
+gravity: the same equations with one more component. Rotation does not widen.
+
+In two dimensions the inertia is a scalar and the angular velocity lies along a
+fixed axis, so a body's inertia never changes in world space and the term
+`omega x (I omega)` is identically zero. A free body spins at a constant rate
+forever, and there is nothing else it could do. In three dimensions Euler's
+equations carry that term:
+
+```text
+Ix wx' = (Iy - Iz) wy wz
+Iy wy' = (Iz - Ix) wz wx
+Iz wz' = (Ix - Iy) wx wy
+```
+
+Every right-hand side is a DIFFERENCE of principal moments, which is why a
+sphere still cannot do anything but spin and a body with three distinct moments
+can tumble under no torque at all.
+
+The milestone is built around the intermediate axis theorem. With moments
+(1, 2, 3) and an identical one-part-in-two-thousand nudge, a body spun about
+the largest or the smallest moment holds that nudge to within a part in a
+hundred over twenty thousand steps, and a body spun about the one in between
+turns completely over. The same code, the same perturbation, the only
+difference is the axis.
+
+### Scope, and what was deliberately not built
+
+M20 scoped the way M19 did, by choosing the slice that needs nothing else
+first. Torque-free rotation has no contacts, no collision geometry, no forces
+and no solver, so none of those had to be built ahead of their milestone.
+
+`RigidBody3D` stores three principal moments and NOT a 3x3 matrix. That is a
+choice of axes rather than a restriction: a symmetric tensor is always
+diagonalizable, so every rigid body has such a frame. A general tensor is
+needed once bodies are built from composed shapes and the parallel-axis step
+moves inertia off the principal axes, which arrives with 3D mass properties and
+3D contacts. Until then it would be three extra zeros (rule 11). ADR 0007's
+scope boundary is amended with what came due and what was deferred again.
+
+The angular velocity is stored in the BODY frame, which is what makes Euler's
+equations diagonal. In the world frame the inertia rotates with the body and
+the equations would need a full tensor at every step.
+
+### What conserves, and what does not
+
+Neither angular momentum nor energy is exactly conserved by the discrete
+scheme, and the size of the difference is an equality rather than a bound.
+Writing `u = L x omega`, so the update is `omega' = omega + dt I^-1 u`, both
+`L . u` and `omega . u` vanish identically. The first-order terms cancel and
+exactly the second-order ones survive:
+
+```text
+|L'|^2 = |L|^2 + dt^2 |u|^2
+T'     = T     + dt^2 (I^-1 u) . u / 2
+```
+
+Both corrections are positive, so this is a slow gain and not a loss. Both are
+checked every step in the tests, and they explain the cases that ARE exact:
+when omega lies along a principal axis, or when all three moments are equal, L
+is parallel to omega, u is zero, and nothing drifts at all. In those
+configurations the angular velocity, the world-frame angular momentum and the
+rotational energy are bit-identical after five thousand steps.
+
+That also makes the template's diagnostics readable rather than mysterious. The
+E and |L| columns sit still, jump, and sit still again, and the jump is exactly
+where the flip is: the drift term is zero for a principal-axis spin and large
+only while the body is turning over.
+
+Linear momentum IS exact, since nothing here applies a force.
+
+### Renormalization costs nothing
+
+Integrating a unit quaternion does not keep it unit, and the growth is exact
+rather than approximate, because the quaternion norm is multiplicative and the
+update is a right multiplication:
+
+```text
+|q'| = |q| |(1, (dt/2) omega)| = |q| sqrt(1 + |omega|^2 dt^2 / 4)
+```
+
+Unlike the positional correction in the 2D contact code, which this was first
+documented as resembling, renormalizing is not a projection that costs
+anything. Scaling a quaternion does not change the rotation it represents, so
+it moves no body and perturbs no conserved quantity. It restores the magnitude
+`rotate` assumes, which would otherwise scale every rotated vector by |q|^2,
+and it stops the factor above from compounding.
+
+### Derived, then measured
+
+Following the practice the rest of the project uses, the tests assert derived
+constants rather than loosened tolerances:
+
+- the discrete growth rate about the intermediate axis. The transverse map has
+  eigenvalues `1 +/- (W/sqrt(3)) dt`, so from a nudge of `e` the growing
+  component is exactly `(e/2)[(1 + r dt)^n + (1 - r dt)^n]`. Measured against
+  that to fifteen significant figures.
+- the bound the two stable axes respect. Explicit Euler on a rotation grows the
+  amplitude by exactly `sqrt(1 + (mu dt)^2)` per step, the same polygon factor
+  as M18's cyclotron, with `mu = W/sqrt(3)` about the smallest moment and
+  `mu = W` about the largest. Two different numbers, so this checks the
+  coefficients rather than repeating one case twice.
+- the peak angular speed during the tumble. Starting on the separatrix fixes
+  `|L|^2 = (I2 W)^2` and `2T = I2 W^2`; where the body passes through wy = 0
+  those give `wz^2 = W^2/3` and `wx^2 = W^2`, so `|omega| = 2W/sqrt(3)`.
+  Measured 2.3107 against 2.3094, the gap being the accumulated per-step drift
+  above.
+- the symmetric top's precession, which is the cyclotron polygon again: `wz` is
+  bit-constant because `(Ix - Iy)` is exactly zero, and the transverse pair
+  turns by exactly `atan(Omega dt)` per step, never by `Omega dt`.
+- the orientation after a principal-axis spin, which is that polygon once more,
+  a step at a time in the (w, axis) plane at half the angular rate.
+
+Two properties are separated by measuring them at two step sizes. Under
+torque-free rotation the WORLD-frame angular momentum is fixed while the
+BODY-frame vector `I omega` tumbles with the body. The former is integration
+error and falls with dt, the latter is the physics and does not: at dt = 1e-3
+the world-frame deviation is 2.925e-3 and at dt = 1e-4 it is 2.923e-4, a ratio
+of 10.006 that pins the scheme's first order, while the body-frame swing is
+5.10 at both. That ratio is asserted, because "small" alone would also be
+satisfied by an implementation that never rotated anything.
+
+### Mutation testing
+
+Twenty-two mutations, all caught: each Euler coefficient's sign, a difference
+turned into a sum, a transposed component, a division by the wrong moment, the
+renormalization removed, the quaternion multiplied on the wrong side, the
+half-step factor dropped, angular momentum left in the body frame, the missing
+half in the energy, the translation dropped, three validity checks weakened,
+and six mutations of the quaternion algebra itself.
+
+One escaped on the first pass: using the stale angular velocity for the
+orientation, which makes the scheme fully explicit instead of semi-implicit.
+The ordering was documented and untested, and it is otherwise invisible,
+because swapping the two changes the result only at O(dt), the same order as
+the scheme's own error, so no convergence test can see it. It is visible as a
+DIRECTION: starting from the identity the quaternion increment points along
+whichever omega was used, and the two differ by `rate * dt`. That is now
+asserted, and the mutation is caught.
+
+Eight further mutations cover the new scenario key and the template's own
+`# check` lines.
+
+### Fixed
+
+- Three documentation claims that were stale before this milestone started, all
+  of them now derived from the repository instead of restated.
+
+  README.md still said 3D "has not started" and that everything shipped was 2D.
+  That had been wrong since M19.
+
+  README.md claimed the templates covered "five domains" when M19 had made it
+  six. Only the template COUNT was guarded; the domain count was prose, so it
+  drifted silently. The scenario tests now count distinct scenario types across
+  the shipped templates and check that number too.
+
+  docs/08_AI_HANDOFF_PROMPT.md claimed "ADRs 0001-0008" after ADR 0009 was
+  written. The guard for exactly this claim existed but read only docs/00, so
+  fixing the guarded copy let the unguarded one drift through two milestones.
+  The guard now reads both.
+
+- The M20 headers claimed, while it was being built, that angular momentum and
+  energy were exactly conserved and that renormalization perturbed world-frame
+  angular momentum. The tests disproved all three before the milestone shipped.
+  The derivations above replace them.
+
 ## [M19] - 2026-09-10  (Vec3 and gravity in three dimensions)
 
 ### Added

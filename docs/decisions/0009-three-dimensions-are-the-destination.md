@@ -2,12 +2,14 @@
 
 ## Status
 
-Accepted, recorded at M16, amended at M19.
+Accepted, recorded at M16, amended at M19 and M20.
 
-As of M19 the first 3D work has shipped: `math::Vec3` and
-`nbody::NBody3DWorld`. Everything else is still 2D, and each remaining piece
-needs its own milestone (`CLAUDE.md` rule 6). The amendment below records how
-M19 answered the three questions this ADR deliberately left open.
+As of M20 the first two pieces of 3D have shipped: `math::Vec3` and
+`nbody::NBody3DWorld`, then `math::Quat` and `rigid::Rigid3DWorld`. Everything
+else is still 2D, and each remaining piece needs its own milestone
+(`CLAUDE.md` rule 6). The amendments below record how M19 answered the three
+questions this ADR deliberately left open, and what M20 found when it built the
+part this ADR called genuinely new.
 
 ## Context
 
@@ -115,6 +117,39 @@ What M19 did NOT do, deliberately: quaternions, inertia tensors, 3D contact
 geometry, and 3D versions of the other four domains. N-body is the only domain
 with no contacts and no orientation, so it needed `Vec3` and nothing else,
 which let the rest stay deferred rather than be built speculatively (rule 11).
+
+## Amendment at M20: the genuinely new part, built
+
+The section above singled out one thing as the reason 3D is a milestone rather
+than a widening: that in 3D a body precesses and can tumble about its
+intermediate axis with no torque applied, and that this is physics the 2D code
+does not contain in any form. M20 built it, and that prediction was right in
+every respect. `Rigid3DWorld` needs no contacts, no collision geometry, no
+forces and no solver, so it reached the new physics without building anything
+ahead of its milestone, the same way M19 reached `Vec3` through N-body.
+
+**One prediction above needs correcting.** This ADR said the scalar inertia
+"becomes a 3x3 tensor". `RigidBody3D` stores three PRINCIPAL moments instead,
+and that is a decision rather than an omission. A symmetric tensor is always
+diagonalizable, so every rigid body has a frame in which the inertia is
+diagonal; storing the diagonal is a choice of axes, not a restriction. A
+general tensor becomes necessary only once bodies are built from composed
+shapes and the parallel-axis step moves inertia off the principal axes, which
+arrives with 3D mass properties and 3D contacts. Written now it would be three
+extra zeros and a speculative abstraction (rule 11). The tensor form of
+`shift_inertia` is deferred with it.
+
+Two predictions held exactly as written. The scalar angle became a quaternion,
+with the 2D form untouched and still shipping. And "carries over" was accurate
+about the integrator: `Rigid3DWorld` is semi-implicit Euler with
+velocities-before-positions, validates and returns status rather than throwing,
+and is selected by the same `type` key through the same dispatch switch, which
+grew by one branch.
+
+**What this did NOT settle.** Whether `malloy_rigid` eventually holds a shared
+integrator once a third domain needs the same translational path, which ADR
+0008 rule 17 asks to be reassessed then. `Rigid3DWorld` duplicates the
+`position += velocity * dt` line and nothing more, which is not yet evidence.
 
 ## Deliberately not decided here (resolved above at M19)
 
