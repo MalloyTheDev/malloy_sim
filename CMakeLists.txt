@@ -189,9 +189,11 @@ target_link_libraries(malloy_springs
         malloy::project_warnings
 )
 
-# malloy_charges (M18): charged particles in electric and magnetic fields.
+# malloy_charges (M18): charged particles in electric and magnetic fields,
+# in two dimensions and (M29) three.
 add_library(malloy_charges STATIC
     src/charges/charges.cpp
+    src/charges/charges3d.cpp
 )
 add_library(malloy::charges ALIAS malloy_charges)
 target_include_directories(malloy_charges PUBLIC include)

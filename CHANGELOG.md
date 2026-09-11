@@ -827,6 +827,56 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M29] - 2026-09-11  (charged particles in three dimensions)
+
+### Added
+
+- `charges::ChargedParticle3D`, `charges::Charge3DSettings` and
+  `charges::Charge3DWorld`, the 3D sibling of the M18 charges domain, with a full
+  VECTOR magnetic field and helical motion, plus the diagnostics
+  `total_momentum3d`, `total_kinetic_energy3d`, `total_potential_energy3d` and
+  `total_energy3d`.
+- A `charges3d` scenario type (keys `coulomb`, `efield3`, `bfield3`, `softening`,
+  `charge3`) and the `magnetic_helix` template. Eighteen templates now ship
+  across eight domains.
+
+### The physics two dimensions could not express
+
+M18's magnetic field was a scalar, out of the plane, and it turned a particle in
+a flat circle. In three dimensions the field is a vector with a direction, and
+q(v x B) turns only the velocity ACROSS the field, leaving the component ALONG
+it untouched. So a particle circles across the field and drifts along it at
+once: a helix. That combination has no 2D form, the same way M20's torque-free
+tumbling did not.
+
+The magnetic turn is still the exact rotation M18 insisted on, now about the
+field DIRECTION rather than a fixed axis:
+`rotate(from_axis_angle(B, -(q |B| / m) dt), v)`. A magnetic force does no work,
+so this cannot change speed, and because it is a rotation about B it carries the
+along-field component to the last bit. Applying it as a kick would inflate the
+speed by sqrt(1 + (q |B| dt / m)^2) every step, exactly as in 2D. The electric
+and Coulomb terms are the 2D ones with a third component.
+
+### Invariants
+
+The speed is preserved exactly under a magnetic field, even a tilted one and
+even with a velocity component along it (a 3-4-5 velocity keeps |v| = 5 to every
+digit); the energy is then purely kinetic and constant. The along-field velocity
+is carried bit for bit (a rotation about z leaves z untouched), the drift half
+of the helix. A full cyclotron period returns the velocity, and the turn's sense
+and rate match the field. The electric field is a force per charge divided by
+mass, so a heavier charge accelerates less and an opposite one the other way.
+And a run confined to the z = 0 plane, with B along z, matches the 2D
+`ChargeWorld` step for step, which ties the new integrator to the proven one.
+
+### Mutation testing
+
+Fourteen mutations, all caught: the magnetic angle's sign, its division by mass
+and its factor of |B|, and the rotation axis; the pairwise force's
+equal-and-opposite split, the electric field's division by mass, and the Coulomb
+sign; the particle and settings validation; and the kinetic, momentum and
+potential diagnostics.
+
 ## [M28] - 2026-09-11  (a constant applied force on a 3D body)
 
 ### Added

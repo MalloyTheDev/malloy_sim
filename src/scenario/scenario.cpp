@@ -68,7 +68,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number,
                                   "type requires nbody, particles, rigid, springs, "
-                                  "charges, nbody3d or rigid3d");
+                                  "charges, nbody3d, rigid3d or charges3d");
             }
             if (value == "nbody")
             {
@@ -97,6 +97,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "rigid3d")
             {
                 scenario.type = ScenarioType::Rigid3D;
+            }
+            else if (value == "charges3d")
+            {
+                scenario.type = ScenarioType::Charges3D;
             }
             else
             {
@@ -155,10 +159,12 @@ ScenarioParseResult parse_scenario(std::istream& input)
             // term that goes to infinity for a coincident pair.
             if (scenario.type != ScenarioType::NBody &&
                 scenario.type != ScenarioType::NBody3D &&
-                scenario.type != ScenarioType::Charges)
+                scenario.type != ScenarioType::Charges &&
+                scenario.type != ScenarioType::Charges3D)
             {
-                return make_error(line_number,
-                                  "softening belongs to type nbody, nbody3d or charges");
+                return make_error(
+                    line_number,
+                    "softening belongs to type nbody, nbody3d, charges or charges3d");
             }
             saw_domain_key = true;
             math::Real value{};
@@ -170,6 +176,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 scenario.type == ScenarioType::NBody3D)
             {
                 scenario.nbody_settings.softening = value;
+            }
+            else if (scenario.type == ScenarioType::Charges3D)
+            {
+                scenario.charge3d_settings.softening = value;
             }
             else
             {
@@ -386,12 +396,17 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "coulomb")
         {
-            if (scenario.type != ScenarioType::Charges)
+            if (scenario.type != ScenarioType::Charges &&
+                scenario.type != ScenarioType::Charges3D)
             {
-                return make_error(line_number, "coulomb belongs to type charges");
+                return make_error(line_number,
+                                  "coulomb belongs to type charges or charges3d");
             }
             saw_domain_key = true;
-            if (!(tokens >> scenario.charge_settings.k))
+            math::Real& k = scenario.type == ScenarioType::Charges3D
+                                ? scenario.charge3d_settings.k
+                                : scenario.charge_settings.k;
+            if (!(tokens >> k))
             {
                 return make_error(line_number, "coulomb requires a value");
             }
@@ -443,6 +458,62 @@ ScenarioParseResult parse_scenario(std::istream& input)
             particle.position = math::Vec2{px, py};
             particle.velocity = math::Vec2{vx, vy};
             scenario.charge_list.push_back(particle);
+        }
+        else if (key == "efield3")
+        {
+            if (scenario.type != ScenarioType::Charges3D)
+            {
+                return make_error(line_number, "efield3 belongs to type charges3d");
+            }
+            saw_domain_key = true;
+            math::Real ex{};
+            math::Real ey{};
+            math::Real ez{};
+            if (!(tokens >> ex >> ey >> ez))
+            {
+                return make_error(line_number, "efield3 requires: ex ey ez");
+            }
+            scenario.charge3d_settings.electric = math::Vec3{ex, ey, ez};
+        }
+        else if (key == "bfield3")
+        {
+            if (scenario.type != ScenarioType::Charges3D)
+            {
+                return make_error(line_number, "bfield3 belongs to type charges3d");
+            }
+            saw_domain_key = true;
+            math::Real bx{};
+            math::Real by{};
+            math::Real bz{};
+            if (!(tokens >> bx >> by >> bz))
+            {
+                return make_error(line_number, "bfield3 requires: bx by bz");
+            }
+            scenario.charge3d_settings.magnetic = math::Vec3{bx, by, bz};
+        }
+        else if (key == "charge3")
+        {
+            if (scenario.type != ScenarioType::Charges3D)
+            {
+                return make_error(line_number, "charge3 belongs to type charges3d");
+            }
+            saw_domain_key = true;
+            charges::ChargedParticle3D particle;
+            math::Real px{};
+            math::Real py{};
+            math::Real pz{};
+            math::Real vx{};
+            math::Real vy{};
+            math::Real vz{};
+            if (!(tokens >> particle.mass >> particle.charge >> px >> py >> pz >> vx >>
+                  vy >> vz))
+            {
+                return make_error(line_number,
+                                  "charge3 requires: mass q px py pz vx vy vz");
+            }
+            particle.position = math::Vec3{px, py, pz};
+            particle.velocity = math::Vec3{vx, vy, vz};
+            scenario.charge_list3d.push_back(particle);
         }
         else if (key == "friction")
         {

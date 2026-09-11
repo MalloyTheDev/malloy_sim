@@ -761,6 +761,31 @@ int main()
                     return 1;
                 }
             }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Charges3D)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.charge_list3d.size() >= 1);
+                malloy::charges::Charge3DWorld world{r.scenario.simulation,
+                                                     r.scenario.charge3d_settings,
+                                                     r.scenario.charge_list3d};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                const auto& settings = r.scenario.charge3d_settings;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.particles();
+                    if (q == "energy")
+                        return malloy::charges::total_energy3d(b, settings);
+                    if (q == "kinetic")
+                        return malloy::charges::total_kinetic_energy3d(b);
+                    if (q == "momentum_x") return malloy::charges::total_momentum3d(b).x;
+                    if (q == "momentum_y") return malloy::charges::total_momentum3d(b).y;
+                    if (q == "momentum_z") return malloy::charges::total_momentum3d(b).z;
+                    if (q == "speed") return malloy::math::length(b.front().velocity);
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
+                {
+                    return 1;
+                }
+            }
             else
             {
                 MALLOY_CHECK_TRUE(r.scenario.particle_list.size() >= 2);

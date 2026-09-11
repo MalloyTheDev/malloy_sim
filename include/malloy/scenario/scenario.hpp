@@ -8,8 +8,10 @@
 #include <malloy/nbody/body3d.hpp>
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/particles/particle2d.hpp>
+#include <malloy/charges/charge3d_settings.hpp>
 #include <malloy/charges/charge_settings.hpp>
 #include <malloy/charges/charged_particle2d.hpp>
+#include <malloy/charges/charged_particle3d.hpp>
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/math/real.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
@@ -36,6 +38,7 @@ enum class ScenarioType
     Charges,
     NBody3D,
     Rigid3D,
+    Charges3D,
 };
 
 // A complete, runnable scenario for one domain.
@@ -75,6 +78,10 @@ struct Scenario
     std::vector<charges::ChargedParticle2D> charge_list;
     charges::ChargeSettings charge_settings{};
 
+    // type == Charges3D
+    std::vector<charges::ChargedParticle3D> charge_list3d;
+    charges::Charge3DSettings charge3d_settings{};
+
     // type == Springs
     std::vector<springs::SpringBody2D> spring_bodies;
     springs::SpringNetwork spring_network;
@@ -100,7 +107,7 @@ struct ScenarioParseResult
 //
 // Common to every domain:
 //
-//   type <nbody|particles|rigid|springs|charges|nbody3d|rigid3d>
+//   type <nbody|particles|rigid|springs|charges|nbody3d|rigid3d|charges3d>
 //                           which domain           (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
@@ -240,6 +247,22 @@ struct ScenarioParseResult
 //
 //     bfield is a scalar rather than a vector because in two dimensions only
 //     the out-of-plane component of B produces an in-plane force.
+//
+// type charges3d:
+//
+//   Charged particles in three dimensions. The Coulomb term and the electric
+//   field mean the same as in 2D; the magnetic field becomes a full VECTOR,
+//   because in three dimensions B has a direction and q(v x B) turns the
+//   velocity about it while leaving the component along it alone, which is what
+//   makes the motion helical (docs/decisions/0009).
+//
+//   coulomb <k>                   Coulomb constant             (default 1.0)
+//   efield3 <ex> <ey> <ez>        uniform electric field       (default 0 0 0)
+//   bfield3 <bx> <by> <bz>        uniform magnetic field       (default 0 0 0)
+//   softening <value>             enters the denominator SQUARED (default 0)
+//   charge3 <mass> <q> <px> <py> <pz> <vx> <vy> <vz>
+//
+//     q is SIGNED and may be zero, exactly as in the 2D charges domain.
 //
 // type springs:
 //

@@ -7,15 +7,23 @@
 #include <limits>
 #include <vector>
 
+using malloy::charges::Charge3DSettings;
+using malloy::charges::Charge3DWorld;
 using malloy::charges::ChargedParticle2D;
+using malloy::charges::ChargedParticle3D;
 using malloy::charges::ChargeSettings;
 using malloy::charges::ChargeWorld;
 using malloy::charges::total_energy;
+using malloy::charges::total_energy3d;
 using malloy::charges::total_kinetic_energy;
+using malloy::charges::total_kinetic_energy3d;
 using malloy::charges::total_momentum;
+using malloy::charges::total_momentum3d;
 using malloy::charges::total_potential_energy;
+using malloy::charges::total_potential_energy3d;
 using malloy::math::Real;
 using malloy::math::Vec2;
+using malloy::math::Vec3;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
 
@@ -613,6 +621,234 @@ int main()
         MALLOY_CHECK_TRUE(charge_at(Vec2{1.0, 2.0}, Vec2{}, 1.0, 1.0).is_valid());
         MALLOY_CHECK_FALSE(charge_at(Vec2{too_big, 0.0}, Vec2{}, 1.0, 1.0).is_valid());
         MALLOY_CHECK_FALSE(charge_at(Vec2{}, Vec2{0.0, too_big}, 1.0, 1.0).is_valid());
+    }
+
+    // --- M29: charged particles in three dimensions. The Coulomb and electric
+    //     terms are the 2D ones with a third component; the magnetic field
+    //     becomes a VECTOR, and its turn is a rotation about the field
+    //     direction, so the velocity component ALONG the field is carried and
+    //     the motion is helical. A magnetic force still does no work. ---
+    {
+        using malloy::math::approx_equal;
+
+        const auto charge3 = [](Vec3 position, Vec3 velocity, Real mass, Real charge) {
+            ChargedParticle3D p;
+            p.position = position;
+            p.velocity = velocity;
+            p.mass = mass;
+            p.charge = charge;
+            return p;
+        };
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Real too_big3 = 1.4e154; // finite, but its square overflows
+
+        // --- Validation. ---
+        {
+            MALLOY_CHECK_TRUE(charge3(Vec3{1.0, 2.0, 3.0}, Vec3{}, 1.0, -2.0).is_valid());
+            MALLOY_CHECK_FALSE(charge3(Vec3{}, Vec3{}, 0.0, 1.0).is_valid()); // mass 0
+            MALLOY_CHECK_FALSE(charge3(Vec3{}, Vec3{}, 1.0, nan3).is_valid());
+            MALLOY_CHECK_FALSE(charge3(Vec3{0.0, too_big3, 0.0}, Vec3{}, 1.0, 1.0).is_valid());
+            MALLOY_CHECK_FALSE(charge3(Vec3{}, Vec3{0.0, 0.0, too_big3}, 1.0, 1.0).is_valid());
+            // Settings: k finite, fields squarable, softening non-negative and
+            // squarable.
+            Charge3DSettings good;
+            good.electric = Vec3{1.0, -2.0, 0.5};
+            good.magnetic = Vec3{0.0, 0.0, 3.0};
+            MALLOY_CHECK_TRUE(good.is_valid());
+            Charge3DSettings bad_field;
+            bad_field.magnetic = Vec3{too_big3, 0.0, 0.0}; // square overflows |B|
+            MALLOY_CHECK_FALSE(bad_field.is_valid());
+            Charge3DSettings bad_efield;
+            bad_efield.electric = Vec3{0.0, inf3, 0.0};
+            MALLOY_CHECK_FALSE(bad_efield.is_valid());
+            Charge3DSettings bad_soft;
+            bad_soft.softening = -1.0;
+            MALLOY_CHECK_FALSE(bad_soft.is_valid());
+            // A world with bad settings refuses to step.
+            Charge3DWorld world{SimulationSettings{0.01}, bad_field, {charge3(Vec3{}, Vec3{}, 1.0, 1.0)}};
+            MALLOY_CHECK_TRUE(world.step().status == StepStatus::InvalidSettings);
+        }
+
+        // --- The electric field is a force per charge, divided by mass: a
+        //     heavier charge accelerates less and an opposite charge the other
+        //     way, the whole difference from gravity, now in 3D. ---
+        {
+            const Real dt = 0.001;
+            Charge3DSettings settings;
+            settings.k = 0.0; // field only
+            settings.electric = Vec3{2.0, -1.0, 3.0};
+            Charge3DWorld world{
+                SimulationSettings{dt}, settings,
+                {charge3(Vec3{}, Vec3{}, 1.0, 1.0),   // light, positive
+                 charge3(Vec3{}, Vec3{}, 4.0, 1.0),   // heavy, positive
+                 charge3(Vec3{}, Vec3{}, 1.0, -1.0)}};// light, negative
+            for (int i = 0; i < 100; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const auto& p = world.particles();
+            const Real t = 100 * dt;
+            // a = (q/m) E, so v = (q/m) E t.
+            MALLOY_CHECK_TRUE(approx_equal(p[0].velocity, settings.electric * t, 1e-9));
+            MALLOY_CHECK_TRUE(approx_equal(p[1].velocity, settings.electric * (t / 4.0), 1e-9));
+            MALLOY_CHECK_TRUE(approx_equal(p[2].velocity, settings.electric * -t, 1e-9));
+        }
+
+        // --- A magnetic force does no work: even with a velocity component
+        //     ALONG a TILTED field (so the rotation is genuinely 3D, not an
+        //     axis-aligned special case), the speed is preserved and the energy
+        //     is purely kinetic and constant. ---
+        {
+            Charge3DSettings settings;
+            settings.k = 0.0;
+            settings.magnetic = Vec3{1.0, 2.0, -0.5}; // tilted
+            Charge3DWorld world{SimulationSettings{0.01}, settings,
+                                {charge3(Vec3{}, Vec3{0.7, -1.3, 0.4}, 1.5, 2.0)}};
+            const Real speed0 = malloy::math::length(world.particles().front().velocity);
+            const Real energy0 = total_energy3d(world.particles(), settings);
+            Real worst_speed = 0.0;
+            Real worst_energy = 0.0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const Real speed = malloy::math::length(world.particles().front().velocity);
+                worst_speed = std::fmax(worst_speed, std::abs(speed - speed0));
+                worst_energy = std::fmax(
+                    worst_energy, std::abs(total_energy3d(world.particles(), settings) - energy0));
+            }
+            MALLOY_CHECK_TRUE(worst_speed < 1e-12);
+            MALLOY_CHECK_TRUE(worst_energy < 1e-12);
+        }
+
+        // --- Helical motion: with the field along z, the velocity component
+        //     along z is carried EXACTLY (a rotation about z leaves the z axis
+        //     untouched, to the last bit), while the perpendicular part circles.
+        //     A full cyclotron period returns the velocity. This is the drift
+        //     plus circle that two dimensions cannot express. ---
+        {
+            Charge3DSettings settings;
+            settings.k = 0.0;
+            settings.magnetic = Vec3{0.0, 0.0, 1.0}; // b = 1, so omega = q/m
+            // v_perp = 3, v_par = 4: speed 5, radius m v_perp/(q b) = 3, period
+            // 2 pi m /(q b) = one turn in steps_per_turn steps at turn_dt.
+            Charge3DWorld world{SimulationSettings{turn_dt}, settings,
+                                {charge3(Vec3{}, Vec3{3.0, 0.0, 4.0}, 1.0, 1.0)}};
+            const Vec3 v0 = world.particles().front().velocity;
+            for (int i = 0; i < steps_per_turn; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                // The along-field component never moves, at any step, exactly.
+                MALLOY_CHECK_NEAR(world.particles().front().velocity.z, 4.0, 0.0);
+            }
+            // After one full period the velocity has come back (to rounding).
+            MALLOY_CHECK_TRUE(approx_equal(world.particles().front().velocity, v0, 1e-12));
+            // And the guiding centre has drifted along z by v_par * period.
+            const Real period = turn_dt * static_cast<Real>(steps_per_turn);
+            MALLOY_CHECK_NEAR(world.particles().front().position.z, 4.0 * period, 1e-9);
+        }
+
+        // --- The turn rate and sense match the field: a positive charge moving
+        //     +x in a +z field turns toward -y, the same convention as 2D, and
+        //     the angle per step is -(q b / m) dt. One quarter turn lands +x on
+        //     -y. ---
+        {
+            Charge3DSettings settings;
+            settings.k = 0.0;
+            settings.magnetic = Vec3{0.0, 0.0, 1.0};
+            Charge3DWorld world{SimulationSettings{turn_dt}, settings,
+                                {charge3(Vec3{}, Vec3{2.0, 0.0, 0.0}, 1.0, 1.0)}};
+            for (int i = 0; i < steps_per_turn / 4; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            // A quarter turn clockwise: +x velocity is now along -y.
+            const Vec3 v = world.particles().front().velocity;
+            MALLOY_CHECK_TRUE(approx_equal(v, Vec3{0.0, -2.0, 0.0}, 1e-3));
+        }
+
+        // --- It reduces to the 2D domain: the same particles in the z = 0
+        //     plane, with B along z and E in the plane, must trace the same xy
+        //     path as ChargeWorld, and never leave the plane. This ties the 3D
+        //     integrator to the proven 2D one. ---
+        {
+            const Real dt = 0.01;
+            const Real b = 0.8;
+            const Vec2 e2{0.5, -0.3};
+            ChargeSettings s2;
+            s2.k = 1.0;
+            s2.electric = e2;
+            s2.magnetic = b;
+            s2.softening = 0.25;
+            Charge3DSettings s3;
+            s3.k = 1.0;
+            s3.electric = Vec3{e2.x, e2.y, 0.0};
+            s3.magnetic = Vec3{0.0, 0.0, b};
+            s3.softening = 0.25;
+            ChargeWorld w2{SimulationSettings{dt}, s2,
+                           {charge_at(Vec2{-1.0, 0.0}, Vec2{0.0, 1.0}, 1.0, 1.0),
+                            charge_at(Vec2{1.0, 0.0}, Vec2{0.0, -1.0}, 2.0, -1.5)}};
+            Charge3DWorld w3{SimulationSettings{dt}, s3,
+                             {charge3(Vec3{-1.0, 0.0, 0.0}, Vec3{0.0, 1.0, 0.0}, 1.0, 1.0),
+                              charge3(Vec3{1.0, 0.0, 0.0}, Vec3{0.0, -1.0, 0.0}, 2.0, -1.5)}};
+            for (int i = 0; i < 500; ++i)
+            {
+                MALLOY_CHECK_TRUE(w2.step().ok());
+                MALLOY_CHECK_TRUE(w3.step().ok());
+                for (std::size_t k = 0; k < 2; ++k)
+                {
+                    const auto& a = w2.particles()[k];
+                    const auto& c = w3.particles()[k];
+                    MALLOY_CHECK_TRUE(approx_equal(c.position, Vec3{a.position.x, a.position.y, 0.0}, 1e-10));
+                    MALLOY_CHECK_TRUE(approx_equal(c.velocity, Vec3{a.velocity.x, a.velocity.y, 0.0}, 1e-10));
+                }
+            }
+        }
+
+        // --- Pairwise Coulomb in 3D: two like charges off-axis repel along
+        //     their 3D separation, and the equal-and-opposite forces keep total
+        //     momentum exactly zero from a symmetric rest start. ---
+        {
+            Charge3DSettings settings;
+            settings.k = 1.0;
+            settings.magnetic = Vec3{}; // no field, pure Coulomb
+            Charge3DWorld world{SimulationSettings{0.001}, settings,
+                                {charge3(Vec3{-1.0, -1.0, -1.0}, Vec3{}, 1.0, 1.0),
+                                 charge3(Vec3{1.0, 1.0, 1.0}, Vec3{}, 1.0, 1.0)}};
+            for (int i = 0; i < 200; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const auto& p = world.particles();
+            // Started at rest, equal masses, so momentum stays zero and they
+            // move apart symmetrically along the body diagonal.
+            MALLOY_CHECK_TRUE(approx_equal(total_momentum3d(p), Vec3{}, 1e-12));
+            MALLOY_CHECK_TRUE(malloy::math::length(p[1].position) >
+                              malloy::math::length(Vec3{1.0, 1.0, 1.0})); // pushed out
+            MALLOY_CHECK_TRUE(approx_equal(p[0].position, p[1].position * -1.0, 1e-12));
+        }
+
+        // --- The diagnostics pin their own factors, before any step. Kinetic
+        //     energy is 0.5 m |v|^2, momentum is the mass-weighted velocity sum,
+        //     and the potential is the pair term k q_i q_j / r plus the field
+        //     term -q (E . r). ---
+        {
+            const std::vector<ChargedParticle3D> two = {
+                charge3(Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 2.0, 2.0}, 3.0, 1.0),
+                charge3(Vec3{5.0, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0}, 4.0, 1.0)};
+            // KE = 0.5*3*(1+4+4) + 0.5*4*(1) = 13.5 + 2 = 15.5.
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(two), 15.5, 1e-12);
+            // p = 3*(1,2,2) + 4*(-1,0,0) = (-1, 6, 6).
+            MALLOY_CHECK_TRUE(approx_equal(total_momentum3d(two), Vec3{-1.0, 6.0, 6.0}, 1e-12));
+            // Pair only (k=1, E=0): k q0 q1 / r = 1/5.
+            Charge3DSettings pair_only; // k defaults to 1
+            MALLOY_CHECK_NEAR(total_potential_energy3d(two, pair_only), 1.0 / 5.0, 1e-12);
+            // Field only: U = -q0 (E.r0) - q1 (E.r1) = 0 - 1*(2*5) = -10.
+            Charge3DSettings field_only;
+            field_only.k = 0.0;
+            field_only.electric = Vec3{2.0, 0.0, 0.0};
+            MALLOY_CHECK_NEAR(total_potential_energy3d(two, field_only), -10.0, 1e-12);
+        }
     }
 
     std::cout << "malloy_charges_tests passed\n";

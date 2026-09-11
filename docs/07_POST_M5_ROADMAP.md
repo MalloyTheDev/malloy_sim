@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M28 are complete, so this is the live roadmap for what comes next.
+M1-M29 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -42,6 +42,7 @@ M25 - 3D mass properties (inertia tensor)  [done]
 M26 - box mass properties and combine      [done]
 M27 - mesh mass properties (any shape)     [done]
 M28 - a constant applied force (wrench)    [done]
+M29 - charged particles in three dimensions [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -170,7 +171,7 @@ a box mass primitive, and combine      [done, M26: three moments, tilt, compound
 mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume integrals]
 a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator]
 more 3D contact geometry               (what replaces SAT for boxes)
-3D versions of particles, springs and charges
+3D versions of particles and springs   (charges done, M29)
 rendering              (terminal-first holds until then, ADR 0002)
 ```
 

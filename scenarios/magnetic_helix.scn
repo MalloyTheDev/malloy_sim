@@ -1,0 +1,72 @@
+# MalloySim scenario: charged particles in a 3D magnetic field (M29).
+#
+# This is what M29 adds, and it is motion two dimensions cannot express. In 2D
+# a magnetic field was a scalar, out of the plane, and it turned a particle in a
+# flat circle. In 3D the field is a VECTOR with a direction, and q(v x B) turns
+# only the part of the velocity ACROSS the field while leaving the part ALONG it
+# untouched. So a particle circles across the field and drifts along it at the
+# same time: a helix. That combination has no 2D form.
+#
+# As in 2D, a magnetic force does no work, so it cannot change speed. The turn
+# is integrated exactly, as a rotation about the field direction, so the |v|
+# column does not move to any digit printed, even though the particle now also
+# has a velocity component along the field that a wrong axis of rotation would
+# corrupt.
+
+type charges3d
+
+dt 0.0062831853071795865
+steps 2000
+output_every 500
+
+# Field alone, no pairwise interaction, so two particles may share a start
+# point without a Coulomb blow-up.
+coulomb 0.0
+
+# The field points along z. A charge circles in the xy plane and drifts in z.
+bfield3 0.0 0.0 1.0
+
+# charge3 <mass> <q> <px> <py> <pz> <vx> <vy> <vz>
+
+# A 3-4-5 velocity: 3 across the field, 4 along it. The cyclotron radius is
+# m v_perp / (|q| b) = 3, the period is 2*pi*m / (|q| b) = 2*pi = 1000 steps, and
+# the speed is exactly 5. It traces a helix of radius 3 climbing in z at 4.
+charge3 1.0  1.0   0.0 0.0 0.0   3.0 0.0 4.0
+
+# A velocity purely ALONG the field: v x B = 0, so no force at all. It moves in
+# a straight line up the z axis at speed 3, which is the other end of the same
+# fact, that the field only turns the perpendicular part.
+charge3 1.0  1.0   3.0 0.0 0.0   0.0 0.0 3.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   1.70000000e+01   |v|  5.00000000e+00   |p|  ...
+#   step   2000   E   1.70000000e+01   |v|  5.00000000e+00   |p|  ...
+#
+# The invariants, exact rather than close:
+#
+# 1. |v| of the first particle does not move: a magnetic force does no work, and
+#    the rotation that implements it cannot change a length. That the length now
+#    includes a component ALONG the field (the 4 in the 3-4-5) is the point: a
+#    rotation about the wrong axis would mix it into the perpendicular part and
+#    change the perpendicular circling, and a naive kick would grow |v| every
+#    step.
+#
+# 2. E is purely kinetic here (no field potential, no pairwise term):
+#    0.5*1*25 + 0.5*1*9 = 12.5 + 4.5 = 17, exactly what step 0 prints.
+#
+# 3. Total momentum along z does not move: each particle keeps its own velocity
+#    component along the field (4 and 3), so p_z = 4 + 3 = 7 forever. This is the
+#    drift half of the helix, the thing 2D has no room for.
+#
+# On the ASCII view (an orthographic projection down z, so the drift is into the
+# screen): the first particle traces a circle of radius 3, the second sits still
+# at (3, 0) because its motion is straight along the viewing axis.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    energy      1.70000000e+01   tol 1e-9
+# check step 2000 energy      1.70000000e+01   tol 1e-9
+# check step 2000 speed       5.00000000e+00   tol 1e-10
+# check step 0    momentum_z  7.00000000e+00   tol 1e-12
+# check step 2000 momentum_z  7.00000000e+00   tol 1e-9

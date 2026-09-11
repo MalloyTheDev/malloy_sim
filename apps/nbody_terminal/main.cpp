@@ -30,7 +30,10 @@ using malloy::math::Real;
 using malloy::math::Vec2;
 using malloy::nbody::Body2D;
 using malloy::nbody::NBodySettings;
+using malloy::charges::Charge3DSettings;
+using malloy::charges::Charge3DWorld;
 using malloy::charges::ChargedParticle2D;
+using malloy::charges::ChargedParticle3D;
 using malloy::charges::ChargeSettings;
 using malloy::charges::ChargeWorld;
 using malloy::nbody::NBodyWorld;
@@ -60,6 +63,7 @@ constexpr auto& rigid_angular_momentum = malloy::rigid::total_angular_momentum;
 constexpr auto& rigid_total_energy = malloy::rigid::total_energy;
 constexpr auto& charge_momentum = malloy::charges::total_momentum;
 constexpr auto& charge_total_energy = malloy::charges::total_energy;
+constexpr auto& charge_total_energy3d = malloy::charges::total_energy3d;
 constexpr auto& spring_momentum = malloy::springs::total_momentum;
 constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
 constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
@@ -402,6 +406,60 @@ int run_charges(const char* title, const SimulationSettings& sim,
     return drive(title, world, report, steps, output_every);
 }
 
+// The same orthographic flattening for 3D charges: plot (x, y) and drop z, the
+// honest limit of an ASCII view of a 3D scene until rendering has its own
+// milestone. A helical orbit reads as a circle from this angle, with the drift
+// along the field carrying it off screen only if the field is not along z.
+std::vector<Vec2> projected(const std::vector<malloy::charges::ChargedParticle3D>& particles)
+{
+    std::vector<Vec2> points;
+    points.reserve(particles.size());
+    for (const auto& particle : particles)
+    {
+        points.push_back(Vec2{particle.position.x, particle.position.y});
+    }
+    return points;
+}
+
+// Runs one 3D charged-particle scenario. An eighth concrete runner and an
+// eighth branch of the dispatch switch: ADR 0006 once more, still no base class.
+int run_charges3d(const char* title, const SimulationSettings& sim,
+                  Charge3DSettings settings,
+                  std::vector<ChargedParticle3D> particles, int steps,
+                  int output_every)
+{
+    Charge3DWorld world{sim, settings, std::move(particles)};
+
+    std::cout << "\n== " << title << " ==  charges=" << world.particles().size()
+              << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(projected(world.particles()));
+
+    const auto report = [&world, &view, &settings](std::int64_t step_index) {
+        const auto& now = world.particles();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        // |v| is the column a magnetic field must leave alone, exactly as in 2D:
+        // the rotation is exact, so speed does not move even as the particle
+        // spirals along the field.
+        std::cout << "   E " << std::setw(16) << charge_total_energy3d(now, settings)
+                  << "   |v| " << std::setw(16)
+                  << malloy::math::length(now.front().velocity) << "   |p| "
+                  << std::setw(16)
+                  << malloy::math::length(malloy::charges::total_momentum3d(now)) << '\n';
+        std::cout << std::fixed;
+        print_view(view, projected(now));
+    };
+
+    return drive(title, world, report, steps, output_every);
+}
+
 // Runs one spring scenario. A fourth concrete runner: SpringWorld shares no
 // base class with the other three (ADR 0006, ADR 0008).
 int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork network,
@@ -551,6 +609,9 @@ int main(int argc, char** argv)
         case ScenarioType::Rigid3D:
             return run_rigid3d(argv[1], s.simulation, s.rigid_bodies3d,
                                s.rigid3d_settings, s.steps, s.output_every);
+        case ScenarioType::Charges3D:
+            return run_charges3d(argv[1], s.simulation, s.charge3d_settings,
+                                 s.charge_list3d, s.steps, s.output_every);
         }
         return 1;
     }

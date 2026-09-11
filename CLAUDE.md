@@ -48,8 +48,8 @@ rolling with friction (M23), colliding with each other (M24), and pushed by a
 constant applied force to go with the torque (M28), and their mass and inertia
 can be computed from geometry (M25), for spheres, boxes and arbitrary triangle
 meshes (M27) assembled into compound bodies (M26). Everything else is still 2D,
-and that is still the bulk of the project: three of the five domains, more 3D
-contact geometry, and 3D versions of the remaining domains.
+and that is still the bulk of the project: two of the five domains (particles
+and springs), more 3D contact geometry, and 3D versions of those two.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -60,7 +60,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M28 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M29 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -70,8 +70,8 @@ three-dimensional domain, quaternions with torque-free 3D rotation, a constant
 applied torque on a 3D body, a sphere bouncing on a 3D ground plane, Coulomb
 friction for 3D contacts, sphere-against-sphere collisions, 3D mass
 properties (inertia from geometry), box mass properties with compound
-assembly, mesh mass properties for arbitrary shapes, and a constant applied
-force on a 3D body.
+assembly, mesh mass properties for arbitrary shapes, a constant applied
+force on a 3D body, and charged particles in three dimensions.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -87,11 +87,12 @@ torque-free rotation in three dimensions), M21 (a constant applied torque on a
 for 3D contacts), M24 (sphere-against-sphere collisions), M25 (3D mass
 properties: mass and inertia computed from geometry), M26 (box mass
 properties and combine: compound bodies assembled from primitives), M27
-(mesh mass properties: the inertia of an arbitrary triangle mesh) and M28 (a
-constant applied force on a 3D body, the translational half of a wrench) are all
-done. See `docs/07_POST_M5_ROADMAP.md`.
+(mesh mass properties: the inertia of an arbitrary triangle mesh), M28 (a
+constant applied force on a 3D body, the translational half of a wrench) and M29
+(charged particles in three dimensions, with the full vector Lorentz force and
+helical motion) are all done. See `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M29 or later) unless explicitly asked, and
+Do not start any further milestone (M30 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -140,7 +141,7 @@ dispatch to:
 
 ```text
 type nbody          # or: particles, rigid, springs, charges, nbody3d,
-                    #     rigid3d
+                    #     rigid3d, charges3d
 dt 0.001
 steps 10000
 ```
