@@ -115,7 +115,11 @@ math::Vec3 total_linear_momentum3d(const std::vector<RigidBody3D>& bodies);
 // Dropping either makes a whole class of motion look conserved when it is not.
 //
 // The orbital term is exactly constant here, since no force acts: for a free
-// body d(r x p)/dt = v x mv = 0.
+// body d(r x p)/dt = v x mv = 0. That is specific to CONSTANT velocity, and to
+// the bit level as well: with v unchanging, r_{n+1} x v = (r_n + dt v) x v =
+// r_n x v every step. It stops holding the moment a force changes v within a
+// step, so a later milestone that adds forces cannot keep this line and assume
+// the orbital term still conserves itself.
 //
 // --- The drift law, and what it does NOT describe ---
 //
