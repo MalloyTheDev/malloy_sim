@@ -667,6 +667,24 @@ int main()
                     if (q == "spin_z") return b.front().angular_velocity.z;
                     if (q == "rotational")
                         return malloy::rigid::rotational_energy(b.front());
+                    // The FIRST body's position and velocity, for a contact
+                    // scenario where a single sphere's height and speed are the
+                    // thing to watch.
+                    if (q == "position_x") return b.front().position.x;
+                    if (q == "position_y") return b.front().position.y;
+                    if (q == "position_z") return b.front().position.z;
+                    if (q == "velocity_x") return b.front().velocity.x;
+                    if (q == "velocity_y") return b.front().velocity.y;
+                    if (q == "velocity_z") return b.front().velocity.z;
+                    // Gravitational potential and the total mechanical energy,
+                    // which trade off during a fall and a bounce.
+                    if (q == "potential")
+                        return malloy::rigid::total_potential_energy3d(
+                            b, world.settings().gravity);
+                    if (q == "total_energy")
+                        return malloy::rigid::total_kinetic_energy3d(b) +
+                               malloy::rigid::total_potential_energy3d(
+                                   b, world.settings().gravity);
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -1319,15 +1337,15 @@ int main()
         std::istringstream in("type nbody3d\nground 0 1 0\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
-    // --- M20: type rigid3d parses into the 3D rigid fields. Seventeen values,
+    // --- M20/M22: type rigid3d parses into the 3D rigid fields. Eighteen values,
     //     every one of them distinct and none of them zero except where zero is
     //     the thing being tested, so a dropped or transposed field shows. ---
     {
         std::istringstream in(
             "type rigid3d\n"
-            "rigid_body3d 2.5  1.5 2.5 3.5   1.0 -2.0 4.0   0.0 0.0 1.0 "
+            "rigid_body3d 2.5  1.5 2.5 3.5   0.5   1.0 -2.0 4.0   0.0 0.0 1.0 "
             "1.5707963267948966   -0.5 0.25 -0.75   0.125 -0.375 0.625\n"
-            "rigid_body3d 0.75  1.0 1.0 1.0   -6.0 7.5 -8.5   0.0 0.0 0.0 0.0   "
+            "rigid_body3d 0.75  1.0 1.0 1.0   0.25   -6.0 7.5 -8.5   0.0 0.0 0.0 0.0   "
             "1.5 -2.5 3.5   -1.25 2.25 -3.25\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_TRUE(r.ok);
@@ -1339,6 +1357,7 @@ int main()
         MALLOY_CHECK_NEAR(first.inertia.x, 1.5, eps);
         MALLOY_CHECK_NEAR(first.inertia.y, 2.5, eps);
         MALLOY_CHECK_NEAR(first.inertia.z, 3.5, eps);
+        MALLOY_CHECK_NEAR(first.radius, 0.5, eps); // M22: the collision radius
         MALLOY_CHECK_NEAR(first.position.x, 1.0, eps);
         MALLOY_CHECK_NEAR(first.position.y, -2.0, eps);
         MALLOY_CHECK_NEAR(first.position.z, 4.0, eps);
@@ -1361,6 +1380,7 @@ int main()
         // A zero axis is the identity, whatever the angle says, which is how a
         // template writes an unrotated body without having to know quaternions.
         const auto& second = r.scenario.rigid_bodies3d[1];
+        MALLOY_CHECK_NEAR(second.radius, 0.25, eps);
         MALLOY_CHECK_TRUE(malloy::math::approx_equal(second.orientation,
                                                      malloy::math::Quat{}, 0.0));
         MALLOY_CHECK_TRUE(second.is_valid());
@@ -1371,19 +1391,19 @@ int main()
         MALLOY_CHECK_TRUE(r.scenario.bodies.empty());
     }
     {
-        // Seventeen fields are required. Sixteen is not a body with a default
-        // somewhere, it is an error.
+        // Eighteen fields are required. Seventeen is not a body with a
+        // default somewhere, it is an error.
         std::istringstream in("type rigid3d\n"
-                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0\n");
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
     {
-        // Eighteen is an error too: a trailing token is refused rather than
+        // Nineteen is an error too: a trailing token is refused rather than
         // ignored, so a line written for some later format does not silently
         // run as this one.
         std::istringstream in(
             "type rigid3d\n"
-            "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0  9\n");
+            "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0  9\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
     {
@@ -1410,13 +1430,14 @@ int main()
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
     {
-        // M20 has no contacts and no forces, so every key that implies one
-        // belongs to type rigid and not here. A scenario that expects gravity
-        // to act on a tumbling body is told so rather than being run without
-        // it.
-        for (const char* line : {"restitution 0.5\n", "gravity 0 -9.81\n",
-                                 "friction 0.3\n", "ground 0 1 -2\n",
-                                 "bfield 1.0\n", "spring 0 1 1 1 0\n"})
+        // The keys M22 did NOT add stay rejected in rigid3d. `restitution` is
+        // now accepted (checked below), but the 2D `gravity` and `ground` keys
+        // are not: 3D uses `gravity3` and `plane3`, so a 2D key here is a
+        // mistake, not a silent half-conversion. Friction is a later milestone,
+        // and bfield and spring belong to other domains entirely.
+        for (const char* line : {"gravity 0 -9.81\n", "friction 0.3\n",
+                                 "ground 0 1 -2\n", "bfield 1.0\n",
+                                 "spring 0 1 1 1 0\n"})
         {
             std::istringstream in(std::string("type rigid3d\n") + line);
             MALLOY_CHECK_FALSE(parse_scenario(in).ok);
@@ -1427,7 +1448,7 @@ int main()
         // parser checks syntax only, and is then refused by the domain. Each
         // rule lives in exactly one place.
         std::istringstream in("type rigid3d\n"
-                              "rigid_body3d 1  1 0 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+                              "rigid_body3d 1  1 0 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_TRUE(r.ok);
         MALLOY_CHECK_FALSE(r.scenario.rigid_bodies3d[0].is_valid());
@@ -1435,12 +1456,11 @@ int main()
                                           r.scenario.rigid_bodies3d};
         MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidState);
     }
-    {
     // --- M21: the torque key, a world-frame setting for type rigid3d. ---
     {
         std::istringstream in("type rigid3d\n"
                               "torque 0.5 -1.5 2.5\n"
-                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_TRUE(r.ok);
         MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid3D);
@@ -1450,7 +1470,7 @@ int main()
         MALLOY_CHECK_TRUE(r.scenario.rigid3d_settings.is_valid());
 
         std::istringstream none("type rigid3d\n"
-                                "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+                                "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
         const ScenarioParseResult r2 = parse_scenario(none);
         MALLOY_CHECK_TRUE(r2.ok);
         MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.torque.x, 0.0, 0.0);
@@ -1482,7 +1502,7 @@ int main()
         // A torque whose square overflows is refused by the settings.
         std::istringstream in("type rigid3d\n"
                               "torque 1e200 0 0\n"
-                              "rigid_body3d 1  1 2 3  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_TRUE(r.ok);
         MALLOY_CHECK_FALSE(r.scenario.rigid3d_settings.is_valid());
@@ -1491,8 +1511,84 @@ int main()
                                           r.scenario.rigid3d_settings};
         MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidSettings);
     }
-    // An unknown type is still an error, and the message names rigid3d
-        // among the ones it could have meant.
+    // --- M22: the contact keys for type rigid3d: gravity3, plane3, and
+    //     restitution. Distinct nonzero values, so a dropped axis shows. ---
+    {
+        std::istringstream in(
+            "type rigid3d\n"
+            "gravity3 0.5 -1.5 -9.81\n"
+            "restitution 0.8\n"
+            "plane3 0 0 2 -3\n"                       // non-unit normal, normalized on load
+            "plane3 1 0 0 0\n"
+            "rigid_body3d 1  1 2 3  0.5  0 0 5  0 0 1 0  0 0 0  0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid3D);
+
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.gravity.x, 0.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.gravity.y, -1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.gravity.z, -9.81, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.restitution, 0.8, eps);
+
+        MALLOY_CHECK_EQ(r.scenario.rigid3d_settings.ground.size(), std::size_t{2});
+        // The first plane's (0,0,2) normal was normalized to (0,0,1), and the
+        // offset carried through unchanged.
+        const auto& p0 = r.scenario.rigid3d_settings.ground[0];
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(p0.normal,
+                                                     malloy::math::Vec3{0.0, 0.0, 1.0}, eps));
+        MALLOY_CHECK_NEAR(p0.offset, -3.0, eps);
+        MALLOY_CHECK_TRUE(p0.is_valid()); // unit normal after normalization
+        MALLOY_CHECK_TRUE(r.scenario.rigid3d_settings.is_valid());
+
+        // The whole thing validates and steps as a world.
+        malloy::rigid::Rigid3DWorld world{r.scenario.simulation,
+                                          r.scenario.rigid_bodies3d,
+                                          r.scenario.rigid3d_settings};
+        MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+    }
+    {
+        // gravity3 needs three components, plane3 needs four, and a trailing
+        // token is refused.
+        for (const char* line : {"gravity3 0 0\n", "gravity3 0 0 0 0\n",
+                                 "plane3 0 0 1\n", "plane3 0 0 1 0 0\n",
+                                 "plane3 0 0 z 0\n"})
+        {
+            std::istringstream in(std::string("type rigid3d\n") + line);
+            MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+        }
+    }
+    {
+        // A plane3 whose normal cannot be normalized is refused at the boundary,
+        // so collide::Plane3 keeps its strict unit-normal invariant.
+        std::istringstream in("type rigid3d\nplane3 0 0 0 5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // gravity3 and plane3 belong to rigid3d and to no other domain, and the
+        // 2D gravity and ground keys do not belong to rigid3d.
+        for (const char* line : {"gravity3 0 0 -9.81\n", "plane3 0 0 1 0\n"})
+        {
+            for (const char* head : {"type rigid\n", "type nbody3d\n",
+                                     "type particles\n"})
+            {
+                std::istringstream in(std::string(head) + line);
+                MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+            }
+        }
+    }
+    {
+        // restitution is now accepted for rigid3d and writes only that domain's
+        // field, not the 2D rigid or particle one.
+        std::istringstream in("type rigid3d\nrestitution 0.3\n"
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.restitution, 0.3, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.restitution, 1.0, eps); // untouched default
+    }
+    {
+        // An unknown type is still an error, and the message names rigid3d
+        // among the ones it could have meant (M22 keys included via rigid3d).
         std::istringstream in("type rigid4d\n");
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_FALSE(r.ok);

@@ -341,17 +341,19 @@ int run_rigid3d(const char* title, const SimulationSettings& sim,
 
     Viewport view = fit_viewport(projected(world.bodies()));
 
-    const auto report = [&world, &view](std::int64_t step_index) {
+    const malloy::math::Vec3 gravity = world.settings().gravity;
+    const auto report = [&world, &view, gravity](std::int64_t step_index) {
         const auto& now = world.bodies();
         std::cout << "step " << std::setw(6) << step_index;
         std::cout << std::scientific;
-        // |L| and E are conserved by the continuum equations and creep upward
-        // in the discrete ones, by exactly dt^2 |L x omega|^2 per step in
-        // |L|^2. Movement in these columns is therefore that term, not
-        // rounding, and it is zero for a body spinning about a principal axis.
+        // E is kinetic plus gravitational potential, the quantity conserved in
+        // free flight (semi-implicit Euler sheds (1/2)(sum m)|g|^2 dt^2 per
+        // step, and a bounce with e<1 removes energy too). |L| is the total
+        // angular momentum, not conserved once gravity or a contact acts.
         std::cout << "   E " << std::setw(16)
-                  << malloy::rigid::total_kinetic_energy3d(now) << "   |L| "
-                  << std::setw(16)
+                  << (malloy::rigid::total_kinetic_energy3d(now) +
+                      malloy::rigid::total_potential_energy3d(now, gravity))
+                  << "   |L| " << std::setw(16)
                   << malloy::math::length(malloy::rigid::total_angular_momentum3d(now))
                   << "   |p| " << std::setw(16)
                   << malloy::math::length(malloy::rigid::total_linear_momentum3d(now))

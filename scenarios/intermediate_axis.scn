@@ -41,7 +41,7 @@ dt 0.001
 steps 20000
 output_every 2500
 
-# rigid_body3d <mass> <Ix> <Iy> <Iz> <px> <py> <pz>
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <radius> <px> <py> <pz>
 #              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
 #
 # The axis and angle set the starting orientation, and a zero axis means
@@ -49,13 +49,13 @@ output_every 2500
 # the BODY frame, which is the frame Euler's equations above are written in.
 
 # Spun about y, the INTERMEDIATE moment, with a nudge along x. This one flips.
-rigid_body3d 1.0   1.0 2.0 3.0   -2.0 0.0 0.0   0.0 0.0 0.0 0.0    0.02 0.0 0.0   0.001 2.0 0.0
+rigid_body3d 1.0   1.0 2.0 3.0   0.0   -2.0 0.0 0.0   0.0 0.0 0.0 0.0    0.02 0.0 0.0   0.001 2.0 0.0
 
 # Spun about z, the LARGEST moment, with the identical nudge along x. This one
 # does not flip, and never will. Change its last three fields to
 # `0.001 2.0 0.0` and it becomes the first body; change the first body's to
 # `0.001 0.0 2.0` and the flipping stops.
-rigid_body3d 1.5   1.0 2.0 3.0    2.0 0.0 0.0   0.0 0.0 0.0 0.0   -0.02 0.0 0.0   0.001 0.0 2.0
+rigid_body3d 1.5   1.0 2.0 3.0   0.0    2.0 0.0 0.0   0.0 0.0 0.0 0.0   -0.02 0.0 0.0   0.001 0.0 2.0
 
 # Expected, from a real run of the shipped binary:
 #

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, recorded at M16, amended at M19 and M20.
+Accepted, recorded at M16, amended at M19, M20 and M22.
 
 As of M20 the first two pieces of 3D have shipped: `math::Vec3` and
 `nbody::NBody3DWorld`, then `math::Quat` and `rigid::Rigid3DWorld`. Everything
@@ -150,6 +150,31 @@ grew by one branch.
 integrator once a third domain needs the same translational path, which ADR
 0008 rule 17 asks to be reassessed then. `Rigid3DWorld` duplicates the
 `position += velocity * dt` line and nothing more, which is not yet evidence.
+
+## Amendment at M22: the collision prediction, confirmed
+
+The section above put contacts in the SPECIALIZES tier, not the genuinely-new
+one: "`Circle` becomes a sphere and the `Halfplane` of M16 generalizes cleanly,
+but `second_moment_of_area` becomes a volume integral and the area properties
+are replaced rather than extended." M22 built the first 3D contact and every
+clause held.
+
+`collide::Sphere` and `collide::Plane3` are direct specializations of `Circle`
+and `Halfplane`, in new headers inside the same library; the 2D primitives are
+untouched. The contact query and its `Contact3` carry the same normal / never-
+negative-depth / midpoint convention with no conceptual change, and the plane,
+like the halfplane, has no degenerate case. No area or volume property was
+needed at all: a centred sphere's normal impulse never reads the inertia, so
+the milestone did not have to build the volume integral the prediction warned
+about.
+
+The one thing worth recording that the ADR did not foresee: a centred sphere's
+normal contact imparts no spin, because the contact point is on the line
+through the centre of mass, so `r x n = 0`. That is why M22 is the 3D echo of
+M10 (translational contacts) rather than M14 (rotational contacts), and why the
+rotational effective-mass term this ADR sanctioned (`n . (I^-1 (r x n)) x r`,
+line 66) is not yet exercised: it is identically zero here and first bites with
+friction, whose tangential impulse has `r x t != 0`.
 
 ## Deliberately not decided here (resolved above at M19)
 

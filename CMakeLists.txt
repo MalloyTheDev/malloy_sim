@@ -125,6 +125,7 @@ target_link_libraries(malloy_ascii
 # malloy_collide (M9): 2D collision primitives and contacts (compiled STATIC).
 add_library(malloy_collide STATIC
     src/collide/collide.cpp
+    src/collide/collide3d.cpp
 )
 add_library(malloy::collide ALIAS malloy_collide)
 target_include_directories(malloy_collide PUBLIC include)

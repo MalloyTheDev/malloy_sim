@@ -29,13 +29,14 @@ dt 0.001
 steps 12000
 output_every 3000
 
-# rigid_body3d <mass> <Ix> <Iy> <Iz> <px> <py> <pz>
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <radius> <px> <py> <pz>
 #              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
 #
 # A symmetric top: Ix = Iy, so it is round about its z spin axis. Iz = 2.5. It
 # sits at the origin, not moving, so its angular momentum is pure spin and the
-# view stays put while the axis tilts. wz = 6 is a fast spin.
-rigid_body3d 1.0   1.0 1.0 2.5   0.0 0.0 0.0   0.0 0.0 0.0 0.0   0.0 0.0 0.0   0.0 0.0 6.0
+# view stays put while the axis tilts. wz = 6 is a fast spin. The radius is 0:
+# this scenario has no ground, so the body does not collide with anything.
+rigid_body3d 1.0   1.0 1.0 2.5   0.0   0.0 0.0 0.0   0.0 0.0 0.0 0.0   0.0 0.0 0.0   0.0 0.0 6.0
 
 # torque <tx> <ty> <tz>, a constant world-frame torque on the body.
 torque 0.4 0.0 0.0

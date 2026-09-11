@@ -8,6 +8,7 @@
 #include <string>
 
 #include <malloy/collide/shapes.hpp>
+#include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/vec2.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/springs/springs.hpp>
@@ -200,10 +201,12 @@ ScenarioParseResult parse_scenario(std::istream& input)
         else if (key == "restitution")
         {
             if (scenario.type != ScenarioType::Particles &&
-                scenario.type != ScenarioType::Rigid)
+                scenario.type != ScenarioType::Rigid &&
+                scenario.type != ScenarioType::Rigid3D)
             {
-                return make_error(line_number,
-                                  "restitution belongs to type particles or rigid");
+                return make_error(
+                    line_number,
+                    "restitution belongs to type particles, rigid or rigid3d");
             }
             saw_domain_key = true;
             math::Real value{};
@@ -214,7 +217,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
             // Write only the field the declared domain actually reads. Setting
             // both would leave a rigid scenario carrying a particle setting it
             // never uses, which reads as a mistake to anyone inspecting it.
-            if (scenario.type == ScenarioType::Particles)
+            if (scenario.type == ScenarioType::Rigid3D)
+            {
+                scenario.rigid3d_settings.restitution = value;
+            }
+            else if (scenario.type == ScenarioType::Particles)
             {
                 scenario.particle_settings.restitution = value;
             }
@@ -282,6 +289,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
             math::Real ix{};
             math::Real iy{};
             math::Real iz{};
+            math::Real radius{};
             math::Real px{};
             math::Real py{};
             math::Real pz{};
@@ -295,14 +303,17 @@ ScenarioParseResult parse_scenario(std::istream& input)
             math::Real wx{};
             math::Real wy{};
             math::Real wz{};
-            if (!(tokens >> body.mass >> ix >> iy >> iz >> px >> py >> pz >> ax >>
-                  ay >> az >> angle >> vx >> vy >> vz >> wx >> wy >> wz))
+            if (!(tokens >> body.mass >> ix >> iy >> iz >> radius >> px >> py >>
+                  pz >> ax >> ay >> az >> angle >> vx >> vy >> vz >> wx >> wy >>
+                  wz))
             {
                 return make_error(line_number,
-                                  "rigid_body3d requires: mass Ix Iy Iz px py pz "
-                                  "axisx axisy axisz angle vx vy vz wx wy wz");
+                                  "rigid_body3d requires: mass Ix Iy Iz radius "
+                                  "px py pz axisx axisy axisz angle vx vy vz "
+                                  "wx wy wz");
             }
             body.inertia = math::Vec3{ix, iy, iz};
+            body.radius = radius;
             body.position = math::Vec3{px, py, pz};
             body.velocity = math::Vec3{vx, vy, vz};
             body.angular_velocity = math::Vec3{wx, wy, wz};
@@ -326,6 +337,52 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 return make_error(line_number, "torque requires: tx ty tz");
             }
             scenario.rigid3d_settings.torque = math::Vec3{tx, ty, tz};
+        }
+        else if (key == "gravity3")
+        {
+            if (scenario.type != ScenarioType::Rigid3D)
+            {
+                return make_error(line_number, "gravity3 belongs to type rigid3d");
+            }
+            saw_domain_key = true;
+            math::Real gx{};
+            math::Real gy{};
+            math::Real gz{};
+            if (!(tokens >> gx >> gy >> gz))
+            {
+                return make_error(line_number, "gravity3 requires: gx gy gz");
+            }
+            scenario.rigid3d_settings.gravity = math::Vec3{gx, gy, gz};
+        }
+        else if (key == "plane3")
+        {
+            if (scenario.type != ScenarioType::Rigid3D)
+            {
+                return make_error(line_number, "plane3 belongs to type rigid3d");
+            }
+            saw_domain_key = true;
+            math::Real nx{};
+            math::Real ny{};
+            math::Real nz{};
+            math::Real offset{};
+            if (!(tokens >> nx >> ny >> nz >> offset))
+            {
+                return make_error(line_number, "plane3 requires: nx ny nz offset");
+            }
+            // Normalized here, at the input boundary, so collide::Plane3 keeps a
+            // strict unit-normal invariant rather than normalizing on every
+            // query. A direction that cannot be normalized is refused rather
+            // than quietly turned into one.
+            const math::Vec3 direction{nx, ny, nz};
+            const math::Real magnitude = math::length(direction);
+            if (!(magnitude > math::Real{0}) || !math::is_finite(magnitude) ||
+                !math::is_finite(offset))
+            {
+                return make_error(line_number,
+                                  "plane3 normal must be non-zero and finite");
+            }
+            scenario.rigid3d_settings.ground.push_back(
+                collide::Plane3{direction / magnitude, offset});
         }
         else if (key == "coulomb")
         {

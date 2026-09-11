@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M21). These boundaries are in force
+> All modules below are implemented (M2-M22). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -70,9 +70,9 @@ Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to 
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 
-Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, oriented-box contacts, or scenario loading. In `RigidBody2D` the inertia is a scalar and the orientation is a scalar angle; those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+Not responsible for shape geometry (that is `malloy_collide`, which since M22 also has `Sphere` and `Plane3`), persistent forces, force or torque accumulators, oriented-box contacts, or scenario loading. In `RigidBody2D` the inertia is a scalar and the orientation is a scalar angle; those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
 
-Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: rotation in three dimensions, with a quaternion orientation and three principal moments of inertia. It lives here rather than in a library of its own because rigid-body dynamics is one domain and the dimension is not a domain, the same reasoning M19 used for 3D gravity. M20 was torque-free; M21 added a constant world-frame torque as a setting (the M15 pattern, applied as Euler forcing rather than through a force/torque accumulator), which is what makes a gyroscope precess. It still carries no contacts and no translational force, and the inertia is a diagonal rather than a general 3x3 tensor; each of those is its own later milestone.
+Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: rotation in three dimensions, with a quaternion orientation and three principal moments of inertia. It lives here rather than in a library of its own because rigid-body dynamics is one domain and the dimension is not a domain, the same reasoning M19 used for 3D gravity. M20 was torque-free; M21 added a constant world-frame torque as a setting (the M15 pattern, applied as Euler forcing rather than through a force/torque accumulator), which is what makes a gyroscope precess; M22 added gravity (an acceleration) and restitution contacts against immovable ground planes, resolved with a normal impulse. A centred sphere's normal contact has no lever arm, so it imparts no spin: M22's contacts are translational, and sphere-sphere and friction are later milestones. The inertia is still a diagonal rather than a general 3x3 tensor. `malloy_rigid` gained a link on `malloy_collide` for the sphere and plane primitives, the same as the 2D path.
 
 ## `malloy_springs`
 

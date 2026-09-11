@@ -42,10 +42,11 @@ rejected, but not adopted until real access-pattern pressure exists (rule 3).
 **MalloySim is intended to become a 3D simulator, and as of M19 it has
 started.** `math::Vec3`, `math::Quat`, `nbody::NBody3DWorld` and
 `rigid::Rigid3DWorld` exist and ship with templates, so gravity runs in three
-dimensions and rigid bodies rotate there, tumbling freely (M20) and turning
-under an applied torque (M21). Everything else is still 2D, and that is still
-the bulk of the project: three of the five domains, all of the contact
-geometry, translational forces on a 3D body, and 3D contacts.
+dimensions and rigid bodies rotate there, tumbling freely (M20), turning under
+an applied torque (M21), and bouncing off ground planes under gravity (M22).
+Everything else is still 2D, and that is still the bulk of the project: three
+of the five domains, most of the contact geometry, a translational force on a
+3D body, and sphere-sphere and friction contacts.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -56,14 +57,14 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M21 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M22 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
 response, uniform gravity for rigid bodies, halfplane ground, Coulomb
 friction, charged particles in electric and magnetic fields, the first
-three-dimensional domain, quaternions with torque-free 3D rotation, and a
-constant applied torque on a 3D body.
+three-dimensional domain, quaternions with torque-free 3D rotation, a constant
+applied torque on a 3D body, and a sphere bouncing on a 3D ground plane.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -74,10 +75,11 @@ domain), M13 (spring networks and deterministic force accumulation), M14
 M16 (halfplanes, giving true flat ground), M17 (Coulomb friction) and M18
 (charged particles, the first domain with a velocity-dependent force), M19
 (Vec3 and 3D gravity, the first step off the plane), M20 (quaternions and
-torque-free rotation in three dimensions) and M21 (a constant applied torque on
-a 3D body) are all done. See `docs/07_POST_M5_ROADMAP.md`.
+torque-free rotation in three dimensions), M21 (a constant applied torque on a
+3D body) and M22 (a sphere bouncing on a 3D ground plane) are all done. See
+`docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M22 or later) unless explicitly asked, and
+Do not start any further milestone (M23 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -96,9 +98,9 @@ M5: terminal N-body demo               [done]
 1. Do not jump ahead; work one milestone at a time.
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
-4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. Body against body is still disc against disc; oriented boxes and SAT are not implemented. Friction is in `malloy_rigid` only: particle contacts remain normal-only.
+4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response. Body against body is still disc against disc in 2D and does not exist yet in 3D (sphere against sphere is a later milestone); oriented boxes and SAT are not implemented. Friction is in `malloy_rigid`'s 2D path only: particle contacts and all 3D contacts remain normal-only.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force. Gravity is a setting applied as an acceleration, not a force: do not add persistent forces or force/torque accumulators to `malloy_rigid` until their dedicated milestone.
-6. 3D began in M19 with `math::Vec3` and `nbody::NBody3DWorld`, M20 added `math::Quat` and `rigid::Rigid3DWorld`, and M21 added a constant applied TORQUE to that world. A general inertia TENSOR, a translational FORCE on a 3D body, 3D contact geometry, and 3D versions of the remaining domains are NOT started and each needs its own milestone. The M21 torque is a world-frame setting applied as Euler forcing, the M15 pattern, NOT a force/torque accumulator (rule 5). `RigidBody3D` stores three principal moments rather than a 3x3 matrix, deliberately. Do not add any of it speculatively; the 2D types stay supported.
+6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), and M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes). Sphere-against-sphere contacts, FRICTION (the first contact that imparts spin), a general inertia TENSOR, a translational FORCE on a 3D body, and 3D versions of the remaining domains are NOT started and each needs its own milestone. M22's contacts are impulses and its gravity is an acceleration (the M10/M15 pattern), NOT force/torque accumulators (rule 5); a centred sphere's normal contact has no lever arm, so it stays translational. `RigidBody3D` stores three principal moments rather than a 3x3 matrix, deliberately. Do not add any of it speculatively; the 2D types stay supported.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
 9. Do not add Catch2/GoogleTest unless explicitly asked.

@@ -4,6 +4,7 @@
 #include <optional>
 #include <vector>
 
+#include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/vec3.hpp>
 #include <malloy/rigid/rigid_body3d.hpp>
 #include <malloy/sim_core/sim_core.hpp>
@@ -11,51 +12,72 @@
 
 namespace malloy::rigid
 {
-// Settings for the 3D rigid world: a single constant torque, applied to every
-// body each step.
+// Settings for the 3D rigid world: a constant torque (M21), and gravity,
+// restitution and ground planes for contacts (M22).
 //
 // The torque is in the WORLD frame, not the body frame. That is a deliberate
-// choice and it is what makes the milestone's headline invariant clean: the
-// physical law dL/dt = torque holds in the world frame, so with a constant
-// world torque each body's world-frame angular momentum grows along a straight
-// line,
+// choice and it is what makes M21's headline invariant clean: the physical law
+// dL/dt = torque holds in the world frame, so with a constant world torque each
+// body's world-frame angular momentum grows along a straight line,
 //
 //   L(t) = L(0) + torque * t,
 //
 // exactly in the continuum. An external couple fixed in the lab (the kind a
 // field produces) is world-frame; a thruster bolted to the body would be
 // constant in the BODY frame instead, a different thing that is not reachable
-// from this one without knowing the body, and is deferred (M21 keeps to the
-// smallest step, as M20 did).
+// from this one without knowing the body, and is deferred.
 //
-// The default is zero torque, which makes a `Rigid3DWorld` built without
-// settings identical to the torque-free M20 world, bit for bit.
+// Every field defaults to the pre-M22 behaviour: zero torque, zero gravity, no
+// ground, so a `Rigid3DWorld` built without settings is the torque-free M20
+// world bit for bit, and one given only a torque is the M21 world.
 struct Rigid3DSettings
 {
     math::Vec3 torque{};
 
-    // Valid when the torque is SQUARABLE, not merely finite: it enters |u|^2 in
-    // the drift law below, so a torque whose square overflows is refused up
-    // front, the same bound positions and velocities carry (docs/04, and M18's
-    // softening).
-    bool is_valid() const { return math::is_squarable(torque); }
+    // Bounciness of every contact. 1 is perfectly elastic and conserves kinetic
+    // energy across a bounce; 0 is perfectly inelastic, so the body stops
+    // separating along the contact normal. The 3D sibling of RigidSettings.
+    math::Real restitution{1.0};
+
+    // Uniform gravitational ACCELERATION, applied to every body before the
+    // position update. An acceleration, not a force (CLAUDE.md rule 5): it does
+    // not scale with mass and needs no force accumulator. Defaults to zero.
+    //
+    // Gravity acts through the centre of mass, so on its own it generates no
+    // torque; a body spins under it only through a contact away from the centre
+    // of mass, which for a centred sphere means not at all until friction.
+    math::Vec3 gravity{};
+
+    // Immovable ground planes: floors, walls, ramps. Each resolves as a body of
+    // infinite mass would, but a plane is NOT stored as a body here: it is pure
+    // geometry, and the sphere is the only thing that moves, so `RigidBody3D`
+    // never has to represent an infinite mass. A plane's normal is its own and
+    // never turns, unlike a floor built from spheres. Empty by default.
+    std::vector<collide::Plane3> ground;
+
+    // Valid when the torque is SQUARABLE (it enters |u|^2 in the drift law),
+    // restitution is in [0, 1] and finite, gravity is SQUARABLE (its square
+    // enters the free-flight energy drift), and every ground plane is valid.
+    bool is_valid() const;
 };
 
-// Rotation of rigid bodies in three dimensions under a constant applied torque.
+// Rigid bodies in three dimensions: free rotation (M20), a constant applied
+// torque (M21), and now gravity and restitution contacts against ground planes
+// (M22).
 //
-// M20 was the torque-free case, the smallest honest slice of 3D rigid-body
-// dynamics. M21 adds the one thing that was missing to make something act on
-// the rotation: a torque. It is still the smallest step that reaches new
-// physics, chosen the way M19 and M20 were: no contacts, no collision geometry,
-// no force on the translation and no solver, so none of those had to be built
-// speculatively.
+// M22 gives a body a collision radius, drops it under a gravity acceleration,
+// and bounces it off immovable planes. It is deliberately the 3D echo of M10's
+// colliding particles, not M14's rigid contacts: a contact on a CENTRED sphere
+// passes through the centre of mass, so it imparts no spin, and the response is
+// a pure normal impulse. Spin from a contact needs a tangential component, and
+// that is friction, its own later milestone. So the rotation of M20/M21 and the
+// bouncing of M22 coexist without yet coupling: a sphere can spin under a torque
+// while it bounces, and neither touches the other.
 //
-// What torque-free rotation could not show, this can. In M20 nothing pushed on
-// a body, so a body spinning about a principal axis stayed there forever. Here
-// a torque perpendicular to the spin makes the spin axis move: the gyroscopic
-// response, which is the reason a spinning top does not simply fall over. In
-// two dimensions there is no such thing, because there is only one rotation
-// axis and a torque can only speed the spin up or slow it down.
+// What is genuinely new is the 3D contact itself: the first collision query and
+// the first restitution response the project has in three dimensions. It needs
+// no inertia tensor (a normal impulse on a centred sphere never touches the
+// inertia) and no force (gravity is an acceleration, contacts are impulses).
 class Rigid3DWorld
 {
 public:
@@ -66,6 +88,11 @@ public:
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step:
+    //
+    //   0. add the gravity acceleration to every body's velocity, before the
+    //      position update, which keeps this semi-implicit Euler. An
+    //      acceleration, so it does not scale with mass and no body is exempt
+    //      (every RigidBody3D is movable; the ground is geometry, not a body).
     //
     //   1. integrate the angular velocity with Euler's equations, in the body
     //      frame, where the inertia is diagonal, using FORWARD Euler (the rate
@@ -117,9 +144,17 @@ public:
     //      displacement instead of rotating. Renormalizing also stops the
     //      factor above from compounding over a long run.
     //
-    //   4. move the centre of mass by velocity * dt. Nothing acts on the
-    //      translation here, so it is constant, and a body flies straight while
-    //      it tumbles: the torque acts only on the rotation.
+    //   4. move the centre of mass by velocity * dt, with the gravity-updated
+    //      velocity. Without gravity and without a contact this is still a body
+    //      flying straight while it tumbles.
+    //
+    //   5. resolve contacts: each body against every ground plane, in a fixed
+    //      body-then-plane order so a run repeats (docs/04). A sphere overlapping
+    //      a plane is pushed out along the plane normal and given a normal
+    //      impulse that reverses its closing speed to -restitution times itself.
+    //      The plane is immovable, so only the sphere changes. A body with zero
+    //      radius does not collide. This is the ONLY place the collision radius
+    //      and the ground planes are read.
     //
     // On validation failure, before or after the update, the state is left
     // unchanged and the failing status is returned; this never throws.
@@ -155,13 +190,15 @@ math::Vec3 total_linear_momentum3d(const std::vector<RigidBody3D>& bodies);
 // its ORBITAL term m (r x v), exactly as the 2D `total_angular_momentum` does.
 // Dropping either makes a whole class of motion look conserved when it is not.
 //
-// The orbital term is exactly constant here, since no force acts: for a free
-// body d(r x p)/dt = v x mv = 0. That is specific to CONSTANT velocity, and to
-// the bit level as well: with v unchanging, r_{n+1} x v = (r_n + dt v) x v =
-// r_n x v every step. It stops holding the moment a force changes v within a
-// step, so a later milestone that adds forces cannot keep this line and assume
-// the orbital term still conserves itself. A torque does not change it: M21
-// acts only on the rotation.
+// The orbital term m (r x v) is exactly constant ONLY when nothing changes a
+// body's velocity: for a free or torque-only body d(r x p)/dt = v x mv = 0, bit
+// for bit, because with v unchanging r_{n+1} x v = (r_n + dt v) x v = r_n x v.
+// M22 is the milestone the M21 comment warned about: gravity changes v every
+// step, so gravity applies a torque about the world origin, m r x g, and a
+// CONTACT changes v as well. With gravity set or a bounce in progress this
+// total is therefore NOT conserved, and is not meant to be. It is conserved
+// again exactly when gravity is zero and no contact fires, which is the M20/M21
+// regime.
 //
 // --- What the torque does to the SPIN, exactly ---
 //
@@ -191,11 +228,21 @@ math::Vec3 total_linear_momentum3d(const std::vector<RigidBody3D>& bodies);
 // law, not its magnitude.
 math::Vec3 total_angular_momentum3d(const std::vector<RigidBody3D>& bodies);
 
-// Translational plus rotational.
+// Translational plus rotational KINETIC energy.
 //
-// The translational part is exactly constant, since no force acts. The
-// rotational part follows the energy law above: a torque does work at rate
-// omega . T_body, plus the same second-order forward-Euler term M20 had. With
-// no torque it can only rise; with a torque it does whatever the work does.
+// The rotational part follows the energy law above: a torque does work at rate
+// omega . T_body, plus the same second-order forward-Euler term M20 had. The
+// translational part is constant without gravity or a contact; under gravity it
+// trades with the potential below, and a contact removes (1 - e^2) of the normal
+// part on each bounce.
 math::Real total_kinetic_energy3d(const std::vector<RigidBody3D>& bodies);
+
+// Gravitational potential energy in a uniform field: the sum of -m (g . r), r
+// the centre of mass. Zero when gravity is zero. The 3D sibling of the 2D
+// rigid `total_potential_energy`. Kinetic plus this is the quantity that would
+// be conserved in free flight if the integrator were exact; semi-implicit Euler
+// instead sheds the derived constant (1/2)(sum m)|g|^2 dt^2 per free-flight
+// step, the same drift M12 and M15 measured in two dimensions.
+math::Real total_potential_energy3d(const std::vector<RigidBody3D>& bodies,
+                                    const math::Vec3& gravity);
 } // namespace malloy::rigid

@@ -1,5 +1,6 @@
 #include <malloy/rigid/rigid.hpp>
 
+#include <malloy/collide/collide.hpp>
 #include <malloy/math/math.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <test_check.hpp>
@@ -3010,6 +3011,308 @@ int main()
             MALLOY_CHECK_TRUE(across > 1.0);        // a full radian of momentum
             MALLOY_CHECK_TRUE(along < 0.05);        // essentially unmoved
             MALLOY_CHECK_TRUE(across > 50.0 * along); // and the two are not close
+        }
+    }
+
+    // --- M22: gravity and restitution contacts against a ground plane.
+    //
+    //     The 3D echo of M10's colliding particles, not M14's rigid contacts: a
+    //     contact on a CENTRED sphere passes through the centre of mass, so it
+    //     imparts no spin, and the response is a pure normal impulse. The sharp
+    //     invariants are therefore translational, and the milestone's own claim,
+    //     that the contact is rotationally inert, is itself a test below. ---
+    {
+        using malloy::collide::Plane3;
+        using malloy::collide::Sphere;
+        using malloy::math::Vec3;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::total_kinetic_energy3d;
+        using malloy::rigid::total_potential_energy3d;
+
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+
+        // --- Validation: the radius, and the new settings. ---
+        {
+            RigidBody3D body;
+            MALLOY_CHECK_TRUE(body.is_valid()); // default radius 0 is fine
+            for (const Real bad : {-1.0, inf3, nan3})
+            {
+                RigidBody3D b;
+                b.radius = bad;
+                MALLOY_CHECK_FALSE(b.is_valid());
+            }
+            RigidBody3D collides;
+            collides.radius = 0.5;
+            MALLOY_CHECK_TRUE(collides.is_valid());
+
+            MALLOY_CHECK_TRUE(Rigid3DSettings{}.is_valid());
+            Rigid3DSettings good;
+            good.restitution = 0.5;
+            good.gravity = Vec3{0.0, 0.0, -9.81};
+            good.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            MALLOY_CHECK_TRUE(good.is_valid());
+
+            for (const Real bad : {-0.1, 1.5, nan3, inf3})
+            {
+                Rigid3DSettings s;
+                s.restitution = bad;
+                MALLOY_CHECK_FALSE(s.is_valid());
+            }
+            Rigid3DSettings bad_gravity;
+            bad_gravity.gravity = Vec3{0.0, 0.0, 1.0e200}; // square overflows
+            MALLOY_CHECK_FALSE(bad_gravity.is_valid());
+            Rigid3DSettings bad_plane;
+            bad_plane.ground = {Plane3{Vec3{0.0, 0.0, 2.0}, 0.0}}; // not unit
+            MALLOY_CHECK_FALSE(bad_plane.is_valid());
+
+            RigidBody3D b;
+            b.radius = 0.5;
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, bad_gravity};
+            MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidSettings);
+            MALLOY_CHECK_TRUE(world.step().status == StepStatus::InvalidSettings);
+        }
+
+        // --- Velocity restitution, EXACT, on a tilted plane with no gravity so
+        //     the impulse is the only thing that changes velocity.
+        //
+        //     The normal component reverses to -e times itself; the tangential
+        //     component is untouched (no friction); and the spin is untouched
+        //     (a normal contact on a centred sphere has no moment arm). Tilted
+        //     so the normal has all three components, and the body carries a
+        //     tangential velocity and a spin so their invariance is a real
+        //     check and not a zero. ---
+        for (const Real e : {1.0, 0.5, 0.0})
+        {
+            const Vec3 n = malloy::math::normalize(Vec3{1.0, 2.0, 2.0});
+            Rigid3DSettings st;
+            st.restitution = e;
+            st.ground = {Plane3{n, 0.0}};
+            RigidBody3D b;
+            b.mass = 2.0;
+            b.radius = 1.0;
+            b.inertia = Vec3{2.0, 2.0, 2.0}; // a sphere: isotropic, so no tumble
+            b.position = n * 0.98; // penetrating by 0.02
+            const Vec3 tangential{0.7, 0.0, -0.35}; // perpendicular to n
+            b.velocity = n * (-3.0) + tangential;
+            b.angular_velocity = Vec3{0.9, -1.1, 0.4};
+
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            const Real vn_before = malloy::math::dot(b.velocity, n);
+            MALLOY_CHECK_TRUE(world.step().ok());
+            const RigidBody3D& out = world.bodies()[0];
+
+            // Normal component reversed and scaled by e, to rounding.
+            const Real vn_after = malloy::math::dot(out.velocity, n);
+            MALLOY_CHECK_NEAR(vn_after, -e * vn_before, 1e-14);
+
+            // Tangential component untouched: no friction.
+            const Vec3 tangential_after =
+                out.velocity - n * malloy::math::dot(out.velocity, n);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(tangential_after, tangential, 1e-14));
+
+            // Spin untouched by the contact. The inertia is isotropic (a real
+            // sphere), so with no torque there is no tumble either, and the
+            // angular velocity is bit-identical to its start. The tumbling case
+            // is covered by the rotationally-inert test below.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                out.angular_velocity, b.angular_velocity, 0.0));
+        }
+
+        // --- Energy across a single straight-down bounce: KE_after = e^2 KE.
+        //
+        //     A sphere moving straight into a floor, no gravity, so the only
+        //     velocity is normal and all the kinetic energy is in it. The bounce
+        //     scales the speed by e, so the energy scales by e^2, exactly. ---
+        for (const Real e : {1.0, 0.6})
+        {
+            Rigid3DSettings st;
+            st.restitution = e;
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            RigidBody3D b;
+            b.mass = 1.5;
+            b.radius = 0.5;
+            b.position = Vec3{0.0, 0.0, 0.49}; // penetrating
+            b.velocity = Vec3{0.0, 0.0, -4.0};
+
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            const Real ke_before = total_kinetic_energy3d(world.bodies());
+            MALLOY_CHECK_TRUE(world.step().ok());
+            const Real ke_after = total_kinetic_energy3d(world.bodies());
+            MALLOY_CHECK_NEAR(ke_after, e * e * ke_before, 1e-13);
+        }
+
+        // --- Free-flight energy shed = (1/2)(sum m)|g|^2 dt^2 per step, the
+        //     same derived constant as M12 and M15, now in 3D. No ground, so it
+        //     is pure free flight. An equality, asserted every step. ---
+        {
+            const Vec3 g{0.4, -0.5, -9.81}; // gravity NOT axis-aligned
+            const Real dt = 0.001;
+            Rigid3DSettings st;
+            st.gravity = g;
+            RigidBody3D b;
+            b.mass = 1.5;
+            b.position = Vec3{2.0, -1.0, 100.0};
+            b.velocity = Vec3{0.3, 0.7, 0.0};
+
+            Rigid3DWorld world{SimulationSettings{dt}, {b}, st};
+            const Real predicted =
+                0.5 * b.mass * malloy::math::length_squared(g) * dt * dt;
+            Real worst = 0.0;
+            for (int i = 0; i < 500; ++i)
+            {
+                const Real before = total_kinetic_energy3d(world.bodies()) +
+                                    total_potential_energy3d(world.bodies(), g);
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const Real after = total_kinetic_energy3d(world.bodies()) +
+                                   total_potential_energy3d(world.bodies(), g);
+                worst = std::fmax(worst, std::abs((before - after) - predicted));
+            }
+            MALLOY_CHECK_TRUE(worst < 1e-11);
+            // The shed is real and one-signed: energy falls, it does not wander.
+            MALLOY_CHECK_TRUE(predicted > 0.0);
+        }
+
+        // --- The contact is rotationally INERT, which is M22's scope claim
+        //     stated as a test. A spinning sphere under a torque, dropped onto a
+        //     floor, has exactly the same orientation and angular velocity as
+        //     the same body with no floor at all: the bounce changes where it is
+        //     and how fast it moves, never how it spins. Bit for bit. ---
+        {
+            Rigid3DSettings grounded;
+            grounded.restitution = 0.8;
+            grounded.gravity = Vec3{0.0, 0.0, -9.81};
+            grounded.torque = Vec3{0.3, -0.2, 0.1};
+            grounded.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+
+            Rigid3DSettings floating = grounded;
+            floating.ground = {}; // identical but for the floor
+
+            RigidBody3D b;
+            b.radius = 0.5;
+            b.inertia = Vec3{1.0, 2.0, 3.0};
+            b.position = Vec3{0.0, 0.0, 1.2};
+            b.velocity = Vec3{0.1, 0.0, -2.0};
+            b.angular_velocity = Vec3{1.0, 0.5, -0.3};
+
+            Rigid3DWorld with_floor{SimulationSettings{0.001}, {b}, grounded};
+            Rigid3DWorld without{SimulationSettings{0.001}, {b}, floating};
+            int bounces = 0;
+            for (int i = 0; i < 6000; ++i)
+            {
+                const Real vz0 = with_floor.bodies()[0].velocity.z;
+                MALLOY_CHECK_TRUE(with_floor.step().ok());
+                MALLOY_CHECK_TRUE(without.step().ok());
+                if (vz0 < 0.0 && with_floor.bodies()[0].velocity.z > 0.0) ++bounces;
+
+                // The rotational state is identical, floor or no floor.
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    with_floor.bodies()[0].angular_velocity,
+                    without.bodies()[0].angular_velocity, 0.0));
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    with_floor.bodies()[0].orientation,
+                    without.bodies()[0].orientation, 0.0));
+            }
+            // The floor really did act: the grounded body bounced at least once,
+            // and it stayed above the floor while the floating one fell far
+            // below it.
+            MALLOY_CHECK_TRUE(bounces >= 1);
+            MALLOY_CHECK_TRUE(with_floor.bodies()[0].position.z > -0.6);
+            MALLOY_CHECK_TRUE(without.bodies()[0].position.z < -5.0);
+        }
+
+        // --- A sphere at rest on the floor stays there: it neither sinks
+        //     through nor is flung off. The steady penetration is a scheme
+        //     characterization, g dt^2 / (1 + e) in magnitude, so it is pinned
+        //     as a bound rather than a golden number. ---
+        {
+            const Real g = 9.81, dt = 0.001, R = 0.3, e = 0.5;
+            Rigid3DSettings st;
+            st.restitution = e;
+            st.gravity = Vec3{0.0, 0.0, -g};
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            RigidBody3D b;
+            b.radius = R;
+            b.position = Vec3{0.0, 0.0, R}; // resting exactly on the floor
+            Rigid3DWorld world{SimulationSettings{dt}, {b}, st};
+
+            Real lowest = 0.0, highest = 0.0; // bottom starts at 0
+            for (int i = 0; i < 20000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const Real bottom = world.bodies()[0].position.z - R;
+                lowest = std::fmin(lowest, bottom);
+                highest = std::fmax(highest, bottom);
+            }
+            // Never sinks more than a few times the characteristic penetration,
+            // and never climbs meaningfully: it rests.
+            // The end-of-step position is pinned to the surface: the
+            // positional correction removes the penetration each step, so the
+            // bottom stays within a hair of the floor and never tunnels far
+            // below it or is flung off. The band is generous (R is 0.3), so
+            // this is a stability characterization, not a golden number.
+            MALLOY_CHECK_TRUE(lowest > -1e-3);
+            MALLOY_CHECK_TRUE(highest < 1e-3);
+            // It did rest, not drift away: the final bottom is essentially zero.
+            MALLOY_CHECK_TRUE(std::abs(world.bodies()[0].position.z - R) < 1e-3);
+        }
+
+        // --- Two planes make a corner, resolved in a fixed order. A sphere
+        //     pushed into the corner of a floor and a wall ends up outside both,
+        //     which a single-plane pass would not guarantee. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.0; // land and stay
+            st.gravity = Vec3{0.0, 0.0, -9.81};
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0},   // floor z >= 0
+                         Plane3{Vec3{1.0, 0.0, 0.0}, 0.0}};  // wall  x >= 0
+            RigidBody3D b;
+            b.radius = 0.5;
+            b.position = Vec3{0.2, 0.0, 1.0};
+            b.velocity = Vec3{-1.0, 0.0, 0.0}; // drifting into the wall
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const RigidBody3D& out = world.bodies()[0];
+            // Outside both planes, to within the steady penetration.
+            MALLOY_CHECK_TRUE(out.position.z > 0.5 - 1e-3);
+            MALLOY_CHECK_TRUE(out.position.x > 0.5 - 1e-3);
+        }
+
+        // --- A zero-radius body does NOT collide: radius 0 means no shape, so
+        //     it falls straight through a plane as if the plane were not there.
+        //     Checked against the identical body with no ground, which must
+        //     move bit for bit the same. This pins the "radius 0 = no collision"
+        //     contract, which every pre-M22 body relies on. ---
+        {
+            Rigid3DSettings grounded;
+            grounded.gravity = Vec3{0.0, 0.0, -9.81};
+            grounded.restitution = 1.0;
+            grounded.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            Rigid3DSettings floating = grounded;
+            floating.ground = {};
+
+            RigidBody3D b;
+            b.radius = 0.0; // no collision shape
+            b.position = Vec3{0.0, 0.0, 1.0};
+            b.velocity = Vec3{0.0, 0.0, -1.0};
+
+            Rigid3DWorld with_floor{SimulationSettings{0.001}, {b}, grounded};
+            Rigid3DWorld without{SimulationSettings{0.001}, {b}, floating};
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(with_floor.step().ok());
+                MALLOY_CHECK_TRUE(without.step().ok());
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    with_floor.bodies()[0].position,
+                    without.bodies()[0].position, 0.0));
+            }
+            // It really did fall through: far below the floor, not resting on it.
+            MALLOY_CHECK_TRUE(with_floor.bodies()[0].position.z < -3.0);
         }
     }
 

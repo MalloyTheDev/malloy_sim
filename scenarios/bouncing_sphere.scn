@@ -1,0 +1,106 @@
+# MalloySim scenario: a sphere bouncing on a 3D ground plane.
+#
+# This is what M22 adds, and it is the project's first collision in three
+# dimensions. M20 gave a rigid body free rotation and M21 gave it a torque, but
+# nothing it could hit. Here a sphere falls under gravity, strikes an immovable
+# floor, and bounces.
+#
+# The response is a pure normal impulse. A sphere's contact point is on the line
+# from its centre straight down to the floor, and its centre is its centre of
+# mass, so the impulse has no lever arm and imparts no spin. That is the 3D echo
+# of M10's colliding particles, not M14's rigid contacts: the sharp facts here
+# are translational. Spin from a contact needs a sideways (friction) force, and
+# that is a later milestone.
+#
+# Two things are exact and worth watching. The bounce reverses the sphere's
+# speed along the floor normal and scales it by the restitution e, so a drop
+# from rest returns to e^2 of its height. And the sphere's motion ALONG the
+# floor is untouched: with no friction, the horizontal velocity and the
+# horizontal momentum are constant, bounce or no bounce. The ball drifts
+# sideways at a steady rate while it bounces along.
+
+type rigid3d
+
+dt 0.001
+steps 4000
+output_every 500
+
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <radius> <px> <py> <pz>
+#              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# A unit sphere of radius 0.5, its bottom starting 2.0 above the floor (centre
+# at 2.5). Isotropic inertia 0.4 = (2/5) m R^2 for a solid sphere of mass 1,
+# radius 0.5, which is the physically right value though a normal contact never
+# reads it. It drifts in +x at 1.0 and spins about x at 3.0, both of which the
+# bounce leaves alone.
+rigid_body3d 1.0   0.4 0.4 0.4   0.5   0.0 0.0 2.5   0.0 0.0 0.0 0.0   1.0 0.0 0.0   3.0 0.0 0.0
+
+# gravity3 <gx> <gy> <gz>, an acceleration, straight down.
+gravity3 0.0 0.0 -9.81
+
+# restitution in [0, 1]. 0.7 loses a little energy on each bounce.
+restitution 0.7
+
+# plane3 <nx> <ny> <nz> <offset>, an immovable floor at z = 0. The normal points
+# up, out of the solid, into the free space the sphere falls through.
+plane3 0.0 0.0 1.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   2.68250000e+01   |L|   2.77308492e+00   |p|   1.00000000e+00
+#   step    500   E   2.68009410e+01   |L|   3.91237368e+00   |p|   5.00589902e+00
+#   step   1000   E   1.68149584e+01   |L|   1.34006784e+00   |p|   1.31024297e+00
+#   step   1500   E   1.67908994e+01   |L|   6.83149202e+00   |p|   4.17978303e+00
+#   step   2000   E   1.18872729e+01   |L|   4.06903290e+00   |p|   1.81425831e+00
+#   step   2500   E   9.48826849e+00   |L|   3.87455791e+00   |p|   1.57004371e+00
+#   step   3000   E   7.74587654e+00   |L|   1.25395116e+00   |p|   1.00202614e+00
+#   step   3500   E   7.21788406e+00   |L|   1.32945346e+00   |p|   1.00020537e+00
+#   step   4000   E   7.20500816e+00   |L|   1.29387149e+00   |p|   1.00000816e+00
+#
+# 1. E is kinetic plus gravitational potential, and it steps DOWN. Each drop is
+#    a bounce: the ball converts potential to kinetic on the way down, keeps e^2
+#    of the kinetic energy on the bounce (e = 0.7, so e^2 = 0.49, it keeps a
+#    little under half), and climbs back to a lower height. Between bounces E is
+#    nearly flat, sagging only by the free-flight shed (1/2)(sum m)|g|^2 dt^2 per
+#    step. It starts at 26.825, exactly m g (h0 + R) + the kinetic energy the
+#    ball already has, and settles toward the resting potential as the bounces
+#    die away.
+#
+#    The initial 26.825 is a hand sum: potential -m (g . r) = 1 * 9.81 * 2.5 =
+#    24.525, translational (1/2) m vx^2 = 0.5, rotational (1/2) Ix wx^2 =
+#    0.5 * 0.4 * 9 = 1.8, total 26.825.
+#
+# 2. |p| = m |v| moves, but only because vz does. The HORIZONTAL momentum is
+#    dead constant: there is no friction and no horizontal force, so the bounce,
+#    which is a purely vertical impulse, never touches vx. The ball drifts in +x
+#    at exactly 1.0 the whole way down and along. At the reports |p| is large
+#    when the ball is falling or rising fast and returns toward 1.0 (its
+#    horizontal-only value) at the top of each arc and once it settles.
+#
+# 3. |L| wanders because gravity applies a torque about the world origin (the
+#    orbital term m r x g) and the ball's height changes; the SPIN, though, is
+#    constant. wx stays exactly 3.0: the inertia is isotropic so there is no
+#    tumble, and a normal contact on a centred sphere has no lever arm, so the
+#    bounce imparts no spin. The ball spins freely at 3 rad/s about x from start
+#    to finish, bounces and all.
+#
+# By step 4000 the ball has essentially come to rest on the floor: its centre
+# sits at z = 0.5 (a radius above the floor), still drifting sideways at vx = 1
+# and still spinning at wx = 3, with the vertical motion bounced away.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. The exact ones (tol 1e-15) are the milestone's core claims: the bounce
+# is a purely vertical impulse, so the horizontal velocity, the horizontal
+# momentum and the spin are all untouched by it, at the start and 4000 steps
+# later alike. total_energy at step 4000 is a measured value, so its tolerance
+# is looser.
+# check step 0    position_z    2.50000000e+00   tol 1e-15
+# check step 0    velocity_x    1.00000000e+00   tol 1e-15
+# check step 0    spin_x        3.00000000e+00   tol 1e-15
+# check step 0    momentum_x    1.00000000e+00   tol 1e-15
+# check step 0    total_energy  2.68250000e+01   tol 1e-13
+# check step 4000 velocity_x    1.00000000e+00   tol 1e-15
+# check step 4000 momentum_x    1.00000000e+00   tol 1e-15
+# check step 4000 spin_x        3.00000000e+00   tol 1e-15
+# check step 4000 position_z    5.00000000e-01   tol 1e-6
+# check step 4000 total_energy  7.20500816e+00   tol 1e-4

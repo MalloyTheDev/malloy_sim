@@ -122,18 +122,23 @@ struct ScenarioParseResult
 //
 // type rigid3d:
 //
-//   Torque-free rotation of rigid bodies in three dimensions. Takes no
-//   restitution, gravity, friction or ground keys, because M20 has no contacts
-//   and no forces: a body here tumbles and flies straight, and that is all.
+//   Rigid bodies in three dimensions: free rotation (M20), a constant torque
+//   (M21), and gravity and restitution contacts against ground planes (M22).
+//   Friction is not here; a normal contact on a centred sphere imparts no spin,
+//   so this domain's contacts are translational until friction gets its own
+//   milestone.
 //
-//   rigid_body3d <mass> <Ix> <Iy> <Iz>
+//   rigid_body3d <mass> <Ix> <Iy> <Iz> <radius>
 //                <px> <py> <pz>
 //                <axisx> <axisy> <axisz> <angle>
 //                <vx> <vy> <vz>
 //                <wx> <wy> <wz>
 //
-//     Seventeen fields, written above in the five groups they form, though the
-//     line itself is a single line like every other.
+//     Eighteen fields, written above in the groups they form, though the line
+//     itself is a single line like every other.
+//
+//     radius is the collision sphere centred on the body's centre of mass.
+//     Zero (a body written before M22) means the body does not collide.
 //
 //     Ix, Iy and Iz are the PRINCIPAL moments of inertia about the centre of
 //     mass, so the body frame is already the one in which the inertia is
@@ -157,6 +162,23 @@ struct ScenarioParseResult
 //     it each body's world-frame angular momentum grows along the straight line
 //     L(t) = L(0) + torque t. There is one torque for the whole world, the way
 //     there is one gravity in the 2D rigid domain.
+//
+//   gravity3 <gx> <gy> <gz>   a uniform gravitational ACCELERATION
+//                             (default 0 0 0)
+//
+//     An acceleration, not a force, applied before the position update. The 3D
+//     key is separate from the 2D `gravity` because it takes three components.
+//
+//   restitution <value>       bounciness of every contact, in [0, 1]
+//                             (default 1, perfectly elastic)
+//
+//   plane3 <nx> <ny> <nz> <offset>   an immovable ground plane
+//
+//     The plane is dot((nx, ny, nz), p) == offset, with the normal pointing OUT
+//     of the solid, into free space, exactly like the 2D `ground` halfplane. A
+//     floor at z = -2 is `plane3 0 0 1 -2`. The normal need not be unit: it is
+//     normalized once on load, and only a zero or non-finite one is refused.
+//     May appear more than once, for a corner or a box of walls.
 //
 // type particles:
 //

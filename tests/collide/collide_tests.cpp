@@ -550,6 +550,81 @@ int main()
         MALLOY_CHECK_NEAR(again->penetration, 0.0, 1e-15);
     }
 
+    // --- M22: Sphere and Plane3, the 3D siblings of Circle and Halfplane.
+    //     Like circle against halfplane, sphere against plane has no degenerate
+    //     case: the normal is the plane's own. Configurations are asymmetric on
+    //     purpose (docs/05): a tilted plane whose normal has all three
+    //     components nonzero, so a dropped or transposed axis shows. ---
+    {
+        using malloy::collide::contact;
+        using malloy::collide::overlaps;
+        using malloy::collide::Plane3;
+        using malloy::collide::Sphere;
+        using malloy::math::Vec3;
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+
+        // Validation. A unit normal is required, exactly as Halfplane requires.
+        MALLOY_CHECK_TRUE(Plane3{}.is_valid()); // default floor (0,0,1) at 0
+        MALLOY_CHECK_TRUE((Sphere{Vec3{1.0, -2.0, 3.0}, 0.5}.is_valid()));
+        MALLOY_CHECK_TRUE((Sphere{Vec3{}, 0.0}.is_valid())); // a point
+        MALLOY_CHECK_FALSE((Sphere{Vec3{}, -1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Sphere{Vec3{0.0, nan3, 0.0}, 1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Sphere{Vec3{}, inf3}.is_valid()));
+
+        const Vec3 tilted = malloy::math::normalize(Vec3{1.0, 2.0, 2.0}); // |.|=3
+        MALLOY_CHECK_TRUE((Plane3{tilted, -4.25}.is_valid()));
+        MALLOY_CHECK_FALSE((Plane3{Vec3{0.0, 0.0, 0.0}, 0.0}.is_valid())); // no direction
+        MALLOY_CHECK_FALSE((Plane3{Vec3{0.0, 0.0, 2.0}, 0.0}.is_valid())); // not unit
+        MALLOY_CHECK_FALSE((Plane3{Vec3{1.0, 1.0, 1.0}, 0.0}.is_valid())); // length sqrt(3)
+        MALLOY_CHECK_FALSE((Plane3{Vec3{0.0, 0.0, 1.0}, nan3}.is_valid()));
+        MALLOY_CHECK_FALSE((Plane3{Vec3{nan3, 0.0, 0.0}, 0.0}.is_valid()));
+
+        // overlaps: touching counts, an invalid shape never overlaps.
+        const Plane3 floor{Vec3{0.0, 0.0, 1.0}, 0.0};
+        MALLOY_CHECK_FALSE((overlaps(Sphere{Vec3{3.0, -1.0, 0.6}, 0.5}, floor)));
+        MALLOY_CHECK_TRUE((overlaps(Sphere{Vec3{3.0, -1.0, 0.5}, 0.5}, floor))); // exact touch
+        MALLOY_CHECK_TRUE((overlaps(Sphere{Vec3{3.0, -1.0, 0.3}, 0.5}, floor)));
+        MALLOY_CHECK_TRUE((overlaps(Sphere{Vec3{3.0, -1.0, -9.0}, 0.5}, floor))); // fully inside
+        MALLOY_CHECK_FALSE((overlaps(Sphere{Vec3{}, -1.0}, floor)));            // invalid sphere
+
+        // contact against the default floor: separated gives nothing, touching
+        // gives penetration 0, overlapping gives a depth and the plane's normal.
+        MALLOY_CHECK_FALSE((contact(Sphere{Vec3{0.0, 0.0, 0.6}, 0.5}, floor).has_value()));
+        {
+            const auto touch = contact(Sphere{Vec3{-2.0, 1.0, 0.5}, 0.5}, floor);
+            MALLOY_CHECK_TRUE(touch.has_value());
+            MALLOY_CHECK_NEAR(touch->penetration, 0.0, 0.0);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(touch->normal, Vec3{0.0, 0.0, -1.0}, 0.0));
+        }
+        {
+            // Centre 0.2 above the floor, radius 0.5, so depth 0.3.
+            const auto k = contact(Sphere{Vec3{2.0, -3.0, 0.2}, 0.5}, floor);
+            MALLOY_CHECK_TRUE(k.has_value());
+            MALLOY_CHECK_NEAR(k->penetration, 0.3, eps);
+            // Normal points from the sphere into the plane's solid side: -z.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(k->normal, Vec3{0.0, 0.0, -1.0}, 0.0));
+            // Point midway between the surfaces: sphere bottom at z=-0.3, plane
+            // at z=0, midpoint z=-0.15; x and y are the centre's.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                k->point, Vec3{2.0, -3.0, -0.15}, eps));
+        }
+
+        // The tilted plane, no fallback: the normal is exactly -plane.normal
+        // even for a centre exactly on the surface.
+        {
+            const Plane3 slope{tilted, 1.0};
+            const auto k = contact(Sphere{tilted * 1.0, 0.5}, slope); // centre on the surface
+            MALLOY_CHECK_TRUE(k.has_value());
+            MALLOY_CHECK_NEAR(k->penetration, 0.5, eps);       // radius - 0
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(k->normal, tilted * -1.0, 0.0));
+        }
+
+        // Invalid shapes yield no contact rather than throwing.
+        MALLOY_CHECK_FALSE((contact(Sphere{Vec3{}, nan3}, floor).has_value()));
+        MALLOY_CHECK_FALSE((contact(Sphere{Vec3{}, 1.0}, Plane3{Vec3{1.0, 1.0, 1.0}, 0.0}).has_value()));
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

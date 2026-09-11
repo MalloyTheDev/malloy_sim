@@ -49,9 +49,23 @@ struct RigidBody3D
     // which is what M20 is about.
     math::Vec3 inertia{1.0, 1.0, 1.0};
 
+    // Collision radius of the sphere centred on the body's position, which is
+    // its centre of mass. Zero (the default) means the body does not collide,
+    // so a body written before M22 keeps its exact behaviour: it tumbles and
+    // flies but passes through everything.
+    //
+    // Centred on the centre of mass, unlike the 2D disc which is centred on the
+    // body ORIGIN offset from the centre of mass. That 2D offset existed only
+    // to give a contact a moment arm; a sphere needs no such device, and the
+    // consequence is that a NORMAL contact on a centred sphere passes through
+    // the centre of mass and so imparts no spin. Spin from contact waits for
+    // friction, its own milestone.
+    math::Real radius{0.0};
+
     // Valid when mass and all three principal moments are strictly positive and
-    // finite, the orientation is a unit quaternion, and position, velocity and
-    // angular velocity are SQUARABLE rather than merely finite (docs/04).
+    // finite, the orientation is a unit quaternion, the radius is non-negative
+    // and finite, and position, velocity and angular velocity are SQUARABLE
+    // rather than merely finite (docs/04).
     bool is_valid() const;
 };
 

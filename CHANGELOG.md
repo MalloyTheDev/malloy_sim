@@ -827,6 +827,97 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M22] - 2026-09-11  (a sphere bouncing on a 3D ground plane)
+
+### Added
+
+- `collide::Sphere` and `collide::Plane3`, the 3D siblings of `Circle` and
+  `Halfplane`, in new headers inside `malloy_collide` (2D untouched). Plus
+  `overlaps` and a `contact(Sphere, Plane3)` returning a `Contact3` (normal,
+  penetration, point). Like circle against halfplane, this pair has no
+  degenerate case: the normal is the plane's own.
+- A collision `radius` on `RigidBody3D`. Zero (the default) means the body does
+  not collide, so every pre-M22 body is unchanged.
+- `restitution`, a `gravity` acceleration, and a list of ground `Plane3`s on
+  `Rigid3DSettings`, all defaulting to the pre-M22 behaviour (elastic, no
+  gravity, no ground).
+- `Rigid3DWorld::step()` gains a gravity kick and a contact-resolution pass; a
+  `total_potential_energy3d` diagnostic.
+- `type rigid3d` gains a `radius` field on `rigid_body3d` (18 fields now), and
+  the keys `gravity3`, `plane3` and `restitution`.
+- `scenarios/bouncing_sphere.scn`.
+
+### The first 3D contact, and why it is the M10 echo, not M14
+
+M20 gave a rigid body free rotation and M21 gave it a torque, but nothing it
+could hit. M22 gives it a radius, drops it under a gravity acceleration, and
+bounces it off an immovable plane. It is the smallest slice that reaches a new
+capability, chosen the way every 3D milestone has been: it needs no inertia
+tensor, no translational force, no solver, and no sphere-sphere geometry, so
+none of those were built.
+
+It reaches new physics without new dynamics infrastructure because a contact
+here is a specialization, not the genuinely-new tier ADR 0009 reserved for the
+tumble. A uniform sphere's inertia is isotropic, and a CENTRED sphere's contact
+point lies on the line from its centre straight to the plane, so the arm from
+the centre of mass to the contact is parallel to the normal and r x n = 0. A
+normal impulse therefore imparts no spin and never touches the inertia: the
+effective mass is just 1/m against the immovable plane. That makes M22 the 3D
+echo of M10's colliding particles, which were also translational, rather than
+M14's rigid contacts, which needed the disc centred off the centre of mass to
+get a moment arm. Spin from a contact needs a tangential (friction) component,
+r x t != 0, and that is a later milestone.
+
+The ground plane is stored as geometry in the settings, not as a body, so
+`RigidBody3D` never has to represent an infinite mass and its validity still
+rejects one. Gravity is an acceleration applied before the position update (the
+M15 pattern, rule 5), not a force, and the contact is an impulse, so no
+force or torque accumulator was added (rules 5, 6, 17).
+
+### Derived, then measured
+
+The tests assert derived constants, not loosened tolerances:
+
+- Velocity restitution, EXACT: across the impulse the normal component of the
+  velocity reverses to -e times itself, to rounding, on a tilted plane whose
+  normal has all three components. The tangential component is untouched (no
+  friction) and the spin is untouched (no lever arm), both asserted.
+- Energy across a straight-down bounce: the kinetic energy scales by exactly
+  e^2, since the speed scales by e.
+- Rebound height e^2 h for a drop from rest, which follows from the velocity
+  law and is shown in the template.
+- Free-flight energy shed = (1/2)(sum m)|g|^2 dt^2 per step, the SAME derived
+  constant as M12 and M15, now in 3D and with a non-axis-aligned g. An
+  equality, asserted every step, matched to about 1e-13.
+- The contact is rotationally INERT, which is the milestone's scope claim
+  written as a test: a spinning body under a torque, dropped onto a floor, has
+  bit-identical orientation and angular velocity to the same body with no floor.
+  The bounce changes where it is, never how it spins.
+
+### Mutation testing
+
+Twenty-one mutations, all caught: the sphere-plane normal not negated, the
+depth sign flipped, the overlap test inverted, the plane's unit-normal check
+and the sphere's radius check dropped, the signed distance flipped; the contact
+response's closing-speed sign, its restitution factor, its impulse direction,
+its positional correction (dropped and reversed), its radius guard and its
+separating guard; the gravity kick dropped and flipped; the whole contact pass
+dropped; the settings validation weakened on restitution, gravity and ground
+planes; the body validity ignoring the radius; and the potential energy sign.
+
+One first appeared to escape: removing the "radius 0 does not collide" guard
+changed no test, because no test dropped a zero-radius body onto a plane. That
+is a real gap, now closed with a test that a zero-radius body falls straight
+through a plane, bit-identical to the same body with no ground.
+
+### Fixed
+
+- A latent brace malformation in `tests/scenario/scenario_tests.cpp`, left by
+  the M21 insertion: a stray `{` wrapped the whole torque section and was
+  balanced only by the following block borrowing its close. It compiled, but
+  the next inserted block would have unbalanced it. Removed while adding the
+  M22 parse tests.
+
 ## [M21] - 2026-09-11  (a constant applied torque on a 3D body)
 
 ### Added

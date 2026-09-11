@@ -14,18 +14,21 @@ project, and it is not trying to become one.
 **It is intended to become a 3D simulator, and it has started.** M19 added
 `Vec3` and gravity in three dimensions; M20 added quaternions and torque-free
 rigid-body rotation, the part of 3D that has no 2D form at all; M21 put a
-constant torque on that rotation, so a gyroscope precesses. The rest is still
-2D and is the larger share of the project: contact geometry, a translational
-force on a 3D body, and the remaining domains. 3D is the destination rather
-than a possibility left open, and each remaining piece is its own milestone:
-see `docs/decisions/0009-three-dimensions-are-the-destination.md`.
+constant torque on that rotation, so a gyroscope precesses; M22 gave a body a
+collision radius and bounced it off a ground plane, the project's first 3D
+contact. The rest is still 2D and is the larger share of the project:
+sphere-sphere and friction contacts, a translational force on a 3D body, and
+the remaining domains. 3D is the destination rather than a possibility left
+open, and each remaining piece is its own milestone: see
+`docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
 Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
 bodies, spring networks, rigid-body contact response and gravity for rigid
 bodies, flat ground, Coulomb friction and charged particles in electric and
-magnetic fields, gravity in three dimensions, and 3D rigid-body rotation both
-free and under an applied torque (milestones M1-M21).
+magnetic fields, gravity in three dimensions, 3D rigid-body rotation both free
+and under an applied torque, and a sphere bouncing on a 3D ground plane
+(milestones M1-M22).
 
 ## Locked baseline
 
@@ -48,7 +51,8 @@ The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
 response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
 **M17: friction**, **M18: charged particles**, **M19: 3D gravity**,
-**M20: 3D rotation**, **M21: 3D torque**). The project builds clean under
+**M20: 3D rotation**, **M21: 3D torque**, **M22: 3D contact**). The project
+builds clean under
 MSVC (`/W4 /permissive-`), and all 14 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
@@ -61,9 +65,9 @@ reporting conserved system diagnostics alongside an ASCII view of the bodies.
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
 | `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
-| `malloy_collide` | STATIC | `Circle`, `Aabb`, `Halfplane`, overlap tests, contact normal/depth/point |
+| `malloy_collide` | STATIC | `Circle`, `Aabb`, `Halfplane`, `Sphere`, `Plane3`, overlap tests, contact normal/depth/point |
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
-| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction; `RigidBody3D` and `Rigid3DWorld`, rotation free and under applied torque |
+| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction; `RigidBody3D` and `Rigid3DWorld`, rotation free/torqued and sphere-plane restitution contacts under gravity |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
 | `malloy_charges` | STATIC | `ChargedParticle2D`, signed Coulomb, uniform E and B fields |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
@@ -86,7 +90,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 14 templates ship across 7 domains, and
+and runnable with the shipped binary. 15 templates ship across 7 domains, and
 every one is parsed, validated and stepped by the test suite. Both numbers are
 checked against the directory by the scenario tests, so neither can go stale.
 
@@ -247,6 +251,7 @@ built-in scenarios shown above.
 | M19 | `Vec3` and 3D gravity: the first step off the plane | ✅ Done |
 | M20 | `Quat` and torque-free 3D rotation: the intermediate axis theorem | ✅ Done |
 | M21 | a constant torque on a 3D body: the gyroscope precesses | ✅ Done |
+| M22 | a sphere bouncing on a 3D ground plane: restitution in 3D | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -259,11 +264,12 @@ a set of decisions.
 Intended, not yet built, and never added speculatively
 (`docs/07_POST_M5_ROADMAP.md`):
 
-- **the rest of 3D**. M19 shipped `Vec3` and 3D gravity, M20 shipped
-  quaternions and torque-free rotation, and M21 added a constant applied
-  torque; a general inertia TENSOR, a translational force on a 3D body, 3D
-  contact geometry, and 3D versions of the remaining domains are each their own
-  milestone (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
+- **the rest of 3D**. M19 shipped `Vec3` and 3D gravity, M20 quaternions and
+  torque-free rotation, M21 a constant applied torque, and M22 the first 3D
+  contact (a sphere on a ground plane); sphere-sphere and friction contacts, a
+  general inertia TENSOR, a translational force on a 3D body, and 3D versions of
+  the remaining domains are each their own milestone
+  (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is
   ASCII text only, and terminal-first holds until then)
