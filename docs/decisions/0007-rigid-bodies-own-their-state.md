@@ -100,6 +100,21 @@ So the scope boundary above is now the boundary between `RigidBody2D` and
 `RigidBody3D` rather than between this project and a later one, and one clause
 of it, the inertia tensor, is deferred again on its own terms.
 
+### Amendment at M25: the tensor deferral came due, on those terms
+
+The M20 amendment said a general tensor "becomes necessary only once bodies are
+built from composed shapes and the parallel-axis step moves inertia off the
+principal axes." M25 built exactly that: `mass_properties_3d` composes solid
+spheres, shifts each by the parallel-axis theorem, and forms the compound
+body's inertia tensor, which is not diagonal in general. `math::Mat3` and a
+symmetric eigensolver arrived to hold and diagonalize it.
+
+But the prediction that `RigidBody3D` need not store a tensor held. The tensor
+is diagonalized at construction into principal moments and an orientation, which
+is what the body already carries, so the body's dynamics are unchanged and no
+`RigidBody3D` gained a 3x3. The tensor is a construction intermediate, not a
+stored state: exactly the split ADR 0009 predicted.
+
 ## Testing consequence
 
 The first rotational tests must break symmetry on every axis at once: body

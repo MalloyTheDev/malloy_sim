@@ -827,6 +827,81 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M25] - 2026-09-11  (3D mass properties: inertia from geometry)
+
+### Added
+
+- `math::Mat3`, a concrete 3x3 matrix stored by columns, with the operations
+  mass properties needs: matrix-vector and matrix-matrix products, transpose,
+  the outer product, a symmetric eigensolver (`eigen_symmetric`, cyclic Jacobi),
+  and a rotation-matrix-to-quaternion conversion (`to_quat`, Shepperd's method).
+- `rigid::mass_properties_3d`, which computes a compound body's mass, centre of
+  mass and principal moments of inertia from a set of solid uniform spheres and
+  their densities, plus `rigid::rigid_body_from` to build a `RigidBody3D` from
+  the result.
+
+### Physics from geometry, not typed in
+
+M20 through M24 took a body's mass and inertia as given. M25 computes them from
+what the body is made of: mass is density times volume, the centre of mass is
+the mass-weighted mean of the parts, and the inertia tensor about that centre is
+each sphere's own (2/5) m r^2 shifted to the common centre by the parallel-axis
+theorem, m (|d|^2 I - d d^T). This is the 3D sibling of the 2D `mass_properties`
+and ADR 0007's step 2 (geometry, then mass properties, then integration), and it
+is the piece a future generated shape will lean on to carry real physics.
+
+A compound body's inertia tensor is generally not diagonal in the frame its
+parts were given in, so M25 diagonalizes it: the eigenvalues are the principal
+moments and the eigenvectors are the principal axes. That is exactly what
+`RigidBody3D` stores, three moments and an orientation, so the result drops
+straight in and the body never has to carry a full tensor. The general tensor
+ADR 0007 and 0009 deferred has arrived as a construction step, not as a change
+to how a body stores its inertia.
+
+### The math is a support library, tested against closed forms
+
+`malloy_math` gained a `Mat3` and a symmetric eigensolver, which are new kinds
+of code for this project (linear algebra, not just vectors), so they are tested
+on their own before anything rests on them: the eigensolver reconstructs its
+input (`V diag Vᵀ`), returns a right-handed frame with ascending eigenvalues,
+handles a repeated eigenvalue, and round-trips through `to_quat`.
+
+The mass properties are then validated against derived closed forms:
+
+- a single solid sphere: mass = density (4/3) pi r^3, isotropic moment
+  (2/5) m r^2;
+- a dumbbell (two spheres on an axis): the axial moment is the two spheres' own
+  with no shift, the transverse pair each gains m d^2;
+- a diagonal dumbbell: the smallest-moment principal axis points along the
+  dumbbell, which pins the orientation the diagonalization returns;
+- different densities: the centre of mass sits nearer the denser part.
+
+The strongest test runs the whole chain through M20's dynamics: a cross of
+spheres with three distinct principal moments, built by `mass_properties_3d`,
+tumbles about its intermediate principal axis and holds about the extreme two,
+exactly the intermediate-axis theorem. The derived moments, their ordering, the
+orientation and `rigid_body_from` all have to be right for the flip to land on
+the middle axis.
+
+Like M9's collision primitives, this is a construction layer rather than a
+domain, so rule 16 does not apply: no world, no scenario key, no template. The
+M20 integration test is its demonstration.
+
+### Mutation testing
+
+Fifteen mutations, all caught: the outer product transposed, a dropped matrix
+column, the eigensolver's sort reversed, its right-handedness fix removed, its
+eigenvector accumulation dropped, `to_quat`'s branch inverted (caught by a
+180-degree rotation, where the other branch divides by zero); and in the mass
+properties, the sphere's (2/5) coefficient, the volume constant, the
+mass-weighting of the centre, the parallel-axis sign, its |d|^2 term, the own
+inertia not summed, the radius and density validation, and `rigid_body_from`
+dropping the orientation. Several needed sharper tests than the first pass had:
+a 180-degree rotation for `to_quat`, a valid-plus-invalid part pair for the
+per-part validation (a single bad part is caught by the positive-mass guard
+instead), and a non-identity orientation for `rigid_body_from` (the cross's
+frame is the identity).
+
 ## [M24] - 2026-09-11  (sphere-against-sphere collisions)
 
 ### Added

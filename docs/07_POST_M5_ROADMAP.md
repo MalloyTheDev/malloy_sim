@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M24 are complete, so this is the live roadmap for what comes next.
+M1-M25 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -38,6 +38,7 @@ M21 - constant applied torque on a 3D body [done]
 M22 - a sphere bouncing on a 3D ground plane [done]
 M23 - Coulomb friction for 3D contacts     [done]
 M24 - sphere against sphere                [done]
+M25 - 3D mass properties (inertia tensor)  [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -161,8 +162,9 @@ a constant applied torque on a 3D body [done, M21]
 sphere against a ground plane          [done, M22]
 friction for 3D contacts                [done, M23]
 sphere against sphere                   [done, M24]
+a general inertia tensor               [done, M25: compound spheres, parallel axis, diagonalized]
 a translational force on a 3D body     (the other half of a wrench)
-a general inertia tensor               (composed shapes, parallel axis)
+mass properties of other 3D shapes     (boxes, meshes; volume integrals)
 more 3D contact geometry               (what replaces SAT for boxes)
 3D versions of particles, springs and charges
 rendering              (terminal-first holds until then, ADR 0002)

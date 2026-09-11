@@ -10,7 +10,12 @@
 //
 // Quat arrived with M20 and is what a scalar angle becomes in three dimensions,
 // exactly as ADR 0007 said when it chose the scalar.
+//
+// Mat3 arrived with M25 for one job: an inertia tensor and its diagonalization
+// into principal moments. It is a concrete type carrying only what mass
+// properties needs, not a general linear-algebra layer.
 #include <malloy/math/real.hpp>
 #include <malloy/math/vec2.hpp>
 #include <malloy/math/vec3.hpp>
 #include <malloy/math/quat.hpp>
+#include <malloy/math/mat3.hpp>

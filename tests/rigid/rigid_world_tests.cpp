@@ -3867,6 +3867,192 @@ int main()
         }
     }
 
+    // --- M25: 3D mass properties. A body's mass, centre of mass and principal
+    //     moments of inertia COMPUTED from its geometry (solid spheres) and
+    //     density, rather than typed in. The 3D sibling of the 2D
+    //     mass_properties, and the piece that will let a generated shape carry
+    //     real physics. Validated against closed forms, then run through M20's
+    //     tumbling to check the whole chain. ---
+    {
+        using malloy::math::Vec3;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::MassProperties3D;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::SolidSphere;
+
+        // --- A single solid sphere: the closed forms. Off the origin, so the
+        //     centre of mass is the sphere's centre and not zero by accident. ---
+        {
+            const Real R = 0.5, density = 1000.0;
+            const MassProperties3D mp =
+                mass_properties_3d({SolidSphere{Vec3{2.0, -1.0, 3.0}, R, density}});
+            const Real mass = density * (4.0 / 3.0) * pi * R * R * R;
+            MALLOY_CHECK_NEAR(mp.mass, mass, 1e-9);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(mp.center_of_mass,
+                                                         Vec3{2.0, -1.0, 3.0}, 1e-12));
+            // Isotropic: all three moments are (2/5) m R^2.
+            const Real moment = 0.4 * mass * R * R;
+            MALLOY_CHECK_NEAR(mp.inertia.x, moment, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.y, moment, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.z, moment, 1e-9);
+        }
+
+        // --- A dumbbell: two equal spheres on the x axis at +/- d. The moment
+        //     about the axis through both centres is just the two spheres' own,
+        //     with no parallel-axis shift; the two transverse moments each gain
+        //     m d^2 per sphere. So
+        //       I_axial = 2 (2/5) m R^2,
+        //       I_transverse = 2 (2/5) m R^2 + 2 m d^2,
+        //     and the transverse pair is equal (an axisymmetric body). ---
+        {
+            const Real R = 0.5, density = 3.0, d = 2.0;
+            const MassProperties3D mp = mass_properties_3d(
+                {SolidSphere{Vec3{d, 0.0, 0.0}, R, density},
+                 SolidSphere{Vec3{-d, 0.0, 0.0}, R, density}});
+            const Real m = density * (4.0 / 3.0) * pi * R * R * R;
+            const Real own = 0.4 * m * R * R;
+            MALLOY_CHECK_NEAR(mp.mass, 2.0 * m, 1e-9);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(mp.center_of_mass, Vec3{}, 1e-12));
+            // Ascending: the axial moment is smallest.
+            MALLOY_CHECK_NEAR(mp.inertia.x, 2.0 * own, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.y, 2.0 * own + 2.0 * m * d * d, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.z, 2.0 * own + 2.0 * m * d * d, 1e-9);
+        }
+
+        // --- The orientation is the principal-axis frame. A dumbbell along a
+        //     DIAGONAL direction has its smallest-moment axis along that
+        //     diagonal, so the returned orientation rotates the body x axis onto
+        //     it. This is where the diagonalization's rotation is exercised, not
+        //     just its eigenvalues. ---
+        {
+            const Vec3 axis = malloy::math::normalize(Vec3{1.0, 1.0, 0.0});
+            const Real R = 0.4, density = 2.0, d = 1.5;
+            const MassProperties3D mp = mass_properties_3d(
+                {SolidSphere{axis * d, R, density}, SolidSphere{axis * -d, R, density}});
+            // The body x axis (the smallest principal moment) maps onto the
+            // dumbbell axis, up to sign.
+            const Vec3 mapped = malloy::math::rotate(mp.orientation, Vec3{1.0, 0.0, 0.0});
+            const Real alignment = std::abs(malloy::math::dot(mapped, axis));
+            MALLOY_CHECK_NEAR(alignment, 1.0, 1e-12);
+            // And the moments are the dumbbell's, whatever direction it points.
+            const Real m = density * (4.0 / 3.0) * pi * R * R * R;
+            const Real own = 0.4 * m * R * R;
+            MALLOY_CHECK_NEAR(mp.inertia.x, 2.0 * own, 1e-9);
+            MALLOY_CHECK_NEAR(mp.inertia.y, 2.0 * own + 2.0 * m * d * d, 1e-9);
+        }
+
+        // --- Different densities: a dense small core and a light large shell,
+        //     centres apart. The centre of mass sits nearer the dense one, and
+        //     the total mass is the sum. ---
+        {
+            const MassProperties3D mp = mass_properties_3d(
+                {SolidSphere{Vec3{0.0, 0.0, 0.0}, 0.4, 8000.0},   // dense core
+                 SolidSphere{Vec3{2.0, 0.0, 0.0}, 0.5, 1000.0}}); // light shell
+            const Real dense = 8000.0 * (4.0 / 3.0) * pi * 0.4 * 0.4 * 0.4;
+            const Real light = 1000.0 * (4.0 / 3.0) * pi * 0.5 * 0.5 * 0.5;
+            MALLOY_CHECK_NEAR(mp.mass, dense + light, 1e-6);
+            // COM on x at (dense*0 + light*2)/(dense+light).
+            MALLOY_CHECK_NEAR(mp.center_of_mass.x, light * 2.0 / (dense + light), 1e-9);
+            MALLOY_CHECK_TRUE(mp.center_of_mass.x < 1.0); // nearer the dense core
+        }
+
+        // --- Validation: an empty body or an invalid part yields nothing
+        //     usable, rather than a meaningless number. ---
+        {
+            MALLOY_CHECK_NEAR(mass_properties_3d({}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                                  {SolidSphere{Vec3{}, -1.0, 1.0}}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                                  {SolidSphere{Vec3{}, 1.0, 0.0}}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                                  {SolidSphere{Vec3{0.0, nan, 0.0}, 1.0, 1.0}}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                                  {SolidSphere{Vec3{}, inf, 1.0}}).mass, 0.0, 0.0);
+            // A valid part alongside an invalid one rejects the WHOLE body, not
+            // just the bad part: one bad radius or density spoils it. (A single
+            // bad part is also caught by the positive-mass guard, so it takes a
+            // good part beside it to pin the per-part check.)
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                {SolidSphere{Vec3{0.0, 0.0, 0.0}, 2.0, 3.0},   // a heavy good part
+                 SolidSphere{Vec3{4.0, 0.0, 0.0}, -0.5, 1.0}}).mass, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(mass_properties_3d(
+                {SolidSphere{Vec3{0.0, 0.0, 0.0}, 1.0, 1.0},
+                 SolidSphere{Vec3{2.0, 0.0, 0.0}, 1.0, 0.0}}).mass, 0.0, 0.0);
+        }
+
+        // --- rigid_body_from copies the principal frame, not just the moments.
+        //     A diagonal-dumbbell body has a non-identity orientation, and the
+        //     built body must carry it, or it would spin about the wrong axes. ---
+        {
+            const Vec3 axis = malloy::math::normalize(Vec3{1.0, 1.0, 0.0});
+            const MassProperties3D mp = mass_properties_3d(
+                {SolidSphere{axis * 1.5, 0.4, 2.0}, SolidSphere{axis * -1.5, 0.4, 2.0}});
+            MALLOY_CHECK_FALSE(malloy::math::approx_equal(mp.orientation,
+                                                          malloy::math::Quat{}, 1e-6));
+            const RigidBody3D body = rigid_body_from(mp);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(body.orientation,
+                                                         mp.orientation, 0.0));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(body.inertia, mp.inertia, 0.0));
+            MALLOY_CHECK_NEAR(body.mass, mp.mass, 0.0);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(body.position,
+                                                         mp.center_of_mass, 0.0));
+            MALLOY_CHECK_TRUE(body.is_valid());
+        }
+
+        // --- The whole chain, through M20's dynamics: a compound body with
+        //     three DISTINCT principal moments, built from spheres, tumbles
+        //     about its intermediate principal axis exactly as the intermediate
+        //     axis theorem demands. This is the strongest test: the derived
+        //     moments, their ordering, the orientation, and rigid_body_from all
+        //     have to be right for the flip to land on the middle axis. ---
+        {
+            using malloy::rigid::Rigid3DWorld;
+            const Real R = 0.4, density = 2.0;
+            // A cross: a long pair on x, a shorter pair on y, so the three
+            // moments are distinct and the principal axes are the coordinate
+            // axes (the tensor is already diagonal, orientation the identity).
+            const MassProperties3D mp = mass_properties_3d(
+                {SolidSphere{Vec3{1.5, 0.0, 0.0}, R, density},
+                 SolidSphere{Vec3{-1.5, 0.0, 0.0}, R, density},
+                 SolidSphere{Vec3{0.0, 0.8, 0.0}, R, density},
+                 SolidSphere{Vec3{0.0, -0.8, 0.0}, R, density}});
+            // Distinct, ascending. y is the intermediate axis.
+            MALLOY_CHECK_TRUE(mp.inertia.x < mp.inertia.y - 0.1);
+            MALLOY_CHECK_TRUE(mp.inertia.y < mp.inertia.z - 0.1);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(mp.orientation,
+                                                         malloy::math::Quat{}, 1e-12));
+
+            const Real spin = 5.0, nudge = 1e-3;
+            // Spun about y (intermediate): it flips.
+            {
+                RigidBody3D body = rigid_body_from(mp);
+                body.angular_velocity = Vec3{nudge, spin, 0.0};
+                Rigid3DWorld world{SimulationSettings{0.0005}, {body}};
+                Real lowest = spin;
+                for (int i = 0; i < 40000; ++i)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                    lowest = std::fmin(lowest, world.bodies()[0].angular_velocity.y);
+                }
+                MALLOY_CHECK_TRUE(lowest < -0.9 * spin); // reversed: a real flip
+            }
+            // Spun about x (smallest): it does NOT flip.
+            {
+                RigidBody3D body = rigid_body_from(mp);
+                body.angular_velocity = Vec3{spin, nudge, 0.0};
+                Rigid3DWorld world{SimulationSettings{0.0005}, {body}};
+                Real lowest = spin;
+                for (int i = 0; i < 40000; ++i)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                    lowest = std::fmin(lowest, world.bodies()[0].angular_velocity.x);
+                }
+                MALLOY_CHECK_TRUE(lowest > 0.9 * spin); // held: stable axis
+            }
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

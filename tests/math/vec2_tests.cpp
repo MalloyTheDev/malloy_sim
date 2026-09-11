@@ -252,6 +252,126 @@ int main()
         MALLOY_CHECK_FALSE(malloy::math::is_squarable(huge));
     }
 
+    // --- M25: Mat3, and the diagonalization of a symmetric matrix into
+    //     principal values and axes. This is the numerical core the 3D mass
+    //     properties rest on, so it is tested against reconstruction and
+    //     round-trips before anything is built on it. ---
+    {
+        using malloy::math::diagonal3;
+        using malloy::math::eigen_symmetric;
+        using malloy::math::identity3;
+        using malloy::math::Mat3;
+        using malloy::math::outer;
+        using malloy::math::Quat;
+        using malloy::math::SymmetricEigen;
+        using malloy::math::to_quat;
+        using malloy::math::transpose;
+        using malloy::math::Vec3;
+
+        // Basics: matrix times vector is a combination of the columns.
+        {
+            const Mat3 m{Vec3{1.0, 2.0, 3.0}, Vec3{4.0, 5.0, 6.0}, Vec3{7.0, 8.0, 9.0}};
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                m * Vec3{1.0, 0.0, 0.0}, Vec3{1.0, 2.0, 3.0}, 0.0)); // first column
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                m * Vec3{1.0, 1.0, 1.0}, Vec3{12.0, 15.0, 18.0}, 1e-14));
+            // Transpose swaps rows and columns.
+            MALLOY_CHECK_NEAR(malloy::math::element(transpose(m), 0, 1),
+                              malloy::math::element(m, 1, 0), 0.0);
+            // Outer product a b^T has (i,j) = a_i b_j.
+            const Mat3 op = outer(Vec3{1.0, 2.0, 3.0}, Vec3{4.0, 5.0, 6.0});
+            MALLOY_CHECK_NEAR(malloy::math::element(op, 0, 0), 4.0, 0.0);  // 1*4
+            MALLOY_CHECK_NEAR(malloy::math::element(op, 2, 1), 15.0, 0.0); // 3*5
+        }
+
+        // A quaternion turned into its rotation matrix, columns = rotated basis.
+        const auto matrix_of = [](const Quat& q) {
+            return Mat3{malloy::math::rotate(q, Vec3{1.0, 0.0, 0.0}),
+                        malloy::math::rotate(q, Vec3{0.0, 1.0, 0.0}),
+                        malloy::math::rotate(q, Vec3{0.0, 0.0, 1.0})};
+        };
+
+        // Already diagonal, out of order: the values come back SORTED ascending,
+        // and the eigenvectors are the canonical axes.
+        {
+            const SymmetricEigen e = eigen_symmetric(diagonal3(Vec3{3.0, 1.0, 2.0}));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(e.values, Vec3{1.0, 2.0, 3.0}, 1e-14));
+            // Reconstruct: V diag(values) V^T is the original.
+            const Mat3 rebuilt =
+                e.vectors * diagonal3(e.values) * transpose(e.vectors);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                rebuilt, diagonal3(Vec3{3.0, 1.0, 2.0}), 1e-13));
+            // The eigenvectors are a right-handed rotation (det +1).
+            MALLOY_CHECK_NEAR(malloy::math::dot(malloy::math::cross(e.vectors.col0,
+                                                                    e.vectors.col1),
+                                                e.vectors.col2),
+                              1.0, 1e-13);
+        }
+
+        // A full symmetric matrix with known eigenvalues, built as
+        // R diag(lambda) R^T for a tilted R. Diagonalization must recover the
+        // sorted eigenvalues and reconstruct the matrix, whatever basis it picks.
+        {
+            const Vec3 lambda{7.0, 1.0, 3.0};
+            const Quat r = malloy::math::from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.9);
+            const Mat3 rmat = matrix_of(r);
+            const Mat3 symmetric = rmat * diagonal3(lambda) * transpose(rmat);
+
+            const SymmetricEigen e = eigen_symmetric(symmetric);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(e.values, Vec3{1.0, 3.0, 7.0}, 1e-12));
+            const Mat3 rebuilt = e.vectors * diagonal3(e.values) * transpose(e.vectors);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(rebuilt, symmetric, 1e-12));
+            MALLOY_CHECK_NEAR(malloy::math::dot(malloy::math::cross(e.vectors.col0,
+                                                                    e.vectors.col1),
+                                                e.vectors.col2),
+                              1.0, 1e-12);
+
+            // to_quat turns the eigenvector rotation back into a quaternion that
+            // rotates the basis onto those same columns.
+            const Quat q = to_quat(e.vectors);
+            MALLOY_CHECK_TRUE(malloy::math::is_unit(q));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::math::rotate(q, Vec3{1.0, 0.0, 0.0}), e.vectors.col0, 1e-13));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::math::rotate(q, Vec3{0.0, 0.0, 1.0}), e.vectors.col2, 1e-13));
+        }
+
+        // A repeated eigenvalue (an axisymmetric tensor): still reconstructs,
+        // and the repeated value appears twice.
+        {
+            const Mat3 axisymmetric = diagonal3(Vec3{2.0, 2.0, 5.0});
+            const SymmetricEigen e = eigen_symmetric(axisymmetric);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(e.values, Vec3{2.0, 2.0, 5.0}, 1e-14));
+            const Mat3 rebuilt = e.vectors * diagonal3(e.values) * transpose(e.vectors);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(rebuilt, axisymmetric, 1e-14));
+        }
+
+        // A 180-degree rotation has a negative trace, so to_quat must take its
+        // other branch; the well-conditioned root would be zero on the trace
+        // branch. Checked by action, since q and -q are the same rotation.
+        {
+            const Vec3 axis = malloy::math::normalize(Vec3{1.0, 2.0, 2.0});
+            const Quat half_turn = malloy::math::from_axis_angle(axis, 3.14159265358979323846);
+            const Quat back = to_quat(matrix_of(half_turn));
+            const Vec3 probe{0.7, -1.3, 0.4};
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::math::rotate(back, probe),
+                malloy::math::rotate(half_turn, probe), 1e-12));
+        }
+
+        // to_quat of the identity is the identity rotation, and of a quarter
+        // turn about z is that quarter turn.
+        {
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(to_quat(identity3()), Quat{}, 1e-15));
+            const Quat qz = malloy::math::from_axis_angle(Vec3{0.0, 0.0, 1.0}, 1.5707963267948966);
+            const Quat back = to_quat(matrix_of(qz));
+            // A quaternion and its negation are the same rotation, so compare by
+            // action, not components.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::math::rotate(back, Vec3{1.0, 0.0, 0.0}), Vec3{0.0, 1.0, 0.0}, 1e-14));
+        }
+    }
+
     std::cout << "malloy_math_tests passed\n";
     return 0;
 }

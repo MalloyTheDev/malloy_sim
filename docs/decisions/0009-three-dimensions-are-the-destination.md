@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, recorded at M16, amended at M19, M20, M22, M23 and M24.
+Accepted, recorded at M16, amended at M19, M20, M22, M23, M24 and M25.
 
 As of M20 the first two pieces of 3D have shipped: `math::Vec3` and
 `nbody::NBody3DWorld`, then `math::Quat` and `rigid::Rigid3DWorld`. Everything
@@ -219,6 +219,27 @@ Still deferred, and still each its own milestone: a translational force on a 3D
 body, a general inertia tensor, and 3D versions of the particle, spring and
 charge domains. Oriented boxes and the SAT question remain untouched in both
 dimensions.
+
+## Amendment at M25: the inertia tensor, as a construction step
+
+The SPECIALIZES section said the scalar inertia "becomes a 3x3 tensor" and that
+`shift_inertia` "becomes the tensor form of the same theorem." M25 built both:
+`mass_properties_3d` composes solid spheres, shifts each by the 3D parallel-axis
+theorem m (|d|^2 I - d d^T), and forms the compound body's inertia tensor, with
+`math::Mat3` and a symmetric eigensolver new in `malloy_math` to hold and
+diagonalize it.
+
+The refinement the M20 amendment already flagged holds all the way through: the
+tensor is where inertia is COMPUTED, not where it is STORED. Diagonalizing it
+gives principal moments and an orientation, which is what `RigidBody3D` carries,
+so the body's dynamics never touch a 3x3. A symmetric tensor always
+diagonalizes, so this is not a shortcut; it is the reason the principal-moments
+choice was correct from M20 on.
+
+What this unlocks is the vision the project is heading toward: a body's physical
+properties FOLLOWING from its geometry rather than being typed in. M25 does it
+for compound spheres; other shapes (boxes, meshes, via volume integrals) are
+later milestones, each its own.
 
 ## Deliberately not decided here (resolved above at M19)
 

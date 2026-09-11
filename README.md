@@ -17,9 +17,10 @@ rigid-body rotation, the part of 3D that has no 2D form at all; M21 put a
 constant torque on that rotation, so a gyroscope precesses; M22 gave a body a
 collision radius and bounced it off a ground plane, the project's first 3D
 contact; M23 added friction, so a sliding sphere rolls; M24 made two spheres collide,
-conserving momentum. The rest is still 2D and is the larger share of the
-project: a translational force on a 3D body, a general inertia tensor, and 3D
-versions of the remaining domains. 3D is the destination rather than a possibility left
+conserving momentum; M25 computes a body's mass and inertia from its geometry.
+The rest is still 2D and is the larger share of the project: a translational
+force on a 3D body, mass properties of other shapes, and 3D versions of the
+remaining domains. 3D is the destination rather than a possibility left
 open, and each remaining piece is its own milestone: see
 `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
@@ -29,8 +30,8 @@ bodies, spring networks, rigid-body contact response and gravity for rigid
 bodies, flat ground, Coulomb friction and charged particles in electric and
 magnetic fields, gravity in three dimensions, 3D rigid-body rotation both free
 and under an applied torque, a sphere bouncing on a 3D ground plane, friction
-that makes a sliding sphere roll, and sphere-against-sphere collisions
-(milestones M1-M24).
+that makes a sliding sphere roll, sphere-against-sphere collisions, and mass
+properties computed from 3D geometry (milestones M1-M25).
 
 ## Locked baseline
 
@@ -54,14 +55,15 @@ bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
 response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
 **M17: friction**, **M18: charged particles**, **M19: 3D gravity**,
 **M20: 3D rotation**, **M21: 3D torque**, **M22: 3D contact**,
-**M23: 3D friction**, **M24: 3D sphere pairs**). The project builds clean under
+**M23: 3D friction**, **M24: 3D sphere pairs**, **M25: 3D mass properties**).
+The project builds clean under
 MSVC (`/W4 /permissive-`), and all 14 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
 
 | Module | Type | Provides |
 |---|---|---|
-| `malloy_math` | INTERFACE | `Real = double`, `Vec2`, `Vec3`, `Quat`, vector/scalar helpers |
+| `malloy_math` | INTERFACE | `Real = double`, `Vec2`, `Vec3`, `Quat`, `Mat3` + symmetric eigensolver, vector/scalar helpers |
 | `malloy_time` | INTERFACE | `FixedStep` (fixed timestep, tick count, elapsed time) |
 | `malloy_sim_core` | STATIC | `SimulationSettings`, `StepStatus`, `StepResult` |
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
@@ -69,7 +71,7 @@ reporting conserved system diagnostics alongside an ASCII view of the bodies.
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | `Circle`, `Aabb`, `Halfplane`, `Sphere`, `Plane3`, overlap tests, contact normal/depth/point (sphere-sphere and sphere-plane in 3D) |
 | `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
-| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction; `RigidBody3D` and `Rigid3DWorld`, rotation free/torqued and sphere-plane and sphere-sphere contacts with restitution and friction |
+| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction; `RigidBody3D` and `Rigid3DWorld`, rotation free/torqued, sphere-plane and sphere-sphere contacts, and 3D mass properties from geometry |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
 | `malloy_charges` | STATIC | `ChargedParticle2D`, signed Coulomb, uniform E and B fields |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
@@ -256,6 +258,7 @@ built-in scenarios shown above.
 | M22 | a sphere bouncing on a 3D ground plane: restitution in 3D | ✅ Done |
 | M23 | Coulomb friction for 3D contacts: a sliding sphere rolls at 5/7 v | ✅ Done |
 | M24 | sphere-against-sphere collisions: two bodies exchange momentum | ✅ Done |
+| M25 | 3D mass properties: mass and inertia computed from geometry | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -271,8 +274,10 @@ Intended, not yet built, and never added speculatively
 - **the rest of 3D**. M19 shipped `Vec3` and 3D gravity, M20 quaternions and
   torque-free rotation, M21 a constant applied torque, M22 the first 3D contact
   (a sphere on a ground plane), M23 friction for it, and M24 sphere-against-
-  sphere collisions; a general inertia TENSOR, a translational force on a 3D
-  body, and 3D versions of the remaining domains are each their own milestone
+  sphere collisions, and M25 mass properties from geometry (with `Mat3` and a
+  symmetric eigensolver); a translational force on a 3D body, mass properties of
+  shapes other than spheres, and 3D versions of the remaining domains are each
+  their own milestone
   (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is

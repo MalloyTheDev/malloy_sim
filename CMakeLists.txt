@@ -158,6 +158,7 @@ target_link_libraries(malloy_particles
 add_library(malloy_rigid STATIC
     src/rigid/rigid.cpp
     src/rigid/rigid3d.cpp
+    src/rigid/mass_properties3d.cpp
 )
 add_library(malloy::rigid ALIAS malloy_rigid)
 target_include_directories(malloy_rigid PUBLIC include)

@@ -44,10 +44,10 @@ started.** `math::Vec3`, `math::Quat`, `nbody::NBody3DWorld` and
 `rigid::Rigid3DWorld` exist and ship with templates, so gravity runs in three
 dimensions and rigid bodies rotate there, tumbling freely (M20), turning under
 an applied torque (M21), bouncing off ground planes under gravity (M22),
-rolling with friction (M23), and colliding with each other (M24). Everything
-else is still 2D, and that is still the bulk of the project: three of the five
-domains, a translational force on a 3D body, and 3D versions of the remaining
-domains.
+rolling with friction (M23), and colliding with each other (M24), and their
+mass and inertia can be computed from geometry (M25). Everything else is still
+2D, and that is still the bulk of the project: three of the five domains, a
+translational force on a 3D body, and 3D versions of the remaining domains.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -58,7 +58,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M24 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M25 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -66,7 +66,8 @@ response, uniform gravity for rigid bodies, halfplane ground, Coulomb
 friction, charged particles in electric and magnetic fields, the first
 three-dimensional domain, quaternions with torque-free 3D rotation, a constant
 applied torque on a 3D body, a sphere bouncing on a 3D ground plane, Coulomb
-friction for 3D contacts, and sphere-against-sphere collisions.
+friction for 3D contacts, sphere-against-sphere collisions, and 3D mass
+properties (inertia from geometry).
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -79,10 +80,11 @@ M16 (halfplanes, giving true flat ground), M17 (Coulomb friction) and M18
 (Vec3 and 3D gravity, the first step off the plane), M20 (quaternions and
 torque-free rotation in three dimensions), M21 (a constant applied torque on a
 3D body), M22 (a sphere bouncing on a 3D ground plane), M23 (Coulomb friction
-for 3D contacts) and M24 (sphere-against-sphere collisions) are all done. See
+for 3D contacts), M24 (sphere-against-sphere collisions) and M25 (3D mass
+properties: mass and inertia computed from geometry) are all done. See
 `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M25 or later) unless explicitly asked, and
+Do not start any further milestone (M26 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -103,7 +105,7 @@ M5: terminal N-body demo               [done]
 3. Do not add ECS (wait for real access-pattern pressure).
 4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. 3D body against body is spheres only; oriented boxes and SAT are not implemented in either dimension, and 2D body against body is still disc against disc. Particle contacts remain normal-only.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force. Gravity is a setting applied as an acceleration, not a force: do not add persistent forces or force/torque accumulators to `malloy_rigid` until their dedicated milestone.
-6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), and M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core). A general inertia TENSOR, a translational FORCE on a 3D body, and 3D versions of the remaining domains are NOT started and each needs its own milestone. The 3D contacts are impulses and gravity is an acceleration (the M10/M15/M17 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` stores three principal moments rather than a 3x3 matrix, deliberately. Do not add any of it speculatively; the 2D types stay supported.
+6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core), and M25 (`math::Mat3` and 3D mass properties: a compound body's inertia TENSOR, computed from geometry by the parallel-axis theorem and diagonalized to principal moments). A translational FORCE on a 3D body, mass properties of shapes other than spheres, and 3D versions of the remaining domains are NOT started and each needs its own milestone. The 3D contacts are impulses and gravity is an acceleration (the M10/M15/M17 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` still stores three principal moments rather than a 3x3 matrix, deliberately: M25 diagonalizes the tensor at construction, so the body never has to carry one. Do not add any of it speculatively; the 2D types stay supported.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
 9. Do not add Catch2/GoogleTest unless explicitly asked.
