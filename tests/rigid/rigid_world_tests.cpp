@@ -1958,7 +1958,7 @@ int main()
     {
         using malloy::math::Quat;
         using malloy::math::Vec3;
-        using malloy::rigid::angular_momentum;
+        using malloy::rigid::spin_angular_momentum;
         using malloy::rigid::Rigid3DWorld;
         using malloy::rigid::RigidBody3D;
         using malloy::rigid::rotational_energy;
@@ -2081,7 +2081,7 @@ int main()
             ball.angular_velocity = Vec3{0.7, -1.3, 0.4};
 
             Rigid3DWorld world{SimulationSettings{0.001}, {ball}};
-            const Vec3 l0 = angular_momentum(world.bodies()[0]);
+            const Vec3 l0 = spin_angular_momentum(world.bodies()[0]);
             for (int i = 0; i < 2000; ++i)
             {
                 MALLOY_CHECK_TRUE(world.step().ok());
@@ -2095,7 +2095,7 @@ int main()
             // to within a few ulp per step, so the bound is the same
             // N half-ulps of the magnitude that the 2D angle accumulates.
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(
-                angular_momentum(world.bodies()[0]), l0,
+                spin_angular_momentum(world.bodies()[0]), l0,
                 (1.0 / 9007199254740992.0) * malloy::math::length(l0) *
                     2000.0 / 2.0));
             MALLOY_CHECK_TRUE(malloy::math::is_unit(world.bodies()[0].orientation));
@@ -2120,7 +2120,7 @@ int main()
                 body.angular_velocity = axes[a] * spin;
 
                 Rigid3DWorld world{SimulationSettings{dt}, {body}};
-                const Vec3 l0 = angular_momentum(world.bodies()[0]);
+                const Vec3 l0 = spin_angular_momentum(world.bodies()[0]);
                 const Real t0 = rotational_energy(world.bodies()[0]);
                 for (int i = 0; i < steps; ++i)
                 {
@@ -2130,7 +2130,7 @@ int main()
                 MALLOY_CHECK_TRUE(
                     malloy::math::approx_equal(out.angular_velocity, body.angular_velocity, 0.0));
                 MALLOY_CHECK_TRUE(
-                    malloy::math::approx_equal(angular_momentum(out), l0, 0.0));
+                    malloy::math::approx_equal(spin_angular_momentum(out), l0, 0.0));
                 MALLOY_CHECK_NEAR(rotational_energy(out), t0, 0.0);
                 MALLOY_CHECK_TRUE(malloy::math::is_unit(out.orientation));
 
@@ -2247,7 +2247,7 @@ int main()
                 // unit quaternion: a scaled one would not preserve length.
                 worst_frame =
                     std::fmax(worst_frame, std::abs(malloy::math::length(
-                                                        angular_momentum(out)) -
+                                                        spin_angular_momentum(out)) -
                                                     std::sqrt(momentum_after)));
             }
 
@@ -2275,14 +2275,22 @@ int main()
         //     only the axis differs.
         //
         //     Linearizing about a spin W along one axis gives a second-order
-        //     equation for the two transverse components whose rate is
+        //     equation for the two transverse components. With the moments
+        //     SORTED as I1 < I2 < I3, the three rates are
         //
-        //         mu^2 = W^2 (I2 - I1)(I2 - I3) / (I1 I3)
+        //         about I2 (intermediate):  +W^2 (I2-I1)(I3-I2) / (I1 I3)
+        //         about I1 (smallest):      -W^2 (I2-I1)(I3-I1) / (I2 I3)
+        //         about I3 (largest):       -W^2 (I3-I1)(I3-I2) / (I1 I2)
         //
-        //     negative (oscillation) about the largest and smallest moments and
-        //     positive (exponential) about the intermediate one. For (1, 2, 3)
-        //     that is mu = W/sqrt(3) in all three cases, differing only in sign
-        //     under the square root. ---
+        //     Every bracket is a larger moment minus a smaller one and so is
+        //     positive, which puts the whole theorem in the leading sign:
+        //     exponential about the intermediate axis, oscillatory about the
+        //     other two.
+        //
+        //     For (1, 2, 3) those are +W^2/3, -W^2/3 and -W^2, so the rate is
+        //     W/sqrt(3) about the intermediate and smallest axes and W about
+        //     the largest. The two stable cases below therefore check two
+        //     DIFFERENT numbers rather than the same one twice. ---
         {
             const Real dt = 0.001;
             const int steps = 20000;
@@ -2467,6 +2475,136 @@ int main()
                 out.angular_velocity, body.angular_velocity, 1e-4));
         }
 
+        // --- Angular momentum is spin PLUS orbital, as it is in two dimensions.
+        //
+        //     `spin_angular_momentum` is R (I omega) and nothing else.
+        //     `total_angular_momentum3d` adds m (r x v) about the world origin,
+        //     because dropping it makes a whole class of motion look conserved
+        //     when it is not: a body flying past the origin carries angular
+        //     momentum about it whether or not it is spinning.
+        //
+        //     Written with a velocity NOT parallel to the position, so the
+        //     orbital term is nonzero in all three components. A configuration
+        //     with r parallel to v would have an orbital term of zero and would
+        //     pass whether or not it was summed. ---
+        {
+            RigidBody3D flyer;
+            flyer.mass = 2.0;
+            flyer.inertia = asymmetric;
+            flyer.position = Vec3{1.0, 2.0, -1.0};
+            flyer.velocity = Vec3{0.3, -0.1, 0.5};
+            flyer.angular_velocity = Vec3{0.4, 1.1, -0.9};
+
+            // 2 * ((1,2,-1) x (0.3,-0.1,0.5)) = 2 * (0.9,-0.8,-0.7), by hand.
+            const Vec3 orbital_start{1.8, -1.6, -1.4};
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                flyer.mass * malloy::math::cross(flyer.position, flyer.velocity),
+                orbital_start, 1e-15));
+
+            // Large enough that omitting it could not hide in a tolerance: the
+            // orbital term here is comparable to the spin term, not a
+            // correction to it.
+            MALLOY_CHECK_TRUE(malloy::math::length(orbital_start) > 2.0);
+
+            Rigid3DWorld world{SimulationSettings{0.001}, {flyer}};
+            const Vec3 total_start =
+                malloy::rigid::total_angular_momentum3d(world.bodies());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                total_start, spin_angular_momentum(flyer) + orbital_start, 1e-15));
+
+            // The two are genuinely different vectors, so a total that returned
+            // only the spin would fail here rather than pass by coincidence.
+            MALLOY_CHECK_FALSE(malloy::math::approx_equal(
+                total_start, spin_angular_momentum(flyer), 1e-6));
+
+            const int steps = 4000;
+            Real worst_orbital = 0.0;
+            for (int i = 0; i < steps; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const RigidBody3D& out = world.bodies()[0];
+                const Vec3 orbital =
+                    out.mass * malloy::math::cross(out.position, out.velocity);
+
+                // The total is exactly the two parts added, every step.
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    malloy::rigid::total_angular_momentum3d(world.bodies()),
+                    spin_angular_momentum(out) + orbital, 0.0));
+
+                worst_orbital = std::fmax(
+                    worst_orbital, malloy::math::length(orbital - orbital_start));
+            }
+
+            // The orbital term is exactly constant in exact arithmetic, since
+            // d(r x p)/dt = v x mv = 0 for a free body. What is left is the
+            // rounding in r, which accumulates over N steps of a quantity of
+            // this size: the same N half-ulp bound the 2D angle uses.
+            MALLOY_CHECK_TRUE(worst_orbital <
+                              (1.0 / 9007199254740992.0) *
+                                  malloy::math::length(orbital_start) *
+                                  static_cast<Real>(steps) / 2.0);
+
+            // The body really did travel, so the constancy above is a
+            // cancellation and not a body sitting at the origin.
+            MALLOY_CHECK_TRUE(malloy::math::distance(world.bodies()[0].position,
+                                                     flyer.position) > 1.0);
+        }
+
+        // --- The zero-drift condition is an EIGENSPACE condition, not a
+        //     principal-axis one.
+        //
+        //     The drift vanishes exactly when u = L x omega is zero, that is
+        //     when I omega is parallel to omega. For three distinct moments the
+        //     only such directions are the three principal axes. For an
+        //     AXISYMMETRIC body two moments are equal, that eigenspace is a
+        //     plane, and every direction in it qualifies: not just the two
+        //     principal axes lying in it.
+        //
+        //     The angular velocity below is in the degenerate plane but along
+        //     neither axis of it, so it is a case the principal-axis statement
+        //     does not cover and the eigenspace one does. ---
+        {
+            RigidBody3D top;
+            top.inertia = Vec3{1.5, 1.5, 4.0}; // axisymmetric about z
+            top.angular_velocity = Vec3{0.6, -0.8, 0.0};
+
+            // In the eigenspace: I omega is a multiple of omega, so u is zero.
+            const Vec3& w0 = top.angular_velocity;
+            const Vec3 iw{top.inertia.x * w0.x, top.inertia.y * w0.y,
+                          top.inertia.z * w0.z};
+            // Zero to rounding: the eigenspace relation is exact, but the
+            // hand-chosen components are not bit-exact in binary.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::math::cross(iw, w0), Vec3{}, 1e-15));
+
+            // And along no principal axis: both in-plane components are
+            // nonzero, which is what makes this a different case.
+            MALLOY_CHECK_TRUE(std::abs(w0.x) > 0.1);
+            MALLOY_CHECK_TRUE(std::abs(w0.y) > 0.1);
+
+            Rigid3DWorld world{SimulationSettings{0.001}, {top}};
+            const Real energy_start = rotational_energy(world.bodies()[0]);
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                world.bodies()[0].angular_velocity, Vec3(0.6, -0.8, 0.0), 0.0));
+            MALLOY_CHECK_NEAR(rotational_energy(world.bodies()[0]), energy_start, 0.0);
+
+            // Tilt the same body out of that plane and it drifts, so the
+            // exactness above is the eigenspace and not the inertia.
+            RigidBody3D tilted = top;
+            tilted.angular_velocity = Vec3{0.6, -0.8, 0.5};
+            Rigid3DWorld drifting{SimulationSettings{0.001}, {tilted}};
+            const Real tilted_start = rotational_energy(drifting.bodies()[0]);
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(drifting.step().ok());
+            }
+            MALLOY_CHECK_TRUE(rotational_energy(drifting.bodies()[0]) > tilted_start);
+        }
+
         // --- The world frame is not the body frame, and that is the whole
         //     reason `angular_momentum` rotates.
         //
@@ -2492,7 +2630,7 @@ int main()
                 body.angular_velocity = Vec3{0.9, 1.4, -0.6};
 
                 Rigid3DWorld world{SimulationSettings{steps[k]}, {body}};
-                const Vec3 world_start = angular_momentum(world.bodies()[0]);
+                const Vec3 world_start = spin_angular_momentum(world.bodies()[0]);
                 const Vec3 body_start{asymmetric.x * body.angular_velocity.x,
                                       asymmetric.y * body.angular_velocity.y,
                                       asymmetric.z * body.angular_velocity.z};
@@ -2507,7 +2645,7 @@ int main()
                                        asymmetric.z * out.angular_velocity.z};
                     deviation[k] = std::fmax(
                         deviation[k],
-                        malloy::math::length(angular_momentum(out) - world_start));
+                        malloy::math::length(spin_angular_momentum(out) - world_start));
                     tumble[k] =
                         std::fmax(tumble[k], malloy::math::length(in_body - body_start));
                 }

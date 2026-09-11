@@ -19,7 +19,7 @@ bool RigidBody3D::is_valid() const
            math::is_squarable(velocity) && math::is_squarable(angular_velocity);
 }
 
-math::Vec3 angular_momentum(const RigidBody3D& body)
+math::Vec3 spin_angular_momentum(const RigidBody3D& body)
 {
     // I omega in the body frame, where the inertia is diagonal, then rotated
     // into the world frame. The body-frame vector tumbles; this one does not.
@@ -77,11 +77,17 @@ sim_core::StepResult Rigid3DWorld::step()
 
     for (RigidBody3D& body : bodies_)
     {
-        // (1) Euler's equations, in the body frame. Every right-hand side is a
-        //     DIFFERENCE of principal moments, so a sphere cannot precess and a
-        //     body with three distinct moments can tumble. This term is
-        //     identically zero in two dimensions, which is why none of this
-        //     physics exists there.
+        // (1) Euler's equations, in the body frame, stepped with FORWARD
+        //     Euler: the rate is evaluated wholly at the old angular velocity,
+        //     because it depends on omega and on nothing else. That is where
+        //     the exact second-order drift in |L|^2 and in the energy comes
+        //     from (see rigid3d_world.hpp); the semi-implicit part of this
+        //     world is the COUPLING in step (2), not this line.
+        //
+        //     Every right-hand side is a DIFFERENCE of principal moments, so a
+        //     sphere cannot precess and a body with three distinct moments can
+        //     tumble. This term is identically zero in two dimensions, which is
+        //     why none of this physics exists there.
         const math::Vec3& w = body.angular_velocity;
         const math::Vec3& I = body.inertia;
         const math::Vec3 rate{(I.y - I.z) * w.y * w.z / I.x,
@@ -97,10 +103,18 @@ sim_core::StepResult Rigid3DWorld::step()
             body.orientation + (body.orientation * spin) * (dt * math::Real{0.5});
 
         // (3) renormalize. The step above moves tangentially off the unit
-        //     sphere, so the norm grows without this. A projection, in the same
-        //     sense as the positional correction in the 2D contact code, with
-        //     the same kind of cost: it perturbs world-frame angular momentum
-        //     while leaving every body-frame quantity untouched.
+        //     sphere, so the norm grows by exactly
+        //     sqrt(1 + |omega|^2 dt^2 / 4) per step: the quaternion norm is
+        //     multiplicative and this is a right multiplication.
+        //
+        //     This is NOT the positional correction's kind of projection and
+        //     costs nothing physically. A nonzero quaternion and any scaling of
+        //     it represent the same rotation, since q v q^-1 is invariant under
+        //     q -> k q, so renormalizing moves no body and perturbs no
+        //     conserved quantity. It is required because `rotate` uses the
+        //     optimized unit-only form, which is NOT scale invariant: fed a
+        //     quaternion of norm k it returns p + k^2 (R p - p), scaling the
+        //     displacement rather than performing the rotation.
         body.orientation = math::normalize(body.orientation);
 
         // (4) translation, on which nothing acts here.
@@ -135,7 +149,17 @@ math::Vec3 total_angular_momentum3d(const std::vector<RigidBody3D>& bodies)
     math::Vec3 angular{};
     for (const RigidBody3D& body : bodies)
     {
-        angular += angular_momentum(body);
+        // Spin about the centre of mass, plus the orbital term about the world
+        // origin. Dropping either makes a whole class of motion look conserved
+        // when it is not, which is why the 2D version sums both as well.
+        //
+        // No infinity guard, unlike the 2D version: there an infinite mass is a
+        // legitimate state meaning an immovable body, while a RigidBody3D with
+        // an infinite mass or moment is not valid, so a world that steps cannot
+        // hold one. `position` is the centre of mass; there is no local offset
+        // in three dimensions.
+        angular += spin_angular_momentum(body);
+        angular += body.mass * math::cross(body.position, body.velocity);
     }
     return angular;
 }

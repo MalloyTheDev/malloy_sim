@@ -55,16 +55,25 @@ struct RigidBody3D
     bool is_valid() const;
 };
 
-// Angular momentum in the WORLD frame: R (I omega_body).
+// SPIN angular momentum in the WORLD frame: R (I omega_body).
 //
-// The invariant M20 is built around, and the reason it must be computed in the
-// world frame: under torque-free rotation the body-frame vector I omega changes
-// as the body tumbles, while the world-frame one does not.
+// Spin only. The orbital term m (r x v) about the world origin is NOT here; it
+// belongs to the system rather than to the body's rotation, and
+// `total_angular_momentum3d` adds it. The name says `spin` because the
+// distinction is easy to lose and expensive to lose: dropping the orbital term
+// makes a whole class of motion look conserved when it is not, which is the
+// same warning the 2D `total_angular_momentum` carries.
 //
-// That holds exactly for the continuum equations. The discrete ones gain
-// dt^2 |L x omega|^2 in |L|^2 per step, exactly; see `total_angular_momentum3d`
-// for the derivation and for the configurations in which it is zero.
-math::Vec3 angular_momentum(const RigidBody3D& body);
+// The reason it is computed in the WORLD frame is the invariant M20 is built
+// around: under torque-free rotation the body-frame vector I omega changes as
+// the body tumbles, while the world-frame one does not.
+//
+// This is also the quantity the discrete drift law is about, and the law is
+// PER BODY. The continuum equations conserve it; the discrete ones gain
+// dt^2 |L x omega|^2 in |L|^2 per step, exactly. See
+// `total_angular_momentum3d` for the derivation and for when it is zero, and
+// note there why the magnitude of a SUM of these does not inherit the law.
+math::Vec3 spin_angular_momentum(const RigidBody3D& body);
 
 // Rotational kinetic energy, (1/2) omega . (I omega), computed in the body
 // frame where the inertia is diagonal. A scalar, so the frame does not matter,

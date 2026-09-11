@@ -257,6 +257,24 @@ if(MALLOY_BUILD_TESTS)
 
     add_test(NAME malloy_math_tests COMMAND malloy_math_tests)
 
+    add_executable(malloy_quat_tests
+        tests/math/quat_tests.cpp
+    )
+
+    target_include_directories(malloy_quat_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_quat_tests
+        PRIVATE
+            malloy::math
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    add_test(NAME malloy_quat_tests COMMAND malloy_quat_tests)
+
     add_executable(malloy_time_tests
         tests/time/fixed_step_tests.cpp
     )

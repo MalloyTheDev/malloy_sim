@@ -74,11 +74,19 @@ rigid_body3d 1.5   1.0 2.0 3.0    2.0 0.0 0.0   0.0 0.0 0.0 0.0   -0.02 0.0 0.0 
 #    1.0e-02, the magnitude of 1.0*(0.02) + 1.5*(-0.02) = -0.01.
 #
 # 2. E and |L| sit still, then jump, then sit still again. That is not noise,
-#    and the jump is where the flip is. Semi-implicit Euler changes |L|^2 by
-#    exactly dt^2 |L x omega|^2 per step, which is ZERO whenever omega lies
-#    along a principal axis and large only while the body is turning over. So
-#    these two columns are a readout of when the tumble happened: flat through
-#    step 5000, climbing hard between 5000 and 10000, flat again afterwards.
+#    and the jump is where the flip is. The forward-Euler angular step changes
+#    each body's |L|^2 by exactly dt^2 |L x omega|^2 per step, which is ZERO
+#    whenever omega lies along a principal axis and large only while the body is
+#    turning over. So these two columns are a readout of when the tumble
+#    happened: flat through step 5000, climbing hard between 5000 and 10000,
+#    flat again afterwards.
+#
+#    |L| here is the magnitude of the whole system's angular momentum, a SUM of
+#    two world-space vectors, so strictly it tracks that per-body law only up to
+#    how the two vectors turn relative to each other. Body 1 sits on a principal
+#    axis and holds still, and both bodies move straight along x through the
+#    origin so neither carries an orbital term, which is why the column reads as
+#    cleanly as it does here.
 #
 #    The second body contributes nothing to that jump. It is spinning about a
 #    principal axis and stays there, so its own contribution is constant to the
@@ -100,16 +108,26 @@ rigid_body3d 1.5   1.0 2.0 3.0    2.0 0.0 0.0   0.0 0.0 0.0 0.0   -0.02 0.0 0.0 
 #    side: the body is spinning the other way round. By step 20000 wx is
 #    growing again, on its way to the next flip.
 #
-#    The growth rate is not a fitted number. Linearizing about a spin W along
-#    the intermediate axis gives a rate of
+#    The growth rate is not a fitted number. With the moments sorted as
+#    I1 < I2 < I3, linearizing about a spin W along the intermediate axis gives
+#    a rate of
 #
-#      W sqrt((I2 - I1)(I2 - I3) / (I1 I3))   which is W/sqrt(3) here,
+#      W sqrt((I2 - I1)(I3 - I2) / (I1 I3))   which is W/sqrt(3) here.
 #
-#    and it is the sign under that square root, positive for the intermediate
-#    axis and negative for the other two, that is the entire theorem. The
-#    discrete version of that rate is asserted to fifteen significant figures in
+#    Both brackets are a larger moment minus a smaller one, so the quantity
+#    under the root is positive and the motion grows. About the other two axes
+#    the corresponding quantity is negative and the motion oscillates instead;
+#    that leading sign is the entire theorem. The discrete version of the rate
+#    is asserted to fifteen significant figures in
 #    tests/rigid/rigid_world_tests.cpp, along with the fact that the two stable
 #    axes hold the identical nudge to within a part in a hundred.
+#
+#    "Stable" there means over this run: twenty thousand steps at this dt. The
+#    integrator is forward Euler on the angular velocity, which amplifies even
+#    an oscillatory perturbation by exactly sqrt(1 + (mu dt)^2) per step, so a
+#    principal-axis nudge grows without bound at fixed dt over a long enough
+#    run. It vanishes as dt -> 0 for a fixed duration, which is why the stable
+#    axes hold here. Improving that is a later integrator's job, not M20's.
 #
 # 4. The peak angular speed during the tumble is also derivable rather than
 #    observed. Starting on the separatrix fixes |L| and the energy, and where

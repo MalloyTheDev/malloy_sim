@@ -7,6 +7,48 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- M20 review pass. Four defects found reviewing the milestone after it shipped,
+  all in the documentation and diagnostics rather than the integrator, and all
+  corrected here.
+
+  `rigid::total_angular_momentum3d` summed only the SPIN term `R (I omega)` and
+  omitted the orbital `m (r x v)`, so a body flying past the world origin
+  reported no angular momentum about it. The 2D `total_angular_momentum` has
+  always summed both and warns against dropping either; the 3D one now matches.
+  The per-body accessor is renamed `spin_angular_momentum` to say what it is, a
+  mutation dropping the orbital term is caught, and the orbital term's exact
+  constancy for a free body is asserted.
+
+  The intermediate-axis growth rate in `scenarios/intermediate_axis.scn` was
+  written `W sqrt((I2 - I1)(I2 - I3) / (I1 I3))`, whose second bracket is
+  NEGATIVE for the intermediate axis. Corrected to `(I2 - I1)(I3 - I2)`, with
+  both stable axes' rates spelled out too, since that leading sign is the whole
+  theorem. The test comment carried the same slip and is fixed; the asserted
+  numbers were already right.
+
+  The renormalization comment in `rigid3d.cpp` still said normalizing perturbs
+  world-frame angular momentum. It does not: a nonzero quaternion and any
+  scaling of it represent the same rotation. Normalizing is required only
+  because `rotate` uses the optimized unit-only form, which returns
+  `p + k^2 (R p - p)` for a quaternion of norm k; that property is now its own
+  test.
+
+  The zero-drift condition was stated as "a principal axis, or a sphere". The
+  exact condition is that `I omega` is parallel to `omega`, i.e. omega lies in
+  an EIGENSPACE of the inertia, which for an axisymmetric body includes every
+  direction in the degenerate plane and not only its two principal axes. That
+  case is now tested directly, and the prose and the drift-law comment say
+  eigenspace.
+
+  Also: the angular-velocity step is named FORWARD Euler wherever it is
+  described, since the exact O(dt^2) drift is that method's error and the word
+  "semi-implicit" belongs to the velocity-before-orientation coupling; the
+  finite-horizon nature of the stable-axis result is stated in the template
+  (forward Euler amplifies even an oscillatory mode by sqrt(1 + (mu dt)^2) per
+  step, so "stable" means at this dt over this run); and the quaternion tests
+  are split out of `tests/math/vec2_tests.cpp` into `tests/math/quat_tests.cpp`,
+  a fourteenth test executable.
+
 - M19 shipped without scenario parse tests for `type nbody3d` or the `body3`
   key, while every other domain has them. Rule 16 requires malformed-input
   tests and the parser is where malformed input arrives, so the milestone was
@@ -869,10 +911,20 @@ T'     = T     + dt^2 (I^-1 u) . u / 2
 
 Both corrections are positive, so this is a slow gain and not a loss. Both are
 checked every step in the tests, and they explain the cases that ARE exact:
-when omega lies along a principal axis, or when all three moments are equal, L
-is parallel to omega, u is zero, and nothing drifts at all. In those
-configurations the angular velocity, the world-frame angular momentum and the
-rotational energy are bit-identical after five thousand steps.
+`u` is zero exactly when `I omega` is parallel to `omega`, that is when omega
+lies in an eigenspace of the inertia. For three distinct moments that means a
+principal axis; for a sphere any direction; for an axisymmetric body any
+direction in the degenerate plane. In those configurations the angular
+velocity, the world-frame spin angular momentum and the rotational energy are
+bit-identical after five thousand steps.
+
+`total_angular_momentum3d` is the SPIN of each body plus its orbital
+`m (r x v)`, matching the 2D diagnostic; the orbital term is exactly constant
+since no force acts. Its magnitude is a vector sum and so does not itself
+inherit the per-body `|L|^2` law, unlike the kinetic energy, which is a scalar
+sum and does. The drift itself comes from the FORWARD-Euler angular velocity
+step; "semi-implicit" here names only the velocity-before-orientation coupling,
+as in every other world.
 
 That also makes the template's diagnostics readable rather than mysterious. The
 E and |L| columns sit still, jump, and sit still again, and the jump is exactly
