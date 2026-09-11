@@ -539,6 +539,183 @@ int main()
         MALLOY_CHECK_FALSE((Body2D{Vec2{}, Vec2{0.0, too_big}, 1.0}.is_valid()));
     }
 
+    // --- M19: three dimensions. Every configuration below is deliberately NOT
+    //     confined to a coordinate plane, because one that is would hide a
+    //     dropped z entirely (docs/05, asymmetric configurations). ---
+    {
+        using malloy::math::Vec3;
+        using malloy::nbody::Body3D;
+        using malloy::nbody::NBody3DWorld;
+
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+
+        // Validation, including the squarable bound.
+        MALLOY_CHECK_TRUE((Body3D{Vec3{1.0, 2.0, 3.0}, Vec3{}, 1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Body3D{Vec3{}, Vec3{}, 0.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Body3D{Vec3{0.0, 0.0, nan3}, Vec3{}, 1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Body3D{Vec3{}, Vec3{0.0, inf3, 0.0}, 1.0}.is_valid()));
+        MALLOY_CHECK_FALSE((Body3D{Vec3{0.0, 0.0, 1.4e154}, Vec3{}, 1.0}.is_valid()));
+
+        // --- The softening contract, the same number the 2D world pins,
+        //     because it is the same denominator. r = 1, softening = 2, so
+        //     r2 = 5 and |a| = 5^-1.5 = 0.0894427190999916. ---
+        {
+            std::vector<Body3D> b = {Body3D{Vec3{0.0, 0.0, 0.0}, Vec3{}, 1.0},
+                                     Body3D{Vec3{0.0, 0.0, 1.0}, Vec3{}, 1.0}};
+            NBody3DWorld w{SimulationSettings{0.001}, NBodySettings{1.0, 2.0}, b};
+            const auto acc = w.compute_accelerations();
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                acc[0], Vec3{0.0, 0.0, 0.0894427190999916}, 1e-15));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                acc[1], Vec3{0.0, 0.0, -0.0894427190999916}, 1e-15));
+        }
+
+        // --- Momentum and angular momentum are exact, and angular momentum is
+        //     a VECTOR here. Every component of it is nonzero below, so a
+        //     dropped one is not hidden by a zero. ---
+        {
+            const std::vector<Body3D> start = {
+                Body3D{Vec3{1.0, -2.0, 0.5}, Vec3{0.1, 0.3, -0.2}, 1.5},
+                Body3D{Vec3{-1.5, 0.75, -1.0}, Vec3{-0.2, 0.05, 0.4}, 2.5},
+                Body3D{Vec3{0.25, 1.5, 2.0}, Vec3{0.15, -0.25, 0.1}, 0.75}};
+
+            const Vec3 p0 = malloy::nbody::total_momentum(start);
+            const Vec3 l0 = malloy::nbody::total_angular_momentum(start);
+
+            // Not a planar configuration, and not a degenerate angular
+            // momentum: if any of these were zero the conservation check below
+            // would be weaker than it looks.
+            MALLOY_CHECK_TRUE(std::abs(l0.x) > 0.1);
+            MALLOY_CHECK_TRUE(std::abs(l0.y) > 0.1);
+            MALLOY_CHECK_TRUE(std::abs(l0.z) > 0.1);
+
+            NBody3DWorld w{SimulationSettings{0.001}, NBodySettings{1.0, 0.05}, start};
+            for (int i = 0; i < 5000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+
+            // Both are exact for pairwise central forces, to all orders in dt:
+            // the (i,j) and (j,i) torque contributions cancel identically. The
+            // only error possible is rounding.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::nbody::total_momentum(w.bodies()), p0, 1e-12));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::nbody::total_angular_momentum(w.bodies()), l0, 1e-12));
+        }
+
+        // --- The orbital plane is invariant, which is a statement three
+        //     dimensions can make and two cannot. Angular momentum is exactly
+        //     conserved, so its DIRECTION is fixed, so the orbit never leaves
+        //     the plane it started in. The plane here is tilted away from every
+        //     coordinate plane. ---
+        {
+            const Vec3 offset = malloy::math::normalize(Vec3{1.0, 1.0, 1.0});
+            const Vec3 along = malloy::math::normalize(Vec3{1.0, -1.0, 0.0});
+
+            std::vector<Body3D> b = {
+                Body3D{Vec3{}, Vec3{}, 1.0},
+                Body3D{offset, along * 1.0, 1e-6}};
+            NBody3DWorld w{SimulationSettings{0.001}, NBodySettings{1.0, 1e-6}, b};
+
+            const Vec3 normal0 =
+                malloy::math::normalize(malloy::nbody::total_angular_momentum(w.bodies()));
+            MALLOY_CHECK_TRUE(std::abs(normal0.x) > 0.1);
+            MALLOY_CHECK_TRUE(std::abs(normal0.z) > 0.1);
+
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                // The orbiting body stays in the plane through the origin whose
+                // normal is L: its position is always perpendicular to L.
+                MALLOY_CHECK_NEAR(
+                    malloy::math::dot(w.bodies()[1].position, normal0), 0.0, 1e-12);
+            }
+            const Vec3 normal1 =
+                malloy::math::normalize(malloy::nbody::total_angular_momentum(w.bodies()));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(normal1, normal0, 1e-12));
+        }
+
+        // --- The 3D world reproduces the 2D one EXACTLY when the configuration
+        //     lies in a plane. This is the strongest check available: it puts
+        //     the new implementation against the one that has been tested since
+        //     M4, rather than against a fresh derivation that could share a
+        //     mistake with it. ---
+        {
+            const std::vector<Body2D> flat = {
+                Body2D{Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 1.0},
+                Body2D{Vec2{1.0, 0.0}, Vec2{0.0, 1.0}, 1e-6},
+                Body2D{Vec2{-0.4, 0.9}, Vec2{0.3, -0.2}, 0.5}};
+            std::vector<Body3D> lifted;
+            for (const Body2D& body : flat)
+            {
+                lifted.push_back(Body3D{Vec3{body.position.x, body.position.y, 0.0},
+                                        Vec3{body.velocity.x, body.velocity.y, 0.0},
+                                        body.mass});
+            }
+
+            NBodyWorld two{SimulationSettings{0.001}, NBodySettings{1.0, 1e-3}, flat};
+            NBody3DWorld three{SimulationSettings{0.001}, NBodySettings{1.0, 1e-3},
+                               lifted};
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(two.step().ok());
+                MALLOY_CHECK_TRUE(three.step().ok());
+            }
+            for (std::size_t i = 0; i < flat.size(); ++i)
+            {
+                // Bit for bit, not nearly: the two compute the same sums in the
+                // same order, and the extra component contributes exact zeros.
+                MALLOY_CHECK_NEAR(three.bodies()[i].position.x,
+                                  two.bodies()[i].position.x, 0.0);
+                MALLOY_CHECK_NEAR(three.bodies()[i].position.y,
+                                  two.bodies()[i].position.y, 0.0);
+                // And nothing drove the third component at all.
+                MALLOY_CHECK_NEAR(three.bodies()[i].position.z, 0.0, 0.0);
+                MALLOY_CHECK_NEAR(three.bodies()[i].velocity.z, 0.0, 0.0);
+            }
+        }
+
+        // --- Coincident bodies with no softening stay finite rather than
+        //     producing NaN, the same guard the 2D world has. ---
+        {
+            std::vector<Body3D> b = {Body3D{Vec3{}, Vec3{}, 1.0},
+                                     Body3D{Vec3{}, Vec3{}, 1.0}};
+            NBody3DWorld w{SimulationSettings{0.001}, NBodySettings{1.0, 0.0}, b};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(w.bodies()[0].position));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(w.bodies()[0].velocity,
+                                                        Vec3{}, 0.0));
+        }
+
+        // --- Determinism, and a failing step leaving the state untouched. ---
+        {
+            const std::vector<Body3D> start = {
+                Body3D{Vec3{0.4, -0.3, 0.7}, Vec3{0.0, 0.2, -0.1}, 2.0},
+                Body3D{Vec3{-0.6, 0.5, -0.2}, Vec3{0.1, 0.0, 0.3}, 1.0}};
+            NBody3DWorld a{SimulationSettings{0.001}, NBodySettings{1.0, 0.01}, start};
+            NBody3DWorld b{SimulationSettings{0.001}, NBodySettings{1.0, 0.01}, start};
+            for (int i = 0; i < 1000; ++i)
+            {
+                MALLOY_CHECK_TRUE(a.step().ok());
+                MALLOY_CHECK_TRUE(b.step().ok());
+            }
+            for (std::size_t i = 0; i < start.size(); ++i)
+            {
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    a.bodies()[i].position, b.bodies()[i].position, 0.0));
+            }
+            MALLOY_CHECK_EQ(a.tick_count(), std::uint64_t{1000});
+
+            NBody3DWorld bad{SimulationSettings{-1.0}, NBodySettings{1.0, 0.0}, start};
+            MALLOY_CHECK_TRUE(bad.validate() == StepStatus::InvalidSettings);
+            MALLOY_CHECK_FALSE(bad.step().ok());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                bad.bodies()[0].position, start[0].position, 0.0));
+        }
+    }
+
     std::cout << "malloy_nbody_tests passed\n";
     return 0;
 }

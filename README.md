@@ -20,7 +20,7 @@ Its first domain, a deterministic terminal 2D N-body gravity simulation, is
 complete and shipping, along with colliding particles, ballistics, 2D rigid
 bodies, spring networks, rigid-body contact response and gravity for rigid
 bodies, flat ground, Coulomb friction and charged particles in electric and
-magnetic fields (milestones M1-M18).
+magnetic fields, and gravity in three dimensions (milestones M1-M19).
 
 ## Locked baseline
 
@@ -42,7 +42,7 @@ The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
 **M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
 bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
 response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
-**M17: friction**, **M18: charged particles**). The
+**M17: friction**, **M18: charged particles**, **M19: 3D gravity**). The
 project builds clean under
 MSVC (`/W4 /permissive-`), and all 13 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
@@ -50,7 +50,7 @@ reporting conserved system diagnostics alongside an ASCII view of the bodies.
 
 | Module | Type | Provides |
 |---|---|---|
-| `malloy_math` | INTERFACE | `Real = double`, `Vec2`, vector/scalar helpers |
+| `malloy_math` | INTERFACE | `Real = double`, `Vec2`, `Vec3`, vector/scalar helpers |
 | `malloy_time` | INTERFACE | `FixedStep` (fixed timestep, tick count, elapsed time) |
 | `malloy_sim_core` | STATIC | `SimulationSettings`, `StepStatus`, `StepResult` |
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
@@ -81,7 +81,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 11 templates ship across five domains,
+and runnable with the shipped binary. 12 templates ship across five domains,
 and every one is parsed, validated and stepped by the test suite. That count
 is checked against the directory by the scenario tests, so it cannot go stale.
 
@@ -239,6 +239,7 @@ built-in scenarios shown above.
 | M16 | halfplanes: true flat ground, floors, walls and ramps | ✅ Done |
 | M17 | Coulomb friction: rolling, spin-down, static holding | ✅ Done |
 | M18 | `malloy_charges`: charged particles, E and B fields | ✅ Done |
+| M19 | `Vec3` and 3D gravity: the first step off the plane | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -251,7 +252,9 @@ a set of decisions.
 Intended, not yet built, and never added speculatively
 (`docs/07_POST_M5_ROADMAP.md`):
 
-- **3D**, which is the project's stated destination
+- **the rest of 3D**. M19 shipped `Vec3` and 3D gravity; quaternions, inertia
+  tensors, 3D contact geometry and 3D versions of the other four domains are
+  each their own milestone
   (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is

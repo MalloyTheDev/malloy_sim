@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <malloy/nbody/body2d.hpp>
+#include <malloy/nbody/body3d.hpp>
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/particles/particle2d.hpp>
 #include <malloy/charges/charge_settings.hpp>
@@ -31,6 +32,7 @@ enum class ScenarioType
     Rigid,
     Springs,
     Charges,
+    NBody3D,
 };
 
 // A complete, runnable scenario for one domain.
@@ -58,6 +60,9 @@ struct Scenario
     // type == Rigid
     std::vector<rigid::RigidBody2D> rigid_bodies;
     rigid::RigidSettings rigid_settings{};
+
+    // type == NBody3D
+    std::vector<nbody::Body3D> bodies3d;
 
     // type == Charges
     std::vector<charges::ChargedParticle2D> charge_list;
@@ -88,7 +93,8 @@ struct ScenarioParseResult
 //
 // Common to every domain:
 //
-//   type <nbody|particles|rigid|springs|charges>  which domain (default nbody)
+//   type <nbody|particles|rigid|springs|charges|nbody3d>  which domain
+//                         (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
@@ -98,6 +104,14 @@ struct ScenarioParseResult
 //   g <value>             gravitational constant   (default 1.0)
 //   softening <value>     softening length         (default 0.0)
 //   body <mass> <px> <py> <vx> <vy>
+//
+// type nbody3d:
+//
+//   Newtonian gravity in three dimensions. Takes the same g and softening keys
+//   as type nbody, because they mean exactly the same thing in either
+//   dimension, and differs only in the body line.
+//
+//   body3 <mass> <px> <py> <pz> <vx> <vy> <vz>
 //
 // type particles:
 //

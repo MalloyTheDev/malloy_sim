@@ -577,6 +577,40 @@ int main()
                     return 1;
                 }
             }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::NBody3D)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.bodies3d.size() >= 2);
+                malloy::nbody::NBody3DWorld world{r.scenario.simulation,
+                                                  r.scenario.nbody_settings,
+                                                  r.scenario.bodies3d};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                const auto& settings = r.scenario.nbody_settings;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.bodies();
+                    if (q == "energy")
+                        return malloy::nbody::total_energy(b, settings.g,
+                                                           settings.softening);
+                    if (q == "kinetic") return malloy::nbody::total_kinetic_energy(b);
+                    if (q == "momentum_x") return malloy::nbody::total_momentum(b).x;
+                    if (q == "momentum_y") return malloy::nbody::total_momentum(b).y;
+                    if (q == "momentum_z") return malloy::nbody::total_momentum(b).z;
+                    // Angular momentum is a vector here, so each component is
+                    // nameable. A 2D template asking for one of these, or a 3D
+                    // one asking for plain `angular`, fails rather than being
+                    // skipped.
+                    if (q == "angular_x")
+                        return malloy::nbody::total_angular_momentum(b).x;
+                    if (q == "angular_y")
+                        return malloy::nbody::total_angular_momentum(b).y;
+                    if (q == "angular_z")
+                        return malloy::nbody::total_angular_momentum(b).z;
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
+                {
+                    return 1;
+                }
+            }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Springs)
             {
                 MALLOY_CHECK_TRUE(r.scenario.spring_bodies.size() >= 2);

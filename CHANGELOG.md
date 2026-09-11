@@ -756,6 +756,102 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M19] - 2026-09-10  (Vec3 and gravity in three dimensions)
+
+### Added
+
+- `math::Vec3`, a concrete 3D vector beside `Vec2`, with a `cross` that returns
+  a VECTOR.
+- `nbody::Body3D` and `nbody::NBody3DWorld`, Newtonian gravity in three
+  dimensions, inside `malloy_nbody` rather than a library of its own.
+- `nbody::total_angular_momentum(const std::vector<Body3D>&)`, which returns a
+  Vec3 where the 2D world returns a scalar.
+- `type nbody3d` in the scenario format, with `body3 <mass> <px> <py> <pz> <vx>
+  <vy> <vz>`. The `g` and `softening` keys now serve both gravity worlds,
+  because they mean the same thing in either dimension.
+- `scenarios/inclined_orbits.scn`.
+- An orthographic projection in the terminal app, so a 3D scenario still draws.
+
+### The three questions ADR 0009 left open, answered
+
+That ADR deliberately deferred three decisions until a concrete case existed.
+Building M19 settled all three, and the amendment there records them.
+
+**Separate types, not templates.** `Vec3` is its own type. The two are not one
+algebra with a different component count: `cross` is a SCALAR in 2D and a
+VECTOR in 3D, so a template would need specializing for the one operation that
+matters most to rigid-body dynamics, and `perp` and rotation by a scalar angle
+have no 3D form at all. A template would have unified the component-wise
+arithmetic, which is the easy half.
+
+**3D worlds sit inside their domain's library.** Gravity is one domain; the
+dimension is not a domain. Splitting them would put the same equations in two
+libraries and require keeping them in step by hand. The dispatch switch grew by
+one branch, exactly what ADR 0006 says a new world should cost.
+
+**2D stays supported**, which follows from the above rather than being a
+separate decision. The 2D types are untouched and all twelve templates run.
+
+### Architecture Notes
+
+- This is the smallest honest step into 3D, and that was the point. N-body is
+  the only domain with no contacts and no orientation, so it needed `Vec3` and
+  nothing else. Quaternions and inertia tensors stay deferred rather than being
+  built speculatively for a user that does not exist yet (rule 11).
+- `malloy_ascii` does not carry over, as ADR 0009 said it would not. The app
+  projects orthographically along z and nothing cleverer: motion along z is
+  invisible, a tilted circular orbit reads as an ellipse, and two bodies at
+  different depths can overlap. Making that a camera would turn this into a
+  graphics project, which rule 2 prevents until rendering has its milestone.
+  The template says so rather than leaving a reader to wonder.
+- `malloy_sim_core` is unchanged, and the layering test confirms the new code
+  adds no dependency: `malloy_nbody` still links math, sim_core and time.
+
+### What conserves, and what does not
+
+Momentum and angular momentum are both EXACT for pairwise central forces, to
+all orders in dt, because the (i,j) and (j,i) torque contributions are
+`x_i x x_j` and `x_j x x_i` and cancel identically. Softening changes only the
+magnitude and does not break it. The only error possible is rounding.
+
+Angular momentum being a vector is what lets three dimensions state something
+two cannot: because its DIRECTION is fixed, every orbit is confined forever to
+the plane it started in. Two orbits in different planes stay in different
+planes. `scenarios/inclined_orbits.scn` is built around that, and the test
+asserts it directly by checking an orbiting body's position stays perpendicular
+to L at every step.
+
+Energy is not conserved and is not meant to be. It oscillates about a nearby
+quantity with bounded amplitude and no secular drift, which is what a symplectic
+method gives, and the template's E column is left visibly wandering in the ninth
+digit with a note saying so.
+
+### Tests
+
+- `Vec3` arithmetic with every component distinct, so a dropped or transposed
+  one shows, and a 2-3-6 triple so lengths are exact rather than nearly so.
+- The cross product: right-handed on all three axis pairs, anticommutative,
+  zero on a parallel pair, perpendicular to both inputs, satisfying
+  `|a x b|^2 + (a . b)^2 = |a|^2 |b|^2`, and one hand-computed value off every
+  axis. The handedness assertions matter because a sign error there is
+  invisible to every magnitude (docs/05).
+- Every 3D configuration is deliberately NOT confined to a coordinate plane,
+  and the angular momentum in the conservation test has all three components
+  nonzero, checked before the conservation is. A planar configuration would
+  conserve two components trivially by both being zero.
+- The orbital-plane invariant, asserted at every step of a tilted orbit.
+- The strongest check available: a 2D configuration embedded at z = 0 runs in
+  both worlds and they agree BIT FOR BIT, with the third component staying
+  exactly zero. That puts the new code against an implementation tested since
+  M4 rather than against a fresh derivation that could share a mistake with it.
+- The softening contract, pinned at the same number the 2D world uses because
+  it is the same denominator.
+- Verified by mutation testing. Nine mutations were applied and all nine were
+  caught: two different wrong cross products, a dot product missing its z term,
+  `is_squarable` weakened to `is_finite`, a pair force applied to one member
+  only, an unsquared softening, the integrator turned into explicit Euler, the
+  mass dropped from angular momentum, and the body validation weakened.
+
 ## [M18] - 2026-09-10  (charged particles)
 
 ### Added

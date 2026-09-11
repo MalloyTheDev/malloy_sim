@@ -5,18 +5,20 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M18 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M19 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all five domains. Gravity, colliding particles, rigid bodies, spring
 networks and charged particles are the finished domains. See `README.md` and `CHANGELOG.md`.
 
 ## Where this is going
 
-MalloySim is 2D today and is intended to become a 3D simulator. That has not
-started and is gated behind its own milestone, but it is the destination, and
-it is why some of the current code looks the way it does: scalar angles and
-scalar inertia are 2D specializations of quaternions and inertia tensors, not
-an alternative to them. See
+MalloySim is intended to become a 3D simulator, and M19 started it: `Vec3` and
+a 3D gravity world ship today. Everything else is still 2D, which is most of the
+project, and each remaining piece is its own milestone.
+
+That destination is why some of the current code looks the way it does: scalar
+angles and scalar inertia are 2D specializations of quaternions and inertia
+tensors rather than an alternative to them. See
 `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
 ## Read order
@@ -49,11 +51,12 @@ completion.
 
 ## What's next
 
-M1-M18 are done. The classical mechanics track is complete, including the
+M1-M19 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
 halfplane ground of M16 and the Coulomb friction of M17, and M18 added
-electromagnetism beside it. Five
+electromagnetism beside it. M19 took the first step off the plane, with Vec3
+and a 3D gravity world. Five
 finished domains sit behind multi-domain dispatch. Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 

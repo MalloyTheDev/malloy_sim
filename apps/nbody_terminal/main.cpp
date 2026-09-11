@@ -240,6 +240,68 @@ int run_rigid(const char* title, const SimulationSettings& sim,
     return drive(title, world, report, steps, output_every);
 }
 
+// Flattens 3D positions onto the xy plane for the debug view.
+//
+// An orthographic projection along z, and nothing cleverer. malloy_ascii plots
+// points that are already in the view plane, and drawing a 3D scene properly is
+// a different problem rather than a wider one (ADR 0009). Turning this into a
+// camera would make it a graphics project, which rule 2 exists to prevent until
+// rendering has its own milestone.
+//
+// The consequence is worth knowing while reading a frame: motion along z is
+// invisible here, so an orbit tilted out of the xy plane looks like an ellipse
+// rather than a circle, and two bodies at different depths can overlap.
+std::vector<Vec2> projected(const std::vector<malloy::nbody::Body3D>& bodies)
+{
+    std::vector<Vec2> points;
+    points.reserve(bodies.size());
+    for (const auto& body : bodies)
+    {
+        points.push_back(Vec2{body.position.x, body.position.y});
+    }
+    return points;
+}
+
+// Runs one 3D N-body scenario. A sixth concrete runner and a sixth branch of
+// the dispatch switch, with no base class: ADR 0006 holds in three dimensions
+// exactly as it does in two.
+int run_nbody3d(const char* title, const SimulationSettings& sim,
+                NBodySettings settings, std::vector<malloy::nbody::Body3D> bodies,
+                int steps, int output_every)
+{
+    malloy::nbody::NBody3DWorld world{sim, settings, std::move(bodies)};
+
+    std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
+              << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(projected(world.bodies()));
+
+    const auto report = [&world, &view, &settings](std::int64_t step_index) {
+        const auto& now = world.bodies();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        // Angular momentum is a vector in three dimensions, and its magnitude
+        // is the single number worth watching: it is exactly conserved, so any
+        // movement in this column is rounding.
+        std::cout << "   E " << std::setw(16)
+                  << malloy::nbody::total_energy(now, settings.g, settings.softening)
+                  << "   |L| " << std::setw(16)
+                  << malloy::math::length(malloy::nbody::total_angular_momentum(now))
+                  << "   |p| " << std::setw(16)
+                  << malloy::math::length(malloy::nbody::total_momentum(now)) << '\n';
+        std::cout << std::fixed;
+        print_view(view, projected(now));
+    };
+
+    return drive(title, world, report, steps, output_every);
+}
+
 // Runs one charged-particle scenario. A fifth concrete runner, and the fifth
 // branch of the dispatch switch: no base class, exactly as ADR 0006 intends.
 int run_charges(const char* title, const SimulationSettings& sim,
@@ -420,6 +482,9 @@ int main(int argc, char** argv)
         case ScenarioType::Charges:
             return run_charges(argv[1], s.simulation, s.charge_settings,
                                s.charge_list, s.steps, s.output_every);
+        case ScenarioType::NBody3D:
+            return run_nbody3d(argv[1], s.simulation, s.nbody_settings, s.bodies3d,
+                               s.steps, s.output_every);
         }
         return 1;
     }

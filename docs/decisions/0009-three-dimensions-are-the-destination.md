@@ -2,8 +2,12 @@
 
 ## Status
 
-Accepted, recorded at M16. Nothing 3D has been started, and none is permitted
-before its own milestone (`CLAUDE.md` rule 6).
+Accepted, recorded at M16, amended at M19.
+
+As of M19 the first 3D work has shipped: `math::Vec3` and
+`nbody::NBody3DWorld`. Everything else is still 2D, and each remaining piece
+needs its own milestone (`CLAUDE.md` rule 6). The amendment below records how
+M19 answered the three questions this ADR deliberately left open.
 
 ## Context
 
@@ -76,7 +80,43 @@ about its intermediate axis with no torque applied at all. That is physics the
 2D code does not contain in any form, and it cannot be reached by replacing
 types.
 
-## Deliberately not decided here
+## Amendment at M19: the three open questions, answered
+
+M19 shipped `math::Vec3` and `nbody::NBody3DWorld`, and building them settled
+all three questions below. Each is answered by what the work actually required
+rather than by choosing in the abstract, which is why they were left open.
+
+**Separate types, not templates.** `Vec3` is its own concrete type beside
+`Vec2`. The decisive reason is that the two are not one algebra with a
+different component count: `cross` returns a SCALAR in two dimensions and a
+VECTOR in three, so a template would need specializing for the one operation
+that matters most to rigid-body dynamics, and `perp` and rotation by a scalar
+angle have no 3D form at all. A template would have unified the component-wise
+arithmetic, which is the easy half, and then needed specializing for every part
+that is interesting. What is shared is spelled identically on purpose, so code
+that reads one reads the other.
+
+**3D worlds sit inside their domain's library, not beside it.** `Body3D` and
+`NBody3DWorld` live in `malloy_nbody`. Gravity is one domain, and two and three
+dimensions are the same physics with a different component count, not two
+domains that share a name. Splitting them would put the same equations in two
+libraries and require keeping them in step by hand. The unit ADR 0006 makes a
+library is the domain; the dimension is not one. The dispatch switch grew by
+one branch, `type nbody3d`, exactly as a new domain would have cost it.
+
+**2D stays supported.** It follows from the answer above rather than being a
+separate decision: the 2D types are untouched, both worlds are selected by the
+same `type` key, and the twelve shipped templates still run. The strongest
+evidence the 3D code is right is a test that embeds a 2D configuration at
+z = 0 and runs both worlds: their positions agree bit for bit, and the third
+component stays exactly zero.
+
+What M19 did NOT do, deliberately: quaternions, inertia tensors, 3D contact
+geometry, and 3D versions of the other four domains. N-body is the only domain
+with no contacts and no orientation, so it needed `Vec3` and nothing else,
+which let the rest stay deferred rather than be built speculatively (rule 11).
+
+## Deliberately not decided here (resolved above at M19)
 
 Left to the milestone, so this ADR records a direction and not a design:
 

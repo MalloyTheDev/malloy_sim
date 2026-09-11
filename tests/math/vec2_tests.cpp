@@ -177,6 +177,81 @@ int main()
         MALLOY_CHECK_TRUE(malloy::math::is_squarable(Vec2{1.0e-200, 0.0}));
     }
 
+    // --- M19: Vec3. Only the parts that differ from Vec2 are worth dwelling
+    //     on, and the cross product is all of them. ---
+    {
+        using malloy::math::Vec3;
+        const Real inf = std::numeric_limits<Real>::infinity();
+        const Real nan = std::numeric_limits<Real>::quiet_NaN();
+
+        // Component arithmetic, with every component distinct so a dropped or
+        // transposed one shows.
+        const Vec3 a{1.0, 2.0, 3.0};
+        const Vec3 b{-4.0, 5.0, -6.0};
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(a + b, Vec3{-3.0, 7.0, -3.0}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(a - b, Vec3{5.0, -3.0, 9.0}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(a * 2.0, Vec3{2.0, 4.0, 6.0}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(-a, Vec3{-1.0, -2.0, -3.0}, eps));
+        MALLOY_CHECK_NEAR(malloy::math::dot(a, b), -4.0 + 10.0 - 18.0, eps);
+
+        // 3-4-5 in three dimensions, so length is exact rather than nearly so.
+        MALLOY_CHECK_NEAR(malloy::math::length(Vec3{2.0, 3.0, 6.0}), 7.0, eps);
+        MALLOY_CHECK_NEAR(malloy::math::distance(Vec3{1.0, 1.0, 1.0},
+                                                 Vec3{3.0, 4.0, 7.0}), 7.0, eps);
+
+        // --- The cross product, which is where 3D stops being 2D with an
+        //     extra component. ---
+
+        // Right-handed, checked on all three axis pairs. A sign error here is
+        // invisible to every magnitude, so it needs its own assertion.
+        const Vec3 ex{1.0, 0.0, 0.0};
+        const Vec3 ey{0.0, 1.0, 0.0};
+        const Vec3 ez{0.0, 0.0, 1.0};
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(malloy::math::cross(ex, ey), ez, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(malloy::math::cross(ey, ez), ex, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(malloy::math::cross(ez, ex), ey, eps));
+
+        // Anticommutative, and zero on a parallel pair.
+        const Vec3 c = malloy::math::cross(a, b);
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(malloy::math::cross(b, a), -c, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            malloy::math::cross(a, a * 3.0), Vec3{}, eps));
+
+        // Perpendicular to both inputs. This is the property the whole of 3D
+        // angular momentum rests on.
+        MALLOY_CHECK_NEAR(malloy::math::dot(c, a), 0.0, 1e-12);
+        MALLOY_CHECK_NEAR(malloy::math::dot(c, b), 0.0, 1e-12);
+
+        // |a x b|^2 + (a . b)^2 = |a|^2 |b|^2, which pins the magnitude without
+        // needing a sine.
+        const Real dot_ab = malloy::math::dot(a, b);
+        MALLOY_CHECK_NEAR(malloy::math::length_squared(c) + dot_ab * dot_ab,
+                          malloy::math::length_squared(a) *
+                              malloy::math::length_squared(b),
+                          1e-12);
+
+        // Worked by hand, off every axis, so no component can be dropped:
+        // (1,2,3) x (-4,5,-6) = (2*-6 - 3*5, 3*-4 - 1*-6, 1*5 - 2*-4)
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(c, Vec3{-27.0, -6.0, 13.0}, eps));
+
+        // --- The shared vocabulary means the same thing it does for Vec2. ---
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            malloy::math::normalize(Vec3{0.0, 0.0, -5.0}), Vec3{0.0, 0.0, -1.0}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            malloy::math::normalize(Vec3{}), Vec3{}, eps)); // no direction to give
+
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(a));
+        MALLOY_CHECK_FALSE(malloy::math::is_finite(Vec3{0.0, inf, 0.0}));
+        MALLOY_CHECK_FALSE(malloy::math::is_finite(Vec3{0.0, 0.0, nan}));
+
+        MALLOY_CHECK_TRUE(malloy::math::is_squarable(a));
+        MALLOY_CHECK_TRUE(malloy::math::is_squarable(Vec3{1.0e154, 0.0, 0.0}));
+        // Finite in every component, and its square is not.
+        const Vec3 huge{0.0, 0.0, 1.4e154};
+        MALLOY_CHECK_TRUE(malloy::math::is_finite(huge));
+        MALLOY_CHECK_FALSE(malloy::math::is_squarable(huge));
+    }
+
     std::cout << "malloy_math_tests passed\n";
     return 0;
 }

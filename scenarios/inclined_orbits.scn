@@ -1,0 +1,104 @@
+# MalloySim scenario: gravity in three dimensions.
+#
+# This is what M19 adds, and it is the project's first step off the plane. The
+# physics is the same Newtonian gravity that shipped in M4, one component wider,
+# and the integrator is the same semi-implicit Euler. What changes is what can
+# be said about it.
+#
+# In two dimensions angular momentum is a scalar, and "the orbit stays in its
+# plane" is not a statement you can make, because there is only one plane. In
+# three it is a VECTOR, exactly conserved for pairwise central forces, so its
+# direction is fixed and every orbit is permanently confined to the plane it
+# started in. Two orbits in different planes stay in different planes forever.
+#
+# That is what this scenario is: two small bodies around a central mass, in
+# planes tilted away from each other and away from every coordinate plane, so
+# the total angular momentum has all three components nonzero and no coordinate
+# axis is special.
+#
+# On the view: it is an orthographic projection along z, and nothing cleverer.
+# malloy_ascii plots points already in the view plane, and drawing a 3D scene
+# properly is a different problem rather than a wider one, deferred with the
+# rest of rendering (ADR 0009). So motion along z is invisible here, a tilted
+# circular orbit looks like an ellipse, and two bodies at different depths can
+# overlap. The |L| column is where the third dimension actually shows.
+
+type nbody3d
+
+dt 0.001
+steps 12000
+output_every 2000
+
+g 1.0
+softening 0.0
+
+# body3 <mass> <px> <py> <pz> <vx> <vy> <vz>
+
+# The central mass. It is not pinned: it moves, which is why total momentum is
+# worth watching.
+body3 1.000  0.0 0.0 0.0   0.0  0.0  0.0
+
+# Orbiting in a plane tilted 45 degrees out of xy, so its angular momentum lies
+# along (0, -1, 1).
+body3 0.001  2.0 0.0 0.0   0.0  0.5  0.5
+
+# A second orbit in a different plane entirely, with angular momentum along
+# (0.9, 0, -1.2). The two planes are not the same and never become so.
+body3 0.001  0.0 3.0 0.0   0.4  0.0  0.3
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E  -4.58610683e-04   |L|  1.36014705e-03   |p|  1.02469508e-03
+#   step   4000   E  -4.58617687e-04   |L|  1.36014705e-03   |p|  1.02469508e-03
+#   step   8000   E  -4.58628266e-04   |L|  1.36014705e-03   |p|  1.02469508e-03
+#   step  12000   E  -4.58606082e-04   |L|  1.36014705e-03   |p|  1.02469508e-03
+#
+# Three things there are exact, and one is deliberately not.
+#
+# 1. The starting energy is a hand sum. Kinetic is
+#    0.5*0.001*(0.25+0.25) + 0.5*0.001*(0.16+0.09) = 3.75e-04. Potential is
+#    -G*M*m/r for each orbiter, -0.001/2 and -0.001/3, plus the tiny term
+#    between the two orbiters themselves, -1e-6/sqrt(13) = -2.7735e-07, giving
+#    -8.336107e-04. The total is -4.586107e-04, which is what step 0 prints.
+#    Softening is 0 here, so nothing is approximated away.
+#
+# 2. |L| does not move. Not roughly: to every digit printed, at every report,
+#    over 12000 steps. Angular momentum is EXACTLY conserved for pairwise
+#    central forces, to all orders in dt, because the (i,j) and (j,i) torque
+#    contributions are x_i x x_j and x_j x x_i and cancel identically.
+#
+#    The vector is (9.0e-04, -1.0e-03, -2.0e-04), with all three components
+#    nonzero, which is the point of tilting both orbits: a configuration in a
+#    coordinate plane would conserve two components trivially by both being
+#    zero, and would prove nothing about the third.
+#
+# 3. |p| does not move either, for the same structural reason: both members of
+#    a pair are written in the same visit, so the forces are equal and opposite
+#    by construction. It is 1.024695e-03, the magnitude of
+#    0.001*(0.4, 0.5, 0.8).
+#
+# 4. E DOES move, in the ninth digit, and it is supposed to. Semi-implicit
+#    Euler does not conserve energy; it oscillates about a nearby quantity with
+#    bounded amplitude and no secular drift, which is what a symplectic method
+#    gives. Watch it wander and come back: -4.58611, -4.58618, -4.58628,
+#    -4.58626, -4.58606.
+#
+# The physical claim behind all of this is the one two dimensions cannot make.
+# L is a vector and it is fixed, so its direction is fixed, so each orbit is
+# confined forever to the plane it started in. These two planes are different
+# and stay different. That is asserted directly in
+# tests/nbody/nbody_world_tests.cpp, where an orbiting body's position is
+# checked to stay perpendicular to L at every step.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests (issue #14). `step 0` is the state before any step, matching the column
+# the app prints, and the tolerance is absolute.
+# check step 0     energy      -4.58610683e-04   tol 1e-12
+# check step 0     angular_x    9.00000000e-04   tol 1e-15
+# check step 0     angular_y   -1.00000000e-03   tol 1e-15
+# check step 0     angular_z   -2.00000000e-04   tol 1e-15
+# check step 12000 angular_x    9.00000000e-04   tol 1e-15
+# check step 12000 angular_y   -1.00000000e-03   tol 1e-15
+# check step 12000 angular_z   -2.00000000e-04   tol 1e-15
+# check step 12000 momentum_z   8.00000000e-04   tol 1e-15
+# check step 12000 energy      -4.58606082e-04   tol 1e-11

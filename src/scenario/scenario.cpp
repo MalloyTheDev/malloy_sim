@@ -66,7 +66,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
             if (!(tokens >> value))
             {
                 return make_error(line_number,
-                                  "type requires nbody, particles, rigid, springs or charges");
+                                  "type requires nbody, particles, rigid, springs, charges or nbody3d");
             }
             if (value == "nbody")
             {
@@ -87,6 +87,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "charges")
             {
                 scenario.type = ScenarioType::Charges;
+            }
+            else if (value == "nbody3d")
+            {
+                scenario.type = ScenarioType::NBody3D;
             }
             else
             {
@@ -126,9 +130,12 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "g")
         {
-            if (scenario.type != ScenarioType::NBody)
+            // Two dimensions or three: G means the same thing in either, and
+            // both use NBodySettings.
+            if (scenario.type != ScenarioType::NBody &&
+                scenario.type != ScenarioType::NBody3D)
             {
-                return make_error(line_number, "g belongs to type nbody");
+                return make_error(line_number, "g belongs to type nbody or nbody3d");
             }
             saw_domain_key = true;
             if (!(tokens >> scenario.nbody_settings.g))
@@ -141,10 +148,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
             // Two domains now, for the same reason: both have a 1/r^2 pair
             // term that goes to infinity for a coincident pair.
             if (scenario.type != ScenarioType::NBody &&
+                scenario.type != ScenarioType::NBody3D &&
                 scenario.type != ScenarioType::Charges)
             {
                 return make_error(line_number,
-                                  "softening belongs to type nbody or charges");
+                                  "softening belongs to type nbody, nbody3d or charges");
             }
             saw_domain_key = true;
             math::Real value{};
@@ -152,7 +160,8 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "softening requires a number");
             }
-            if (scenario.type == ScenarioType::NBody)
+            if (scenario.type == ScenarioType::NBody ||
+                scenario.type == ScenarioType::NBody3D)
             {
                 scenario.nbody_settings.softening = value;
             }
@@ -232,6 +241,29 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 scenario.rigid_settings.gravity = math::Vec2{gx, gy};
             }
+        }
+        else if (key == "body3")
+        {
+            if (scenario.type != ScenarioType::NBody3D)
+            {
+                return make_error(line_number, "body3 belongs to type nbody3d");
+            }
+            saw_domain_key = true;
+            nbody::Body3D body;
+            math::Real px{};
+            math::Real py{};
+            math::Real pz{};
+            math::Real vx{};
+            math::Real vy{};
+            math::Real vz{};
+            if (!(tokens >> body.mass >> px >> py >> pz >> vx >> vy >> vz))
+            {
+                return make_error(line_number,
+                                  "body3 requires: mass px py pz vx vy vz");
+            }
+            body.position = math::Vec3{px, py, pz};
+            body.velocity = math::Vec3{vx, vy, vz};
+            scenario.bodies3d.push_back(body);
         }
         else if (key == "coulomb")
         {

@@ -24,7 +24,7 @@ Before doing anything, read:
 
 Current status:
 
-M1-M18 are complete. Gravity, colliding particles (with ballistics as uniform
+M1-M19 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
 uniform gravity field, halfplane ground and friction, spring networks, and
 charged particles in electric and magnetic fields are the five finished
@@ -42,7 +42,7 @@ with its own concrete world type. There is no simulation base class, no virtual
 step(), no registry, and no engine kernel. Adding a domain must leave
 malloy_sim_core unchanged (ADR 0006).
 
-Do not add rendering, ECS, 3D, quantum, package
+Do not add rendering, ECS, quantum, package
 managers, Catch2, plugins, scripting, or editor systems unless the milestone I
 asked for explicitly requires it.
 

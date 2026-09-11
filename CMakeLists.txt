@@ -73,6 +73,7 @@ target_link_libraries(malloy_sim_core
 # malloy_nbody (M4): concrete 2D N-body gravity simulation (compiled STATIC).
 add_library(malloy_nbody STATIC
     src/nbody/nbody.cpp
+    src/nbody/nbody3d.cpp
 )
 add_library(malloy::nbody ALIAS malloy_nbody)
 target_include_directories(malloy_nbody PUBLIC include)
