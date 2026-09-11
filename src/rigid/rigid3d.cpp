@@ -14,16 +14,30 @@ namespace malloy::rigid
 {
 namespace
 {
+// The world-frame inverse inertia applied to a vector: R I^-1 R^T x. The stored
+// inertia is the diagonal of principal moments in the body frame, so this
+// rotates x into the body frame, divides component-wise, and rotates back. The
+// same body-frame bridge Euler's equations use for the torque (M21), now for a
+// contact impulse. For an isotropic (spherical) body it reduces to x / I.
+math::Vec3 inverse_inertia_world(const RigidBody3D& body, const math::Vec3& x)
+{
+    const math::Vec3 body_frame = math::rotate(math::conjugate(body.orientation), x);
+    const math::Vec3 scaled{body_frame.x / body.inertia.x,
+                            body_frame.y / body.inertia.y,
+                            body_frame.z / body.inertia.z};
+    return math::rotate(body.orientation, scaled);
+}
+
 // Resolve one sphere body against one immovable ground plane: a normal impulse
-// plus a positional correction, and nothing else. This is M22's whole contact
-// response, and it is deliberately the translational one.
+// and a positional correction (M22), then a tangential friction impulse (M23).
 //
 // A centred sphere's contact normal passes through its centre of mass, so the
 // arm r from the centre of mass to the contact point is parallel to the normal
 // and r x n = 0. A NORMAL impulse therefore imparts no angular velocity, and
-// none of the rotational effective-mass machinery is needed or written: the
-// effective mass is just 1/m against an immovable plane. Spin from a contact is
-// friction's job (a tangential impulse has r x t != 0), a later milestone.
+// its effective mass is just 1/m against an immovable plane. The FRICTION
+// impulse is tangential, and r x t is not zero, so it does impart spin: it is
+// the first contact here that turns the rotational effective-mass term on. That
+// is the whole reason friction is where a sliding sphere starts to roll.
 void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
                       const Rigid3DSettings& settings)
 {
@@ -71,6 +85,61 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
         -(math::Real{1} + settings.restitution) * closing / inverse_mass;
     const math::Vec3 impulse = hit->normal * magnitude;
     body.velocity -= impulse * inverse_mass;
+
+    // --- Friction: a tangential impulse, clamped to the Coulomb cone, computed
+    //     from the velocity that REMAINS after the normal impulse (the 2D
+    //     ordering, which is observable). This is the first contact here that
+    //     changes the angular velocity. ---
+    if (!(settings.friction > math::Real{0}))
+    {
+        return; // frictionless (the default): nothing tangential to do
+    }
+    // Arm from the centre of mass to the sphere's contact point, which is the
+    // radius along the contact normal (the lowest point against the plane).
+    // r x normal is zero, which is why the normal impulse imparted no spin, but
+    // r x tangent is not, which is why this one does.
+    const math::Vec3 arm = hit->normal * body.radius;
+    const math::Vec3 omega_world =
+        math::rotate(body.orientation, body.angular_velocity);
+    const math::Vec3 contact_velocity =
+        body.velocity + math::cross(omega_world, arm);
+    const math::Vec3 sideways =
+        contact_velocity - hit->normal * math::dot(contact_velocity, hit->normal);
+    const math::Real sliding = math::length(sideways);
+    if (!(sliding > math::Real{0}))
+    {
+        return; // not sliding; invent no tangent (the 2D no-fallback rule)
+    }
+    const math::Vec3 tangent = sideways / sliding;
+
+    // Tangential effective mass, now WITH the rotational term the normal impulse
+    // lacked: 1/m + t . [(I^-1 (r x t)) x r], with I^-1 the world-frame inverse
+    // inertia. This is the exact formula ADR 0009 named, first put to work.
+    const math::Real tangent_effective =
+        inverse_mass +
+        math::dot(tangent, math::cross(
+                               inverse_inertia_world(body, math::cross(arm, tangent)),
+                               arm));
+    if (!(tangent_effective > math::Real{0}))
+    {
+        return;
+    }
+    math::Real tangent_magnitude = -sliding / tangent_effective;
+
+    // Coulomb's cone: the tangential impulse cannot exceed friction times the
+    // normal impulse. `magnitude` is that normal impulse. Clamping it as a
+    // minimum is what lets a sphere slide (friction saturated) before it rolls.
+    const math::Real limit = settings.friction * magnitude;
+    if (tangent_magnitude < -limit)
+    {
+        tangent_magnitude = -limit;
+    }
+    const math::Vec3 friction_impulse = tangent * tangent_magnitude;
+    body.velocity += friction_impulse * inverse_mass;
+    const math::Vec3 angular_world =
+        inverse_inertia_world(body, math::cross(arm, friction_impulse));
+    body.angular_velocity +=
+        math::rotate(math::conjugate(body.orientation), angular_world);
 }
 } // namespace
 
@@ -92,6 +161,10 @@ bool Rigid3DSettings::is_valid() const
     }
     if (!(restitution >= math::Real{0}) || !(restitution <= math::Real{1}) ||
         !math::is_finite(restitution))
+    {
+        return false;
+    }
+    if (!(friction >= math::Real{0}) || !math::is_finite(friction))
     {
         return false;
     }

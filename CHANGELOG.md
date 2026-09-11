@@ -827,6 +827,84 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M23] - 2026-09-11  (Coulomb friction for 3D contacts)
+
+### Added
+
+- `friction` on `Rigid3DSettings` (default 0, frictionless), and a tangential
+  friction impulse in the sphere-plane contact, clamped to the Coulomb cone.
+- `type rigid3d` gains a `friction` key (shared spelling with the 2D `rigid`
+  key, writing the 3D settings).
+- `scenarios/rolling_sphere.scn`.
+
+### The first 3D contact that imparts spin
+
+M22 was rotationally trivial on purpose: a normal impulse on a centred sphere
+passes through the centre of mass, r x n = 0, so it could not turn the body.
+Friction is tangential, r x t is not zero, and it is the first contact here that
+does work through the rotational effective-mass term ADR 0009 named,
+`n . (I^-1 (r x n)) x r`, now put to use for the tangent. A sliding sphere is
+dragged at its contact, slows, and spins up until the contact point is no longer
+sliding: it rolls without slipping.
+
+The response mirrors the 2D friction of M17: recompute the relative velocity
+after the normal impulse, take the tangent along the residual slide, size the
+impulse to arrest it, and clamp it to `friction` times the normal impulse
+(Coulomb's cone). No new dynamics infrastructure: the world-frame inverse
+inertia is the same body-frame bridge Euler's equations use for the torque
+(M21), R I^-1 R^T, now applied to a contact impulse.
+
+### The headline is a derived constant
+
+A solid sphere sliding at v0 rolls without slipping at
+
+```text
+v_roll = v0 / (1 + I/(m R^2)) = (5/7) v0,
+```
+
+independent of the friction coefficient and of gravity, which set only how
+quickly the slide phase ends. It is the 3D echo of the 2D rolling ratio (a disc
+rolls at 2/3 of its sliding speed). The tests assert it two ways:
+
+- Exactly, in one step, with a large coefficient that arrests the slide fully:
+  v_roll = 5/7 v0 and the contact point comes to rest, to rounding, on a
+  DIAGONAL slide so the spin axis is not a coordinate axis.
+- Asymptotically under gravity, and INDEPENDENT of the coefficient: two
+  different coefficients settle at the same 5/7 v0 to a part in a million, while
+  each is far from the starting speed.
+
+Also asserted: the Coulomb clamp (a small coefficient drops the speed by exactly
+mu (1+e) |vz|, not the full 2/7 v0 a complete arrest would give); friction does
+nothing in mid-air, since no normal impulse means no tangential one; and with
+friction off the world is M22 bit for bit.
+
+### The world-frame inverse inertia is rotated, and a test proves it
+
+For a sphere the inertia is isotropic and I^-1 commutes with the orientation, so
+the rotation into and out of the body frame is a no-op and could be dropped
+unnoticed. It is not a no-op for a body whose principal moments differ. A test
+tilts such a body 90 degrees so its third principal axis lies on the roll axis
+and checks that it rolls at v0 / (1 + I3/(m R^2)), the I3 value, not the
+body-frame I2 that ignoring the rotation would give. The two are far apart, so
+the rotation is pinned.
+
+### Mutation testing
+
+Twenty-two mutations. Twenty caught on the first pass; a further one after adding
+the tilted non-isotropic test above (the escape was the dropped body-frame
+rotation, invisible to a sphere). The catches span the friction early-out, the
+rotational term in the tangent effective mass, the angular-velocity update
+(dropped and sign-flipped), the friction velocity update sign, the Coulomb clamp
+(removed and mis-signed), the contact arm sign, the contact velocity ignoring
+spin, the inverse inertia's conjugate rotation and its division by the moments,
+and the friction validation.
+
+One mutation is EQUIVALENT and cannot be caught: removing the "not sliding,
+invent no tangent" guard. When the slide is exactly zero the tangent is 0/0, and
+the next guard (tangential effective mass not positive) returns for the NaN
+anyway, so the two produce identical behaviour. The guard stays as the clean
+place to handle it rather than relying on that backstop.
+
 ## [M22] - 2026-09-11  (a sphere bouncing on a 3D ground plane)
 
 ### Added

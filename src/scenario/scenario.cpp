@@ -446,9 +446,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "friction")
         {
-            if (scenario.type != ScenarioType::Rigid)
+            if (scenario.type != ScenarioType::Rigid &&
+                scenario.type != ScenarioType::Rigid3D)
             {
-                return make_error(line_number, "friction belongs to type rigid");
+                return make_error(line_number,
+                                  "friction belongs to type rigid or rigid3d");
             }
             saw_domain_key = true;
             math::Real value{};
@@ -456,7 +458,14 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "friction requires a value");
             }
-            scenario.rigid_settings.friction = value;
+            if (scenario.type == ScenarioType::Rigid3D)
+            {
+                scenario.rigid3d_settings.friction = value;
+            }
+            else
+            {
+                scenario.rigid_settings.friction = value;
+            }
         }
         else if (key == "ground")
         {

@@ -3316,6 +3316,300 @@ int main()
         }
     }
 
+    // --- M23: Coulomb friction for 3D contacts, the first contact here that
+    //     imparts spin.
+    //
+    //     A normal impulse on a centred sphere has no lever arm (r x n = 0), so
+    //     M22 was rotationally trivial. Friction is tangential, r x t is not
+    //     zero, and the rotational effective-mass term finally does work. The
+    //     headline is the same shape as the 2D rolling ratio: a sliding sphere
+    //     rolls without slipping at v_roll = 5/7 v0 for a solid sphere,
+    //     independent of the friction coefficient and of gravity. ---
+    {
+        using malloy::collide::Plane3;
+        using malloy::math::Vec3;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Real R = 0.5;
+        const Real m = 2.0;
+        const Real inertia = 0.4 * m * R * R; // (2/5) m R^2, a solid sphere
+
+        // --- Validation: friction is non-negative and finite. ---
+        {
+            MALLOY_CHECK_TRUE(Rigid3DSettings{}.is_valid()); // default 0
+            Rigid3DSettings s;
+            s.friction = 0.7;
+            MALLOY_CHECK_TRUE(s.is_valid());
+            s.friction = 2.5; // above 1 is physically real, not capped
+            MALLOY_CHECK_TRUE(s.is_valid());
+            for (const Real bad : {-0.1, nan3, inf3})
+            {
+                Rigid3DSettings b;
+                b.friction = bad;
+                MALLOY_CHECK_FALSE(b.is_valid());
+            }
+        }
+
+        // --- Rolling without slipping, EXACT, in one step. A large coefficient
+        //     arrests the slide fully, so a single impulse takes the sphere to
+        //     the rolling state. The slide is DIAGONAL, so the tangent has two
+        //     components and the axis it spins about is not a coordinate axis:
+        //     a real check on the r x t machinery, not an axis-aligned accident.
+        //
+        //       v_roll = 5/7 v0,  and the contact point comes to rest. ---
+        {
+            const Real speed = 3.0;
+            const Vec3 dir = malloy::math::normalize(Vec3{1.0, 2.0, 0.0});
+            Rigid3DSettings st;
+            st.restitution = 0.0;
+            st.friction = 100.0; // effectively unclamped
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+
+            RigidBody3D b;
+            b.mass = m;
+            b.radius = R;
+            b.inertia = Vec3{inertia, inertia, inertia};
+            b.position = Vec3{0.0, 0.0, R - 0.01}; // penetrating, so a contact fires
+            b.velocity = dir * speed + Vec3{0.0, 0.0, -1.0}; // sliding + into floor
+
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            const RigidBody3D& out = world.bodies()[0];
+
+            // Horizontal speed is exactly 5/7 of the slide speed, still along
+            // the slide direction.
+            const Vec3 horizontal{out.velocity.x, out.velocity.y, 0.0};
+            MALLOY_CHECK_NEAR(malloy::math::length(horizontal), 5.0 * speed / 7.0, 1e-13);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::math::normalize(horizontal), dir, 1e-13));
+
+            // The contact point is at rest: rolling without slipping. arm points
+            // from the centre of mass to the sphere's lowest point.
+            const Vec3 arm{0.0, 0.0, -R};
+            const Vec3 omega_world = malloy::math::rotate(out.orientation, out.angular_velocity);
+            const Vec3 contact_velocity = out.velocity + malloy::math::cross(omega_world, arm);
+            const Vec3 contact_tangential{contact_velocity.x, contact_velocity.y, 0.0};
+            MALLOY_CHECK_TRUE(malloy::math::length(contact_tangential) < 1e-13);
+
+            // It really did spin up: friction turned a non-spinning slide into a
+            // spin, which a normal contact (M22) could never do.
+            MALLOY_CHECK_TRUE(malloy::math::length(out.angular_velocity) > 1.0);
+            // Spin magnitude is v_roll / R.
+            MALLOY_CHECK_NEAR(malloy::math::length(out.angular_velocity),
+                              (5.0 * speed / 7.0) / R, 1e-13);
+        }
+
+        // --- The rolling ratio is INDEPENDENT of the friction coefficient.
+        //     Two different coefficients, both large enough to reach rolling
+        //     under gravity, settle at the SAME 5/7 v0. That independence is the
+        //     content of the theorem, the 3D echo of the 2D rolling ratio. ---
+        {
+            const Real v0 = 4.0;
+            const auto rolled_speed = [&](Real mu) -> Real {
+                Rigid3DSettings st;
+                st.restitution = 0.0;
+                st.friction = mu;
+                st.gravity = Vec3{0.0, 0.0, -9.81};
+                st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+                RigidBody3D b;
+                b.mass = m;
+                b.radius = R;
+                b.inertia = Vec3{inertia, inertia, inertia};
+                b.position = Vec3{0.0, 0.0, R};
+                b.velocity = Vec3{v0, 0.0, 0.0};
+                Rigid3DWorld world{SimulationSettings{0.0005}, {b}, st};
+                for (int i = 0; i < 40000; ++i)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                }
+                return world.bodies()[0].velocity.x;
+            };
+
+            const Real slow = rolled_speed(0.2);
+            const Real fast = rolled_speed(0.6);
+            MALLOY_CHECK_NEAR(slow, 5.0 * v0 / 7.0, 1e-4);
+            MALLOY_CHECK_NEAR(fast, 5.0 * v0 / 7.0, 1e-4);
+            // The same to a much tighter bound than the distance from v0: the
+            // coefficient sets how FAST it rolls, not the speed it rolls at.
+            MALLOY_CHECK_NEAR(slow, fast, 1e-6);
+            MALLOY_CHECK_TRUE(std::abs(slow - v0) > 1.0);
+        }
+
+        // --- Coulomb's cone: a small coefficient cannot arrest the slide in one
+        //     step. The tangential impulse is clamped to friction * normal
+        //     impulse, so the horizontal speed drops by exactly mu * (1+e) |vz|,
+        //     not by the 2/7 v0 a full arrest would give. ---
+        {
+            const Real v0 = 3.0, vz = 2.0, mu = 0.1;
+            Rigid3DSettings st;
+            st.restitution = 0.0;
+            st.friction = mu;
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            RigidBody3D b;
+            b.mass = m;
+            b.radius = R;
+            b.inertia = Vec3{inertia, inertia, inertia};
+            b.position = Vec3{0.0, 0.0, R - 0.01};
+            b.velocity = Vec3{v0, 0.0, -vz};
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+
+            const Real drop = v0 - world.bodies()[0].velocity.x;
+            // Normal impulse magnitude is (1 + e) |vz| m; clamp is mu times it;
+            // the velocity drop is that over m.
+            const Real clamped_drop = mu * (1.0 + 0.0) * vz; // = mu (1+e) |vz|
+            MALLOY_CHECK_NEAR(drop, clamped_drop, 1e-14);
+            // A full arrest would have dropped it by 2/7 v0, much more.
+            MALLOY_CHECK_TRUE(2.0 * v0 / 7.0 > 3.0 * clamped_drop);
+        }
+
+        // --- Friction cannot act in mid-air: no normal impulse means no
+        //     tangential impulse. A moving, spinning body high above the floor
+        //     keeps its velocity and spin bit for bit. ---
+        {
+            Rigid3DSettings st;
+            st.friction = 0.5;
+            st.gravity = Vec3{0.0, 0.0, -9.81};
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            RigidBody3D b;
+            b.mass = m;
+            b.radius = R;
+            b.inertia = Vec3{inertia, inertia, inertia};
+            b.position = Vec3{0.0, 0.0, 5.0}; // well clear of the floor
+            const Vec3 v_start{3.0, -1.0, 0.0};
+            const Vec3 w_start{0.0, 1.0, 0.0};
+            b.velocity = v_start;
+            b.angular_velocity = w_start;
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            for (int i = 0; i < 100; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                // The horizontal velocity is untouched: only gravity acts, on vz.
+                MALLOY_CHECK_NEAR(world.bodies()[0].velocity.x, v_start.x, 0.0);
+                MALLOY_CHECK_NEAR(world.bodies()[0].velocity.y, v_start.y, 0.0);
+                // Isotropic inertia and no torque: spin is bit-constant.
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    world.bodies()[0].angular_velocity, w_start, 0.0));
+            }
+        }
+
+        // --- Friction off (the default) is M22 exactly. A sliding sphere on a
+        //     frictionless floor keeps its horizontal velocity and never spins
+        //     up: bit-identical to the same world with friction left at zero. ---
+        {
+            Rigid3DSettings rough;
+            rough.restitution = 0.5;
+            rough.gravity = Vec3{0.0, 0.0, -9.81};
+            rough.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            rough.friction = 0.0; // explicit zero
+            Rigid3DSettings smooth = rough; // friction defaulted to 0 as well
+
+            RigidBody3D b;
+            b.mass = m;
+            b.radius = R;
+            b.inertia = Vec3{inertia, inertia, inertia};
+            b.position = Vec3{0.0, 0.0, R};
+            b.velocity = Vec3{3.0, 0.0, 0.0};
+
+            Rigid3DWorld a{SimulationSettings{0.001}, {b}, rough};
+            Rigid3DWorld c{SimulationSettings{0.001}, {b}, smooth};
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(a.step().ok());
+                MALLOY_CHECK_TRUE(c.step().ok());
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                    a.bodies()[0].velocity, c.bodies()[0].velocity, 0.0));
+            }
+            // Frictionless: the sphere slides forever at its start speed and
+            // never spins up.
+            MALLOY_CHECK_NEAR(a.bodies()[0].velocity.x, 3.0, 0.0);
+            MALLOY_CHECK_TRUE(malloy::math::length(a.bodies()[0].angular_velocity) < 1e-15);
+        }
+
+        // --- The inverse inertia is rotated into the world frame, which only
+        //     matters for a NON-isotropic body at a non-identity orientation. A
+        //     body with distinct principal moments is tilted 90 degrees about x,
+        //     so its third principal axis (moment I3) now lies along the world y
+        //     axis the sphere rolls about. The rolling speed therefore uses I3,
+        //     not the body-y moment I2:
+        //
+        //       v_roll = v0 / (1 + I3 / (m R^2)),
+        //
+        //     which is a different number from the I2 value. Getting it right
+        //     requires the R I^-1 R^T rotation; using the body-frame inertia
+        //     directly would give the I2 answer. A sphere's isotropic inertia
+        //     hides this, so it needs a body whose moments differ. ---
+        {
+            const Real v0 = 2.2;
+            const Vec3 moments{0.1, 0.2, 0.3}; // distinct on purpose
+            const Real Ithree = 0.3;
+            const Real roll_mass = 1.0;
+            const Real roll_radius = 0.5;
+
+            Rigid3DSettings st;
+            st.restitution = 0.0;
+            st.friction = 0.6;
+            st.gravity = Vec3{0.0, 0.0, -9.81};
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+
+            RigidBody3D b;
+            b.mass = roll_mass;
+            b.radius = roll_radius;
+            b.inertia = moments;
+            // 90 degrees about x sends body z onto world -y, so the world y roll
+            // axis sees the I3 moment.
+            b.orientation = malloy::math::from_axis_angle(Vec3{1.0, 0.0, 0.0},
+                                                          1.57079632679489661923);
+            b.position = Vec3{0.0, 0.0, roll_radius};
+            b.velocity = Vec3{v0, 0.0, 0.0};
+
+            Rigid3DWorld world{SimulationSettings{0.0005}, {b}, st};
+            for (int i = 0; i < 60000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const Real mR2 = roll_mass * roll_radius * roll_radius;
+            const Real expected = v0 / (1.0 + Ithree / mR2);
+            MALLOY_CHECK_NEAR(world.bodies()[0].velocity.x, expected, 1e-4);
+            // And NOT the body-y value, which is what ignoring the rotation gives.
+            const Real wrong = v0 / (1.0 + 0.2 / mR2);
+            MALLOY_CHECK_TRUE(std::abs(expected - wrong) > 0.2); // they are far apart
+            MALLOY_CHECK_TRUE(std::abs(world.bodies()[0].velocity.x - wrong) > 0.15);
+        }
+
+        // --- Friction with NOTHING to resist: a sphere dropped straight down,
+        //     no horizontal velocity and no spin, has zero sliding at the
+        //     contact, so friction must do nothing rather than divide by that
+        //     zero. It bounces normally and never spins up, every step valid. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.7;
+            st.friction = 0.9; // high, but there is no sliding for it to act on
+            st.gravity = Vec3{0.0, 0.0, -9.81};
+            st.ground = {Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}};
+            RigidBody3D b;
+            b.mass = m;
+            b.radius = R;
+            b.inertia = Vec3{inertia, inertia, inertia};
+            b.position = Vec3{0.0, 0.0, 2.0};
+            b.velocity = Vec3{0.0, 0.0, 0.0}; // straight down under gravity
+            Rigid3DWorld world{SimulationSettings{0.001}, {b}, st};
+            for (int i = 0; i < 5000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok()); // no NaN from 0/0
+                // No horizontal motion is ever created, and no spin.
+                MALLOY_CHECK_NEAR(world.bodies()[0].velocity.x, 0.0, 0.0);
+                MALLOY_CHECK_NEAR(world.bodies()[0].velocity.y, 0.0, 0.0);
+                MALLOY_CHECK_TRUE(
+                    malloy::math::length(world.bodies()[0].angular_velocity) < 1e-15);
+            }
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

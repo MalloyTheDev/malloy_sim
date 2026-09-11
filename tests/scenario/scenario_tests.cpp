@@ -1430,14 +1430,12 @@ int main()
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
     {
-        // The keys M22 did NOT add stay rejected in rigid3d. `restitution` is
-        // now accepted (checked below), but the 2D `gravity` and `ground` keys
-        // are not: 3D uses `gravity3` and `plane3`, so a 2D key here is a
-        // mistake, not a silent half-conversion. Friction is a later milestone,
-        // and bfield and spring belong to other domains entirely.
-        for (const char* line : {"gravity 0 -9.81\n", "friction 0.3\n",
-                                 "ground 0 1 -2\n", "bfield 1.0\n",
-                                 "spring 0 1 1 1 0\n"})
+        // `restitution` and `friction` are accepted for rigid3d (M22, M23),
+        // but the 2D `gravity` and `ground` keys are not: 3D uses `gravity3`
+        // and `plane3`, so a 2D key here is a mistake, not a silent
+        // half-conversion. bfield and spring belong to other domains entirely.
+        for (const char* line : {"gravity 0 -9.81\n", "ground 0 1 -2\n",
+                                 "bfield 1.0\n", "spring 0 1 1 1 0\n"})
         {
             std::istringstream in(std::string("type rigid3d\n") + line);
             MALLOY_CHECK_FALSE(parse_scenario(in).ok);
@@ -1585,6 +1583,20 @@ int main()
         MALLOY_CHECK_TRUE(r.ok);
         MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.restitution, 0.3, eps);
         MALLOY_CHECK_NEAR(r.scenario.rigid_settings.restitution, 1.0, eps); // untouched default
+    }
+    {
+        // friction (M23) is accepted for rigid3d and writes only that domain's
+        // field, not the 2D rigid one. It requires a value and is not capped.
+        std::istringstream in("type rigid3d\nfriction 0.4\n"
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.friction, 0.4, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid_settings.friction, 0.0, eps); // untouched default
+        MALLOY_CHECK_TRUE(r.scenario.rigid3d_settings.is_valid());
+
+        std::istringstream missing("type rigid3d\nfriction\n");
+        MALLOY_CHECK_FALSE(parse_scenario(missing).ok);
     }
     {
         // An unknown type is still an error, and the message names rigid3d

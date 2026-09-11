@@ -172,6 +172,13 @@ struct ScenarioParseResult
 //   restitution <value>       bounciness of every contact, in [0, 1]
 //                             (default 1, perfectly elastic)
 //
+//   friction <mu>             Coulomb coefficient (default 0, frictionless)
+//
+//     The tangential impulse is clamped to `mu` times the normal impulse, so a
+//     sphere sliding on a plane spins up and rolls without slipping at 5/7 of
+//     its sliding speed. Not capped at 1. Shared spelling with the 2D `rigid`
+//     key, which writes the 2D settings; here it writes the 3D ones.
+//
 //   plane3 <nx> <ny> <nz> <offset>   an immovable ground plane
 //
 //     The plane is dot((nx, ny, nz), p) == offset, with the normal pointing OUT

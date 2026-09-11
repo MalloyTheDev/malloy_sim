@@ -1,0 +1,90 @@
+# MalloySim scenario: a sliding sphere that starts to roll.
+#
+# This is what M23 adds, and it is the first 3D contact that imparts spin. M22
+# bounced a sphere with a purely vertical impulse, which for a centred sphere
+# has no lever arm and so cannot turn it. Friction is tangential, it does have a
+# lever arm, and it is what makes a sliding ball start to spin.
+#
+# The sphere below is dropped onto a floor moving sideways with no spin, like a
+# bowling ball thrown flat. Friction at the contact drags on the bottom of the
+# ball, slowing its slide and spinning it up, until the contact point is no
+# longer sliding at all: the ball rolls without slipping. From then on there is
+# nothing left for friction to resist, and it rolls on at a constant speed.
+#
+# The speed it settles at is not a fitted number. Conserving angular momentum
+# about the contact line during the slide gives, for a solid sphere (moment of
+# inertia (2/5) m R^2),
+#
+#   v_roll = v0 / (1 + I/(m R^2)) = v0 / (1 + 2/5) = (5/7) v0,
+#
+# and the spin that goes with rolling is w = v_roll / R. It is independent of
+# the friction coefficient and of gravity: those set how QUICKLY it rolls, not
+# the speed it rolls at. This is the 3D echo of the 2D rolling ratio (there a
+# disc rolls at 2/3 of its sliding speed).
+#
+# Started at v0 = 7, so v_roll = 5 exactly, and with R = 0.5 the rolling spin is
+# w = 10.
+
+type rigid3d
+
+dt 0.001
+steps 6000
+output_every 1000
+
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <radius> <px> <py> <pz>
+#              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# A solid sphere of radius 0.5 and mass 1: isotropic inertia (2/5) m R^2 = 0.1.
+# It sits on the floor moving in +x at 7 with no spin.
+rigid_body3d 1.0   0.1 0.1 0.1   0.5   0.0 0.0 0.5   0.0 0.0 0.0 0.0   7.0 0.0 0.0   0.0 0.0 0.0
+
+gravity3 0.0 0.0 -9.81
+restitution 0.0
+friction 0.5
+
+# plane3 <nx> <ny> <nz> <offset>: the floor at z = 0.
+plane3 0.0 0.0 1.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   2.94050000e+01   |L|   3.50000000e+00   |p|   7.00000000e+00
+#   step   1000   E   2.24050000e+01   |L|   3.50000000e+00   |p|   5.00000000e+00
+#   step   2000   E   2.24050000e+01   |L|   3.50000000e+00   |p|   5.00000000e+00
+#   step   3000   E   2.24050000e+01   |L|   3.50000000e+00   |p|   5.00000000e+00
+#   step   4000   E   2.24050000e+01   |L|   3.50000000e+00   |p|   5.00000000e+00
+#   step   5000   E   2.24050000e+01   |L|   3.50000000e+00   |p|   5.00000000e+00
+#   step   6000   E   2.24050000e+01   |L|   3.50000000e+00   |p|   5.00000000e+00
+#
+# 1. |p| = m |v| goes from 7 to 5 and stops there. 5 is exactly (5/7) * 7, the
+#    rolling speed, and it is reached by step 1000 and held: once the ball rolls
+#    without slipping there is no relative motion at the contact, so friction
+#    has nothing to resist and the speed is constant. The friction coefficient
+#    (0.5 here) only sets how fast the slide phase ends, not the 5 it ends at.
+#
+# 2. E steps down once, from 29.405 to 22.405, then holds. The drop is the
+#    energy friction removes while the ball slides; once it rolls, no energy is
+#    lost. That is a sharper statement than "friction removes energy": it
+#    removes energy only while there is sliding.
+#
+# 3. |L| about the world origin is 3.50 the whole way through, to every digit.
+#    At the start it is all orbital, m (r x v) = 1 * (0, R vx, 0) = (0, 3.5, 0).
+#    In the rolling state the ball has spun up, so part of it is now spin,
+#    R (I w) = (0, 1, 0), and the orbital part has dropped to (0, 2.5, 0) as the
+#    ball slowed; the two still sum to (0, 3.5, 0). Friction is an internal
+#    contact force here and moves angular momentum between orbital and spin
+#    without changing the total about the contact line.
+#
+# The body-frame spin about y goes from 0 to exactly 10, which is v_roll / R =
+# 5 / 0.5: the rolling condition, that the contact point is instantaneously at
+# rest, written as a number.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `spin_y` is the FIRST body's body-frame angular velocity about y, which
+# is zero at the start (no spin) and 10 once rolling.
+# check step 0    velocity_x    7.00000000e+00   tol 1e-15
+# check step 0    spin_y        0.00000000e+00   tol 1e-15
+# check step 0    position_z    5.00000000e-01   tol 1e-15
+# check step 0    momentum_x    7.00000000e+00   tol 1e-15
+# check step 6000 velocity_x    5.00000000e+00   tol 1e-6
+# check step 6000 spin_y        1.00000000e+01   tol 1e-6
+# check step 6000 momentum_x    5.00000000e+00   tol 1e-6

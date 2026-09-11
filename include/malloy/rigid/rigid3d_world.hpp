@@ -39,6 +39,17 @@ struct Rigid3DSettings
     // separating along the contact normal. The 3D sibling of RigidSettings.
     math::Real restitution{1.0};
 
+    // Coulomb friction coefficient for every contact. 0 is frictionless, which
+    // is how M22 behaved and remains the default. The tangential impulse is
+    // clamped to `friction` times the normal impulse, so it is self-limiting: a
+    // body in mid-air has no normal impulse and so cannot be turned by friction.
+    //
+    // This is the FIRST 3D contact that imparts spin. A normal impulse on a
+    // centred sphere has no lever arm (r x n = 0), but a tangential one does
+    // (r x t is nonzero), so friction is where the rotational effective-mass
+    // term finally does work. Not capped at 1: a coefficient above 1 is real.
+    math::Real friction{0.0};
+
     // Uniform gravitational ACCELERATION, applied to every body before the
     // position update. An acceleration, not a force (CLAUDE.md rule 5): it does
     // not scale with mass and needs no force accumulator. Defaults to zero.
@@ -56,8 +67,9 @@ struct Rigid3DSettings
     std::vector<collide::Plane3> ground;
 
     // Valid when the torque is SQUARABLE (it enters |u|^2 in the drift law),
-    // restitution is in [0, 1] and finite, gravity is SQUARABLE (its square
-    // enters the free-flight energy drift), and every ground plane is valid.
+    // restitution is in [0, 1] and finite, friction is non-negative and finite,
+    // gravity is SQUARABLE (its square enters the free-flight energy drift), and
+    // every ground plane is valid.
     bool is_valid() const;
 };
 

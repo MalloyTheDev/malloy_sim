@@ -24,11 +24,11 @@ Before doing anything, read:
 
 Current status:
 
-M1-M22 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
+M1-M23 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
 both torque-free and under a constant applied torque, a sphere bouncing on a 3D
-ground plane, spring networks, and
+ground plane and rolling with friction, spring networks, and
 charged particles in electric and magnetic fields are the five finished
 domains, and the scenario format dispatches
 between them with a type key across seven scenario types. The classical mechanics track is complete

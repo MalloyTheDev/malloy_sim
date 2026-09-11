@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, recorded at M16, amended at M19, M20 and M22.
+Accepted, recorded at M16, amended at M19, M20, M22 and M23.
 
 As of M20 the first two pieces of 3D have shipped: `math::Vec3` and
 `nbody::NBody3DWorld`, then `math::Quat` and `rigid::Rigid3DWorld`. Everything
@@ -175,6 +175,29 @@ M10 (translational contacts) rather than M14 (rotational contacts), and why the
 rotational effective-mass term this ADR sanctioned (`n . (I^-1 (r x n)) x r`,
 line 66) is not yet exercised: it is identically zero here and first bites with
 friction, whose tangential impulse has `r x t != 0`.
+
+## Amendment at M23: the impulse formula, put to work
+
+The SPECIALIZES section predicted that the impulse formulas keep their
+structure, with the rotational effective-mass term `(r x n)^2 / I` becoming
+`n . (I^-1 (r x n)) x r` (line 66). M22 built the normal impulse but could not
+exercise that term: a centred sphere's normal contact has `r x n = 0`, so the
+term is identically zero there. M23's friction is the first contact with a
+nonzero arm, `r x t`, and it uses exactly that formula, in exactly that shape.
+
+Building it confirmed the prediction and added one detail the ADR did not
+spell out: the `I^-1` in that formula is the WORLD-frame inverse inertia,
+`R I^-1_body R^T`, computed by the same body-frame bridge Euler's equations use
+for the torque (M21). For a sphere the inertia is isotropic and the rotation is
+a no-op, but the formula is written in the general form and a test with a
+non-isotropic body pins it, so the machinery is correct before the general
+inertia tensor it will eventually pair with exists.
+
+The physics it reaches is the 3D echo of M17's rolling: a sliding sphere rolls
+without slipping at `5/7` of its sliding speed, independent of the coefficient
+and of gravity, the same shape as the 2D `2/3` disc ratio. So 3D contact
+response has now specialized from the 2D code exactly as this ADR said it would,
+across both the normal impulse (M22) and the tangential one (M23).
 
 ## Deliberately not decided here (resolved above at M19)
 
