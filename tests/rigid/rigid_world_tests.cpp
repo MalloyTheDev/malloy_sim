@@ -3610,6 +3610,263 @@ int main()
         }
     }
 
+    // --- M24: sphere against sphere, two movable bodies.
+    //
+    //     M22 and M23 bounced a sphere off an immovable plane, which carries
+    //     momentum away silently. With two movable bodies the sharp invariant
+    //     is that TOTAL momentum is conserved: the impulse is equal and
+    //     opposite, so what one body gains the other loses. The contact goes
+    //     through the same impulse core as the ground, with the plane replaced
+    //     by a second real body. ---
+    {
+        using malloy::collide::Sphere;
+        using malloy::math::Vec3;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::total_kinetic_energy3d;
+        using malloy::rigid::total_linear_momentum3d;
+
+        // Two unit-radius spheres overlapping slightly along x (centres 1.9
+        // apart), approaching head-on. A failed step leaves velocities
+        // unchanged, so the exact post-collision checks below would catch it.
+        const auto head_on = [](Real ma, Real mb, Real va, Real vb,
+                                Real e) -> Rigid3DWorld {
+            Rigid3DSettings st;
+            st.restitution = e;
+            RigidBody3D a;
+            a.mass = ma; a.radius = 1.0; a.position = Vec3{0.0, 0.0, 0.0};
+            a.velocity = Vec3{va, 0.0, 0.0};
+            RigidBody3D b;
+            b.mass = mb; b.radius = 1.0; b.position = Vec3{1.9, 0.0, 0.0};
+            b.velocity = Vec3{vb, 0.0, 0.0};
+            Rigid3DWorld w{SimulationSettings{0.001}, {a, b}, st};
+            w.step();
+            return w;
+        };
+
+        // Equal masses, elastic, head-on: the classic exchange of velocities.
+        {
+            const auto w = head_on(1.0, 1.0, 2.0, -2.0, 1.0);
+            MALLOY_CHECK_NEAR(w.bodies()[0].velocity.x, -2.0, 1e-14);
+            MALLOY_CHECK_NEAR(w.bodies()[1].velocity.x, 2.0, 1e-14);
+        }
+        // Equal masses, one at rest: the mover stops, the target leaves with it.
+        {
+            const auto w = head_on(1.0, 1.0, 3.0, 0.0, 1.0);
+            MALLOY_CHECK_NEAR(w.bodies()[0].velocity.x, 0.0, 1e-14);
+            MALLOY_CHECK_NEAR(w.bodies()[1].velocity.x, 3.0, 1e-14);
+        }
+        // Unequal masses, elastic: the exact 1D elastic result.
+        {
+            const Real ma = 3.0, mb = 1.0, va = 2.0, vb = -2.0;
+            const auto w = head_on(ma, mb, va, vb, 1.0);
+            const Real sum = ma + mb;
+            MALLOY_CHECK_NEAR(w.bodies()[0].velocity.x,
+                              ((ma - mb) * va + 2.0 * mb * vb) / sum, 1e-14); // 0
+            MALLOY_CHECK_NEAR(w.bodies()[1].velocity.x,
+                              ((mb - ma) * vb + 2.0 * ma * va) / sum, 1e-14); // 4
+        }
+        // Inelastic (e = 0), equal masses head-on at equal speed: both stop.
+        {
+            const auto w = head_on(1.0, 1.0, 2.0, -2.0, 0.0);
+            MALLOY_CHECK_NEAR(w.bodies()[0].velocity.x, 0.0, 1e-14);
+            MALLOY_CHECK_NEAR(w.bodies()[1].velocity.x, 0.0, 1e-14);
+        }
+
+        // --- Total momentum is conserved (both e), and energy never grows and
+        //     here strictly falls: friction dissipates while the spheres slide
+        //     across each other, and for e < 1 the bounce removes energy too.
+        //     A general collision: unequal masses and radii, off-axis
+        //     velocities, spin, and friction, so no term is trivially zero. ---
+        for (const Real e : {1.0, 0.5})
+        {
+            Rigid3DSettings st;
+            st.restitution = e;
+            st.friction = 0.4;
+            RigidBody3D a;
+            a.mass = 1.5; a.radius = 0.8; a.inertia = Vec3{0.2, 0.3, 0.25};
+            a.position = Vec3{0.0, 0.0, 0.0}; a.velocity = Vec3{2.0, 0.4, -0.3};
+            a.angular_velocity = Vec3{0.5, -0.2, 0.1};
+            RigidBody3D b;
+            b.mass = 2.5; b.radius = 1.0; b.inertia = Vec3{0.4, 0.35, 0.5};
+            b.position = Vec3{1.7, 0.2, 0.1}; b.velocity = Vec3{-1.0, 0.1, 0.2};
+            b.angular_velocity = Vec3{-0.3, 0.4, -0.1};
+
+            const std::vector<RigidBody3D> start = {a, b};
+            const Vec3 momentum = total_linear_momentum3d(start);
+            const Real energy = total_kinetic_energy3d(start);
+
+            Rigid3DWorld world{SimulationSettings{0.001}, start, st};
+            Real worst_momentum = 0.0;
+            for (int i = 0; i < 400; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                worst_momentum = std::fmax(
+                    worst_momentum,
+                    malloy::math::length(total_linear_momentum3d(world.bodies()) - momentum));
+            }
+            // Equal and opposite impulse, no external force: total momentum is
+            // conserved to rounding across every contact.
+            MALLOY_CHECK_TRUE(worst_momentum < 1e-13);
+            const Real final_energy = total_kinetic_energy3d(world.bodies());
+            MALLOY_CHECK_TRUE(final_energy < energy);        // strictly lost
+            MALLOY_CHECK_TRUE(final_energy > energy - 10.0); // but not absurdly
+        }
+
+        // --- Frictionless and elastic: total kinetic energy is conserved
+        //     across the collision, to the scheme's contact drift (the overlap
+        //     resolves over a few steps, each applying an impulse, ~1e-7 here,
+        //     the same class as M14's positional-correction artefact). The exact
+        //     single-impulse conservation is the head-on swap above. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 1.0; st.friction = 0.0;
+            RigidBody3D a;
+            a.mass = 1.5; a.radius = 0.8; a.inertia = Vec3{0.2, 0.3, 0.25};
+            a.position = Vec3{0.0, 0.0, 0.0}; a.velocity = Vec3{2.0, 0.4, -0.3};
+            a.angular_velocity = Vec3{0.5, -0.2, 0.1};
+            RigidBody3D b;
+            b.mass = 2.5; b.radius = 1.0; b.inertia = Vec3{0.4, 0.35, 0.5};
+            b.position = Vec3{1.7, 0.2, 0.1}; b.velocity = Vec3{-1.0, 0.1, 0.2};
+            b.angular_velocity = Vec3{-0.3, 0.4, -0.1};
+
+            const std::vector<RigidBody3D> start = {a, b};
+            const Real energy = total_kinetic_energy3d(start);
+            const Vec3 momentum = total_linear_momentum3d(start);
+
+            Rigid3DWorld world{SimulationSettings{0.001}, start, st};
+            for (int i = 0; i < 400; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(world.bodies()), energy, 1e-6);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                total_linear_momentum3d(world.bodies()), momentum, 1e-13));
+            MALLOY_CHECK_FALSE(malloy::math::approx_equal(
+                world.bodies()[0].velocity, a.velocity, 1e-6));
+        }
+
+        // --- Restitution reverses the relative normal velocity by -e, off-axis
+        //     so the normal is not a coordinate axis. ---
+        {
+            const Vec3 n = malloy::math::normalize(Vec3{1.0, 1.0, 0.0});
+            Rigid3DSettings st;
+            st.restitution = 0.6;
+            RigidBody3D a;
+            a.mass = 2.0; a.radius = 1.0; a.position = Vec3{0.0, 0.0, 0.0};
+            a.velocity = n * 2.0;
+            RigidBody3D b;
+            b.mass = 1.0; b.radius = 1.0; b.position = n * 1.9; b.velocity = n * -1.0;
+            const Real approach = malloy::math::dot(b.velocity - a.velocity, n);
+            Rigid3DWorld world{SimulationSettings{0.001}, {a, b}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            const Real separate = malloy::math::dot(
+                world.bodies()[1].velocity - world.bodies()[0].velocity, n);
+            MALLOY_CHECK_NEAR(separate, -0.6 * approach, 1e-13);
+        }
+
+        // --- Coincident centres: fallback normal +x, no NaN, pushed apart. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 1.0;
+            RigidBody3D a;
+            a.mass = 1.0; a.radius = 1.0; a.position = Vec3{0.0, 0.0, 0.0};
+            RigidBody3D b;
+            b.mass = 1.0; b.radius = 1.0; b.position = Vec3{0.0, 0.0, 0.0};
+            Rigid3DWorld world{SimulationSettings{0.001}, {a, b}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            MALLOY_CHECK_TRUE(world.bodies()[1].position.x - world.bodies()[0].position.x >
+                              1.9);
+            MALLOY_CHECK_NEAR(world.bodies()[0].position.y, 0.0, 0.0);
+            MALLOY_CHECK_NEAR(world.bodies()[0].position.z, 0.0, 0.0);
+        }
+
+        // --- Friction between two spheres spins both from rest. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5; st.friction = 0.5;
+            RigidBody3D a;
+            a.mass = 1.0; a.radius = 1.0; a.inertia = Vec3{0.4, 0.4, 0.4};
+            a.position = Vec3{0.0, 0.0, 0.0}; a.velocity = Vec3{3.0, 0.0, 0.0};
+            RigidBody3D b;
+            b.mass = 1.0; b.radius = 1.0; b.inertia = Vec3{0.4, 0.4, 0.4};
+            b.position = Vec3{1.6, 0.9, 0.0}; b.velocity = Vec3{0.0, 0.0, 0.0};
+            Rigid3DWorld world{SimulationSettings{0.001}, {a, b}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            MALLOY_CHECK_TRUE(malloy::math::length(world.bodies()[0].angular_velocity) > 1e-3);
+            MALLOY_CHECK_TRUE(malloy::math::length(world.bodies()[1].angular_velocity) > 1e-3);
+        }
+
+        // --- Radius zero does not collide, on EITHER side. First the striker
+        //     has no shape, then the target has none: both pass through. ---
+        for (int who = 0; who < 2; ++who)
+        {
+            Rigid3DSettings st;
+            st.restitution = 1.0;
+            RigidBody3D a;
+            a.mass = 1.0; a.radius = (who == 0) ? 0.0 : 1.0;
+            a.position = Vec3{-2.0, 0.0, 0.0}; a.velocity = Vec3{1.0, 0.0, 0.0};
+            RigidBody3D b;
+            b.mass = 1.0; b.radius = (who == 0) ? 1.0 : 0.0;
+            b.position = Vec3{0.0, 0.0, 0.0};
+            Rigid3DWorld world{SimulationSettings{0.001}, {a, b}, st};
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_NEAR(world.bodies()[0].velocity.x, 1.0, 0.0); // drove through
+            MALLOY_CHECK_TRUE(world.bodies()[0].position.x > 1.0);
+        }
+
+        // --- The positional correction is split by inverse mass: the heavier
+        //     body moves less. Two overlapping spheres at rest, mass 1 and 3,
+        //     no restitution to keep it about the correction alone. The light
+        //     one is pushed out three times as far. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.0;
+            RigidBody3D light;
+            light.mass = 1.0; light.radius = 1.0; light.position = Vec3{0.0, 0.0, 0.0};
+            RigidBody3D heavy;
+            heavy.mass = 3.0; heavy.radius = 1.0; heavy.position = Vec3{1.5, 0.0, 0.0};
+            Rigid3DWorld world{SimulationSettings{0.001}, {light, heavy}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            const Real light_move = 0.0 - world.bodies()[0].position.x;
+            const Real heavy_move = world.bodies()[1].position.x - 1.5;
+            MALLOY_CHECK_TRUE(light_move > 0.0);
+            MALLOY_CHECK_TRUE(heavy_move > 0.0);
+            MALLOY_CHECK_NEAR(light_move, 3.0 * heavy_move, 1e-12);
+        }
+
+        // --- A glancing collision between UNEQUAL spheres with friction spins
+        //     both, and the induced spins pin the contact arms. Each body's arm
+        //     is its radius along the normal toward the contact: a's forward,
+        //     b's back. Getting b's sign wrong flips its spin; using the wrong
+        //     radius for a changes its spin. The two values below are from a
+        //     real run and fix both. Unequal radii on purpose. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5; st.friction = 0.5;
+            RigidBody3D a;
+            a.mass = 1.0; a.radius = 0.6; a.inertia = Vec3{0.2, 0.3, 0.25};
+            a.position = Vec3{0.0, 0.0, 0.0}; a.velocity = Vec3{3.0, 0.0, 0.0};
+            RigidBody3D b;
+            b.mass = 2.0; b.radius = 1.0; b.inertia = Vec3{0.5, 0.6, 0.7};
+            b.position = Vec3{1.4, 0.55, 0.0}; // centres 1.504 apart, radii sum 1.6
+            Rigid3DWorld world{SimulationSettings{0.001}, {a, b}, st};
+            for (int i = 0; i < 300; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            // The collision is in the xy plane, so both spin about z. Signs and
+            // magnitudes are a real-run pin of the two-body arm machinery.
+            MALLOY_CHECK_NEAR(world.bodies()[0].angular_velocity.z, 0.60376549, 1e-6);
+            MALLOY_CHECK_NEAR(world.bodies()[1].angular_velocity.z, 0.35938422, 1e-6);
+            MALLOY_CHECK_TRUE(world.bodies()[1].angular_velocity.z > 0.1); // definite sign
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

@@ -625,6 +625,60 @@ int main()
         MALLOY_CHECK_FALSE((contact(Sphere{Vec3{}, 1.0}, Plane3{Vec3{1.0, 1.0, 1.0}, 0.0}).has_value()));
     }
 
+    // --- M24: Sphere against Sphere, the 3D sibling of Circle against Circle.
+    //     Normal points from a toward b; coincident centres fall back to +x. ---
+    {
+        using malloy::collide::contact;
+        using malloy::collide::overlaps;
+        using malloy::collide::Sphere;
+        using malloy::math::Vec3;
+
+        // Separated: no overlap, no contact.
+        MALLOY_CHECK_FALSE((overlaps(Sphere{Vec3{0.0, 0.0, 0.0}, 0.5},
+                                     Sphere{Vec3{3.0, 0.0, 0.0}, 0.5})));
+        MALLOY_CHECK_FALSE((contact(Sphere{Vec3{0.0, 0.0, 0.0}, 0.5},
+                                    Sphere{Vec3{3.0, 0.0, 0.0}, 0.5}).has_value()));
+
+        // Overlapping along a diagonal: normal from a to b, penetration is the
+        // sum of radii minus the centre distance, point midway between surfaces.
+        {
+            const Vec3 ca{1.0, 2.0, 3.0};
+            const Vec3 dir = malloy::math::normalize(Vec3{2.0, -1.0, 2.0}); // |.|=3
+            const Vec3 cb = ca + dir * 2.5;   // centres 2.5 apart
+            const auto k = contact(Sphere{ca, 1.5}, Sphere{cb, 2.0}); // sum 3.5
+            MALLOY_CHECK_TRUE(k.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(k->normal, dir, 1e-15));
+            MALLOY_CHECK_NEAR(k->penetration, 3.5 - 2.5, eps); // 1.0
+            MALLOY_CHECK_TRUE(overlaps(Sphere{ca, 1.5}, Sphere{cb, 2.0}));
+            // Point is a.radius - penetration/2 along the normal from a's centre.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                k->point, ca + dir * (1.5 - 0.5), eps));
+        }
+
+        // Exactly touching gives penetration 0, not "no contact".
+        {
+            const auto k = contact(Sphere{Vec3{0.0, 0.0, 0.0}, 1.0},
+                                   Sphere{Vec3{3.0, 0.0, 0.0}, 2.0}); // dist 3 == sum
+            MALLOY_CHECK_TRUE(k.has_value());
+            MALLOY_CHECK_NEAR(k->penetration, 0.0, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(k->normal, Vec3{1.0, 0.0, 0.0}, eps));
+        }
+
+        // Coincident centres: the fallback normal is +x, penetration the full
+        // sum of radii, and no divide by zero.
+        {
+            const auto k = contact(Sphere{Vec3{5.0, -1.0, 2.0}, 1.0},
+                                   Sphere{Vec3{5.0, -1.0, 2.0}, 1.5});
+            MALLOY_CHECK_TRUE(k.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(k->normal, Vec3{1.0, 0.0, 0.0}, 0.0));
+            MALLOY_CHECK_NEAR(k->penetration, 2.5, eps);
+        }
+
+        // An invalid sphere never overlaps or contacts.
+        MALLOY_CHECK_FALSE((overlaps(Sphere{Vec3{}, -1.0}, Sphere{Vec3{}, 1.0})));
+        MALLOY_CHECK_FALSE((contact(Sphere{Vec3{}, -1.0}, Sphere{Vec3{}, 1.0}).has_value()));
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

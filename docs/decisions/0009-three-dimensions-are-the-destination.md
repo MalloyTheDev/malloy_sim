@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, recorded at M16, amended at M19, M20, M22 and M23.
+Accepted, recorded at M16, amended at M19, M20, M22, M23 and M24.
 
 As of M20 the first two pieces of 3D have shipped: `math::Vec3` and
 `nbody::NBody3DWorld`, then `math::Quat` and `rigid::Rigid3DWorld`. Everything
@@ -198,6 +198,27 @@ without slipping at `5/7` of its sliding speed, independent of the coefficient
 and of gravity, the same shape as the 2D `2/3` disc ratio. So 3D contact
 response has now specialized from the 2D code exactly as this ADR said it would,
 across both the normal impulse (M22) and the tangential one (M23).
+
+## Amendment at M24: one impulse core for both contact types
+
+M22 and M23 resolved a sphere against an immovable plane. M24 added a sphere
+against a second movable sphere, and in doing so unified the two: the contact
+response is now one two-body core, with the plane expressed as a participant of
+zero inverse mass. This is the 3D echo of the 2D `resolve_ground` stand-in body
+(ADR 0008), and it is the answer to whether the impulse formula would be written
+twice. It is not. Refactoring the sphere-plane path onto the shared core left
+every M22/M23 result bit for bit unchanged.
+
+The new physics a second movable body brings is conservation: an immovable plane
+is a momentum sink, so a sphere-plane contact says nothing about momentum, while
+two real bodies exchange an equal and opposite impulse and so conserve total
+linear momentum exactly. That is the sphere-sphere headline, and it is the 3D
+form of what M10's colliding particles first showed in the plane.
+
+Still deferred, and still each its own milestone: a translational force on a 3D
+body, a general inertia tensor, and 3D versions of the particle, spring and
+charge domains. Oriented boxes and the SAT question remain untouched in both
+dimensions.
 
 ## Deliberately not decided here (resolved above at M19)
 

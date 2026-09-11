@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M23 are complete, so this is the live roadmap for what comes next.
+M1-M24 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -37,6 +37,7 @@ M20 - Quat and torque-free 3D rotation  [done]
 M21 - constant applied torque on a 3D body [done]
 M22 - a sphere bouncing on a 3D ground plane [done]
 M23 - Coulomb friction for 3D contacts     [done]
+M24 - sphere against sphere                [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -159,7 +160,7 @@ quaternions and torque-free 3D rotation [done, M20]
 a constant applied torque on a 3D body [done, M21]
 sphere against a ground plane          [done, M22]
 friction for 3D contacts                [done, M23]
-sphere against sphere                   (a second movable body; coincident-centre fallback)
+sphere against sphere                   [done, M24]
 a translational force on a 3D body     (the other half of a wrench)
 a general inertia tensor               (composed shapes, parallel axis)
 more 3D contact geometry               (what replaces SAT for boxes)

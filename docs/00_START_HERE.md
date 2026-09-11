@@ -5,7 +5,7 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M23 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M24 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all seven scenario types. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and two of them
@@ -20,8 +20,9 @@ three distinct principal moments tumbles under no torque, and in two dimensions
 it cannot); M21 applied a constant torque to that rotation, so a gyroscope
 precesses instead of toppling; M22 gave a body a collision radius and bounced
 it off a ground plane under gravity, the project's first 3D contact; M23 added
-friction, so a sliding sphere spins up and rolls. Everything else is still 2D,
-which is most of the project, and each remaining piece is its own milestone.
+friction, so a sliding sphere spins up and rolls; M24 made two spheres collide
+and exchange momentum. Everything else is still 2D, which is most of the
+project, and each remaining piece is its own milestone.
 
 That destination is why some of the current code looks the way it does: the
 scalar angle and scalar inertia in `RigidBody2D` are 2D specializations of the
@@ -59,15 +60,15 @@ completion.
 
 ## What's next
 
-M1-M23 are done. The classical mechanics track is complete, including the
+M1-M24 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
 halfplane ground of M16 and the Coulomb friction of M17, and M18 added
 electromagnetism beside it. M19 took the first step off the plane, with Vec3
 and a 3D gravity world, M20 added quaternions and torque-free 3D rotation, M21
-put a constant torque on it, M22 bounced a sphere off a ground plane, and M23
-added friction. Five finished domains sit behind multi-domain dispatch, across
-seven scenario types.
+put a constant torque on it, M22 bounced a sphere off a ground plane, M23
+added friction, and M24 collided two spheres. Five finished domains sit behind
+multi-domain dispatch, across seven scenario types.
 Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.
 

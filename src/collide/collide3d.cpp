@@ -27,6 +27,10 @@ math::Real signed_distance(const Plane3& plane, const math::Vec3& point)
 {
     return math::dot(plane.normal, point) - plane.offset;
 }
+
+// Coincident-centre fallback, the 3D copy of the 2D one: arbitrary but fixed,
+// so a run repeats.
+const math::Vec3 fallback_normal{1.0, 0.0, 0.0};
 } // namespace
 
 bool overlaps(const Sphere& sphere, const Plane3& plane)
@@ -64,6 +68,63 @@ std::optional<Contact3> contact(const Sphere& sphere, const Plane3& plane)
     // and the plane's surface is `depth` further back.
     result.point =
         sphere.center + result.normal * (sphere.radius - depth / math::Real{2});
+    return result;
+}
+
+bool overlaps(const Sphere& a, const Sphere& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return false;
+    }
+    const math::Vec3 delta = b.center - a.center;
+    const math::Real distance_squared = math::dot(delta, delta);
+    if (!math::is_finite(distance_squared))
+    {
+        return false; // so far apart the squared distance overflowed
+    }
+    const math::Real radius_sum = a.radius + b.radius;
+    return distance_squared <= radius_sum * radius_sum;
+}
+
+std::optional<Contact3> contact(const Sphere& a, const Sphere& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return std::nullopt;
+    }
+
+    const math::Vec3 delta = b.center - a.center;
+    const math::Real distance_squared = math::dot(delta, delta);
+    if (!math::is_finite(distance_squared))
+    {
+        return std::nullopt;
+    }
+
+    const math::Real radius_sum = a.radius + b.radius;
+    if (distance_squared > radius_sum * radius_sum)
+    {
+        return std::nullopt;
+    }
+
+    Contact3 result;
+    if (distance_squared > math::Real{0})
+    {
+        const math::Real distance = std::sqrt(distance_squared);
+        result.normal = delta / distance; // from a toward b
+        result.penetration = radius_sum - distance;
+    }
+    else
+    {
+        // Coincident centres: every direction separates them equally, so take
+        // the documented one rather than dividing by zero. Same rule as the 2D
+        // circle pair.
+        result.normal = fallback_normal;
+        result.penetration = radius_sum;
+    }
+    // Midway between the two surfaces along the normal, as for every other pair.
+    result.point =
+        a.center + result.normal * (a.radius - result.penetration / math::Real{2});
     return result;
 }
 } // namespace malloy::collide

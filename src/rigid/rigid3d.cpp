@@ -28,16 +28,159 @@ math::Vec3 inverse_inertia_world(const RigidBody3D& body, const math::Vec3& x)
     return math::rotate(body.orientation, scaled);
 }
 
-// Resolve one sphere body against one immovable ground plane: a normal impulse
-// and a positional correction (M22), then a tangential friction impulse (M23).
+// One side of a contact: a real body with the arm from its centre of mass to
+// the contact point, or the immovable plane (body == nullptr), which
+// contributes nothing and receives nothing. The plane as a zero-inverse-mass
+// participant is the 3D echo of the 2D `resolve_ground` stand-in body: it lets
+// one impulse formula serve both a sphere against a plane and a sphere against
+// a sphere, so the formula is never written twice (ADR 0008).
+struct Participant
+{
+    RigidBody3D* body;
+    math::Vec3 arm;
+};
+
+math::Real inverse_mass_of(const Participant& p)
+{
+    return p.body ? math::Real{1} / p.body->mass : math::Real{0};
+}
+
+// Velocity of the participant's material point at the contact: v + omega x r,
+// with omega in the world frame. Zero for the immovable plane.
+math::Vec3 contact_velocity_of(const Participant& p)
+{
+    if (!p.body)
+    {
+        return math::Vec3{};
+    }
+    const math::Vec3 omega_world =
+        math::rotate(p.body->orientation, p.body->angular_velocity);
+    return p.body->velocity + math::cross(omega_world, p.arm);
+}
+
+// The rotational part of the effective mass along a direction d:
+// d . [(I^-1 (r x d)) x r]. Zero for a plane, and zero for any d parallel to
+// the arm (so a centred sphere's normal impulse has no rotational term).
+math::Real angular_effective_mass(const Participant& p, const math::Vec3& d)
+{
+    if (!p.body)
+    {
+        return math::Real{0};
+    }
+    return math::dot(
+        d, math::cross(inverse_inertia_world(*p.body, math::cross(p.arm, d)), p.arm));
+}
+
+// Apply an impulse `signed_impulse` to a participant: change its velocity by
+// J/m and its angular velocity by I^-1 (r x J). The caller passes +J to one
+// side and -J to the other, so the pair exchanges momentum exactly.
+void apply_impulse(const Participant& p, const math::Vec3& signed_impulse)
+{
+    if (!p.body)
+    {
+        return;
+    }
+    const math::Real inverse_mass = math::Real{1} / p.body->mass;
+    p.body->velocity += signed_impulse * inverse_mass;
+    const math::Vec3 angular_world =
+        inverse_inertia_world(*p.body, math::cross(p.arm, signed_impulse));
+    p.body->angular_velocity +=
+        math::rotate(math::conjugate(p.body->orientation), angular_world);
+}
+
+// Resolve one contact between two participants: a positional correction, a
+// normal impulse with restitution, then a tangential friction impulse clamped
+// to the Coulomb cone. `normal` points from a toward b, and the relative
+// velocity is taken as b's minus a's, matching the 2D apply_contact.
 //
-// A centred sphere's contact normal passes through its centre of mass, so the
-// arm r from the centre of mass to the contact point is parallel to the normal
-// and r x n = 0. A NORMAL impulse therefore imparts no angular velocity, and
-// its effective mass is just 1/m against an immovable plane. The FRICTION
-// impulse is tangential, and r x t is not zero, so it does impart spin: it is
-// the first contact here that turns the rotational effective-mass term on. That
-// is the whole reason friction is where a sliding sphere starts to roll.
+// This is the whole contact response, and it serves both the ground (b is the
+// plane) and a sphere pair (both real). A centred sphere's normal impulse has
+// no lever arm, so it imparts no spin; friction is tangential, so it does.
+void resolve_pair(const Participant& a, const Participant& b,
+                  const math::Vec3& normal, math::Real penetration,
+                  const Rigid3DSettings& settings)
+{
+    const math::Real inverse_mass_a = inverse_mass_of(a);
+    const math::Real inverse_mass_b = inverse_mass_of(b);
+    const math::Real inverse_sum = inverse_mass_a + inverse_mass_b;
+    if (!(inverse_sum > math::Real{0}))
+    {
+        return; // two immovable things never resolve
+    }
+
+    // Positional correction, split by inverse mass so the heavier body moves
+    // less. The plane, with zero inverse mass, does not move.
+    if (penetration > math::Real{0})
+    {
+        const math::Vec3 correction = normal * (penetration / inverse_sum);
+        if (a.body)
+        {
+            a.body->position -= correction * inverse_mass_a;
+        }
+        if (b.body)
+        {
+            b.body->position += correction * inverse_mass_b;
+        }
+    }
+
+    // Normal impulse. Closing speed is the relative velocity along the normal;
+    // negative when the two are approaching. If already separating, do nothing.
+    const math::Vec3 relative = contact_velocity_of(b) - contact_velocity_of(a);
+    const math::Real closing = math::dot(relative, normal);
+    if (closing >= math::Real{0})
+    {
+        return;
+    }
+    const math::Real effective = inverse_sum + angular_effective_mass(a, normal) +
+                                 angular_effective_mass(b, normal);
+    if (!(effective > math::Real{0}))
+    {
+        return;
+    }
+    const math::Real normal_magnitude =
+        -(math::Real{1} + settings.restitution) * closing / effective;
+    const math::Vec3 normal_impulse = normal * normal_magnitude;
+    apply_impulse(a, -normal_impulse);
+    apply_impulse(b, normal_impulse);
+
+    // Friction: a tangential impulse, from the velocity that REMAINS after the
+    // normal impulse (the observable 2D ordering), clamped to the Coulomb cone.
+    if (!(settings.friction > math::Real{0}))
+    {
+        return;
+    }
+    const math::Vec3 remaining = contact_velocity_of(b) - contact_velocity_of(a);
+    const math::Vec3 sideways = remaining - normal * math::dot(remaining, normal);
+    const math::Real sliding = math::length(sideways);
+    if (!(sliding > math::Real{0}))
+    {
+        return; // not sliding; invent no tangent (the 2D no-fallback rule)
+    }
+    const math::Vec3 tangent = sideways / sliding;
+    const math::Real tangent_effective = inverse_sum +
+                                         angular_effective_mass(a, tangent) +
+                                         angular_effective_mass(b, tangent);
+    if (!(tangent_effective > math::Real{0}))
+    {
+        return;
+    }
+    math::Real tangent_magnitude = sliding / tangent_effective;
+    const math::Real limit = settings.friction * normal_magnitude;
+    if (tangent_magnitude > limit)
+    {
+        tangent_magnitude = limit; // Coulomb's cone
+    }
+    const math::Vec3 friction_impulse = tangent * tangent_magnitude;
+    // Friction opposes the slide, which points from a toward b along `tangent`,
+    // so a receives +friction_impulse and b receives -friction_impulse (the
+    // opposite of the normal impulse's sign).
+    apply_impulse(a, friction_impulse);
+    apply_impulse(b, -friction_impulse);
+}
+
+// A sphere against one immovable ground plane (M22, M23): the plane is the null
+// participant. The arm is the radius along the contact normal, the sphere's
+// lowest point against the plane.
 void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
                       const Rigid3DSettings& settings)
 {
@@ -51,95 +194,30 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
     {
         return;
     }
+    const Participant sphere{&body, hit->normal * body.radius};
+    const Participant ground{nullptr, math::Vec3{}};
+    resolve_pair(sphere, ground, hit->normal, hit->penetration, settings);
+}
 
-    // Push the sphere out along the normal so it no longer overlaps. The plane
-    // is immovable, so the whole correction goes to the body. The Contact3
-    // normal points from the sphere INTO the plane, so moving out is -normal.
-    if (hit->penetration > math::Real{0})
+// A sphere against another sphere (M24): both participants are real. The normal
+// points from a toward b, so each arm is the radius along it toward the
+// contact, a's forward and b's back.
+void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
+                       const Rigid3DSettings& settings)
+{
+    if (!(a.radius > math::Real{0}) || !(b.radius > math::Real{0}))
     {
-        body.position -= hit->normal * hit->penetration;
+        return; // either without a shape does not collide
     }
-
-    // Normal impulse, in the same convention as the 2D apply_contact: the
-    // contact normal points from the sphere (a) into the plane (b), and the
-    // relative velocity is the plane's minus the sphere's, v_b - v_a. The plane
-    // is still, so that is -body.velocity, and the closing speed along the
-    // normal is -dot(velocity, normal): negative when the sphere is moving into
-    // the plane. If it is already separating, do nothing.
-    //
-    // A centred sphere's spin does not enter this: the spin contribution
-    // omega x r is perpendicular to r, and the normal is parallel to r, so it
-    // has no component along the normal.
-    const math::Real closing = -math::dot(body.velocity, hit->normal);
-    if (closing >= math::Real{0})
+    const std::optional<collide::Contact3> hit = collide::contact(
+        collide::Sphere{a.position, a.radius}, collide::Sphere{b.position, b.radius});
+    if (!hit)
     {
         return;
     }
-    // Effective mass is 1/m (the plane contributes nothing), so the applied
-    // velocity change along the normal is exactly -(1 + e) * closing, which
-    // reverses the closing speed to -e times itself. Written through the impulse
-    // and the inverse mass, as the 2D code is, so it reads as the impulse it is
-    // and generalizes to a second movable body later.
-    const math::Real inverse_mass = math::Real{1} / body.mass;
-    const math::Real magnitude =
-        -(math::Real{1} + settings.restitution) * closing / inverse_mass;
-    const math::Vec3 impulse = hit->normal * magnitude;
-    body.velocity -= impulse * inverse_mass;
-
-    // --- Friction: a tangential impulse, clamped to the Coulomb cone, computed
-    //     from the velocity that REMAINS after the normal impulse (the 2D
-    //     ordering, which is observable). This is the first contact here that
-    //     changes the angular velocity. ---
-    if (!(settings.friction > math::Real{0}))
-    {
-        return; // frictionless (the default): nothing tangential to do
-    }
-    // Arm from the centre of mass to the sphere's contact point, which is the
-    // radius along the contact normal (the lowest point against the plane).
-    // r x normal is zero, which is why the normal impulse imparted no spin, but
-    // r x tangent is not, which is why this one does.
-    const math::Vec3 arm = hit->normal * body.radius;
-    const math::Vec3 omega_world =
-        math::rotate(body.orientation, body.angular_velocity);
-    const math::Vec3 contact_velocity =
-        body.velocity + math::cross(omega_world, arm);
-    const math::Vec3 sideways =
-        contact_velocity - hit->normal * math::dot(contact_velocity, hit->normal);
-    const math::Real sliding = math::length(sideways);
-    if (!(sliding > math::Real{0}))
-    {
-        return; // not sliding; invent no tangent (the 2D no-fallback rule)
-    }
-    const math::Vec3 tangent = sideways / sliding;
-
-    // Tangential effective mass, now WITH the rotational term the normal impulse
-    // lacked: 1/m + t . [(I^-1 (r x t)) x r], with I^-1 the world-frame inverse
-    // inertia. This is the exact formula ADR 0009 named, first put to work.
-    const math::Real tangent_effective =
-        inverse_mass +
-        math::dot(tangent, math::cross(
-                               inverse_inertia_world(body, math::cross(arm, tangent)),
-                               arm));
-    if (!(tangent_effective > math::Real{0}))
-    {
-        return;
-    }
-    math::Real tangent_magnitude = -sliding / tangent_effective;
-
-    // Coulomb's cone: the tangential impulse cannot exceed friction times the
-    // normal impulse. `magnitude` is that normal impulse. Clamping it as a
-    // minimum is what lets a sphere slide (friction saturated) before it rolls.
-    const math::Real limit = settings.friction * magnitude;
-    if (tangent_magnitude < -limit)
-    {
-        tangent_magnitude = -limit;
-    }
-    const math::Vec3 friction_impulse = tangent * tangent_magnitude;
-    body.velocity += friction_impulse * inverse_mass;
-    const math::Vec3 angular_world =
-        inverse_inertia_world(body, math::cross(arm, friction_impulse));
-    body.angular_velocity +=
-        math::rotate(math::conjugate(body.orientation), angular_world);
+    const Participant pa{&a, hit->normal * a.radius};
+    const Participant pb{&b, hit->normal * -b.radius};
+    resolve_pair(pa, pb, hit->normal, hit->penetration, settings);
 }
 } // namespace
 
@@ -296,9 +374,18 @@ sim_core::StepResult Rigid3DWorld::step()
         body.position += body.velocity * dt;
     }
 
-    // (5) resolve contacts: each body against every ground plane, in a fixed
-    //     body-then-plane order so a run repeats (docs/04). The plane is
-    //     immovable geometry, so only the sphere moves.
+    // (5) resolve contacts. First every pair of bodies against each other, in a
+    //     fixed ascending pair order, then every body against every ground
+    //     plane. Fixed order so a run repeats (docs/04): floating-point addition
+    //     is not associative, so the order is part of the observable behaviour.
+    const std::size_t count = bodies_.size();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        for (std::size_t j = i + 1; j < count; ++j)
+        {
+            resolve_contact3d(bodies_[i], bodies_[j], settings_);
+        }
+    }
     for (RigidBody3D& body : bodies_)
     {
         for (const collide::Plane3& plane : settings_.ground)

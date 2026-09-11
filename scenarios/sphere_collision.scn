@@ -1,0 +1,71 @@
+# MalloySim scenario: one sphere striking another.
+#
+# This is what M24 adds: a contact between two MOVABLE bodies. M22 and M23
+# bounced a sphere off an immovable plane, which quietly absorbs whatever
+# momentum it must. With two real bodies there is nowhere for momentum to hide,
+# so the sharp fact is conservation: whatever one sphere gains, the other loses,
+# because the contact impulse is equal and opposite.
+#
+# The setup is the simplest that shows it: a moving sphere strikes an identical
+# one at rest, head-on and perfectly elastic. The result is the one a Newton's
+# cradle shows: the mover stops dead and the struck sphere leaves with the whole
+# velocity. Equal masses exchange velocities in an elastic collision, and here
+# one of them was zero.
+#
+# There is no gravity, no ground and no friction here: just the two spheres and
+# empty space, so the collision is the only thing that happens.
+
+type rigid3d
+
+dt 0.001
+steps 1500
+output_every 250
+
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <radius> <px> <py> <pz>
+#              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# The striker: unit mass, radius 0.5, starting at x = -2 and moving in +x at 2.
+rigid_body3d 1.0   0.1 0.1 0.1   0.5   -2.0 0.0 0.0   0.0 0.0 0.0 0.0   2.0 0.0 0.0   0.0 0.0 0.0
+
+# The target: identical, at the origin, at rest.
+rigid_body3d 1.0   0.1 0.1 0.1   0.5    0.0 0.0 0.0   0.0 0.0 0.0 0.0   0.0 0.0 0.0   0.0 0.0 0.0
+
+restitution 1.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#   step    250   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#   step    500   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#   step    750   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#   step   1000   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#   step   1250   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#   step   1500   E   2.00000000e+00   |L|   0.00000000e+00   |p|   2.00000000e+00
+#
+# 1. |p| = 2 the whole way through, before the collision and after. The struck
+#    sphere carries off exactly the momentum the striker loses, because the
+#    contact impulse is equal and opposite. This is the fact a plane cannot
+#    show: an immovable plane is a momentum sink, two real bodies are not.
+#
+# 2. E = 2 throughout: (1/2)(1)(2^2) = 2. The collision is elastic (restitution
+#    1), and with equal masses head-on the striker stops and the target leaves
+#    at the full speed, so no kinetic energy is lost. |L| is zero because
+#    neither sphere spins and both move straight along a line through the
+#    origin, so there is no angular momentum about it.
+#
+# 3. The striker reaches the target at x = -1 (centres one diameter apart) at
+#    step 500, stops dead, and stays there: with no gravity, no friction and
+#    nothing else to push it, a body at rest stays at rest. The target, now
+#    moving at 2, is long gone by step 1500.
+#
+# The velocities are exact for equal masses: an elastic head-on collision
+# exchanges them, and one of the two was zero, so the striker's becomes zero.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `velocity_x` and `position_x` are the FIRST body, the striker.
+# check step 0    velocity_x    2.00000000e+00   tol 1e-15
+# check step 0    position_x   -2.00000000e+00   tol 1e-15
+# check step 0    momentum_x    2.00000000e+00   tol 1e-15
+# check step 1500 velocity_x    0.00000000e+00   tol 1e-9
+# check step 1500 position_x   -1.00000000e+00   tol 1e-3
+# check step 1500 momentum_x    2.00000000e+00   tol 1e-13

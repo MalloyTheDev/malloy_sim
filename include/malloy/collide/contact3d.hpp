@@ -26,9 +26,10 @@ struct Contact3
     math::Vec3 point{};
 };
 
-// Cheap "do these touch" test, no contact data. Touching counts. An invalid
+// Cheap "do these touch" tests, no contact data. Touching counts. An invalid
 // shape never overlaps anything.
 bool overlaps(const Sphere& sphere, const Plane3& plane);
+bool overlaps(const Sphere& a, const Sphere& b);
 
 // Sphere against plane. Like circle against halfplane, this has NO fallback:
 // the normal is the plane's own, exactly -plane.normal for every configuration,
@@ -36,4 +37,11 @@ bool overlaps(const Sphere& sphere, const Plane3& plane);
 // when they do not overlap or when either shape is invalid; never throws
 // (docs/04).
 std::optional<Contact3> contact(const Sphere& sphere, const Plane3& plane);
+
+// Sphere against sphere, the 3D sibling of circle against circle. The normal
+// points from `a` toward `b`. Coincident centres are the one degenerate case:
+// every direction separates them equally, so the normal falls back to a fixed
+// +x, exactly as the 2D circle pair does (a documented, deterministic choice
+// rather than a divide by zero).
+std::optional<Contact3> contact(const Sphere& a, const Sphere& b);
 } // namespace malloy::collide

@@ -827,6 +827,67 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M24] - 2026-09-11  (sphere-against-sphere collisions)
+
+### Added
+
+- `collide::Sphere` against `collide::Sphere`: `overlaps` and `contact`, the 3D
+  sibling of circle against circle, with the same +x fallback for coincident
+  centres.
+- Two-body contact response in `Rigid3DWorld`: a body-body pass in `step()`
+  over every pair in a fixed order, alongside the existing ground pass.
+- `scenarios/sphere_collision.scn`.
+
+### One impulse core, two contact types
+
+The contact response is now a single two-body core, `resolve_pair`, that takes
+two participants and exchanges an equal and opposite impulse between them. The
+ground is expressed as a participant with zero inverse mass, so a sphere against
+a plane and a sphere against a sphere run the same formula; it is never written
+twice. This is the 3D echo of the 2D `resolve_ground` stand-in body (ADR 0008,
+"the second copy that becomes a third"), and refactoring M22/M23's
+`resolve_ground3d` onto it left every existing sphere-plane result bit for bit
+unchanged, which the M22 and M23 tests confirm.
+
+### The headline is momentum
+
+An immovable plane is a momentum sink: it absorbs whatever it must, so
+sphere-plane contacts say nothing about momentum. Two movable bodies do, and the
+sharp invariant is that TOTAL linear momentum is conserved, because the impulse
+is equal and opposite. It is asserted to hold to rounding across a general
+collision (unequal masses and radii, off-axis velocities, spin, and friction),
+over four hundred steps.
+
+The velocity outcomes are exact where they have closed forms:
+
+- equal masses, elastic, head-on: the velocities are exchanged;
+- equal masses, one at rest: the mover stops and the target leaves with the
+  whole velocity (a Newton's cradle of two);
+- unequal masses, elastic: the exact 1D elastic result
+  `va' = ((ma-mb) va + 2 mb vb) / (ma+mb)`, and likewise for b;
+- the relative normal velocity reverses by -e, off-axis.
+
+Energy is conserved across a single elastic impulse (the head-on cases, exact),
+and across a frictionless elastic multi-body collision to the scheme's contact
+drift (~1e-7, the same class as M14's positional-correction artefact). With
+friction or e < 1 it strictly falls. The positional correction splits by inverse
+mass, so the heavier body of an overlapping pair moves less (a 1 : 3 mass pair
+moves 3 : 1).
+
+### Mutation testing
+
+Fourteen mutations. Thirteen caught: the sphere-sphere normal (unnormalized and
+reversed), penetration sign, overlap test, and coincident-centre fallback; both
+contact arms (b's sign and a's radius, pinned by a glancing unequal collision's
+induced spins); the radius guard on the second body; the impulse not reaching b,
+both bodies taking the same sign, friction not reaching b; the positional
+correction not splitting by mass; and the body-body pass dropped.
+
+One is EQUIVALENT and uncatchable: removing the "two immovable things never
+resolve" guard. A RigidBody3D always has positive finite mass, and there is no
+plane-against-plane path, so the inverse-mass sum is always positive and the
+guard never fires. It stays as defensive intent.
+
 ## [M23] - 2026-09-11  (Coulomb friction for 3D contacts)
 
 ### Added
