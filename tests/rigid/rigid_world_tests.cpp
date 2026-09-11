@@ -4548,6 +4548,212 @@ int main()
         }
     }
 
+    // --- M28: a constant applied FORCE, the translational half of a wrench.
+    //     M21 put a torque on a body; M28 puts a force. It enters as the
+    //     acceleration F/m before the position update, so it scales with mass
+    //     (a force, not gravity's acceleration) and acts through the centre of
+    //     mass, making no torque. Together with the torque setting it expresses
+    //     any constant wrench, and the two halves do not interfere. ---
+    {
+        using malloy::math::approx_equal;
+        using malloy::math::Vec3;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::SolidSphere;
+        using malloy::rigid::total_force_potential3d;
+        using malloy::rigid::total_kinetic_energy3d;
+        using malloy::rigid::total_linear_momentum3d;
+
+        // --- Validation: the force must be SQUARABLE, like the torque. ---
+        {
+            Rigid3DSettings good;
+            good.force = Vec3{1.0, -2.0, 3.0};
+            MALLOY_CHECK_TRUE(good.is_valid());
+            Rigid3DSettings infinite;
+            infinite.force = Vec3{inf, 0.0, 0.0};
+            MALLOY_CHECK_FALSE(infinite.is_valid());
+            Rigid3DSettings not_a_number;
+            not_a_number.force = Vec3{0.0, nan, 0.0};
+            MALLOY_CHECK_FALSE(not_a_number.is_valid());
+            Rigid3DSettings unsquarable; // finite, but its square overflows
+            unsquarable.force = Vec3{0.0, 0.0, 1.4e154};
+            MALLOY_CHECK_FALSE(unsquarable.is_valid());
+            // A world with a bad force refuses to step and leaves state alone.
+            RigidBody3D body;
+            Rigid3DWorld world{SimulationSettings{0.01}, {body}, infinite};
+            MALLOY_CHECK_TRUE(world.step().status == StepStatus::InvalidSettings);
+        }
+
+        // --- Newton's second law, discretely exact in momentum. A body from
+        //     rest under a constant force: the velocity reaches (F/m) t and the
+        //     momentum reaches F t, because each step adds the impulse F dt
+        //     exactly (m times the acceleration F/m). ---
+        {
+            const Real dt = 0.001;
+            const Vec3 force{2.0, -3.0, 1.5};
+            RigidBody3D body = rigid_body_from(mass_properties_3d(
+                std::vector<SolidSphere>{SolidSphere{Vec3{}, 0.5, 1000.0}}));
+            const Real m = body.mass;
+            Rigid3DSettings settings;
+            settings.force = force;
+            Rigid3DWorld world{SimulationSettings{dt}, {body}, settings};
+            const int steps = 5000;
+            for (int i = 0; i < steps; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const Real t = static_cast<Real>(steps) * dt;
+            MALLOY_CHECK_TRUE(
+                approx_equal(world.bodies()[0].velocity, force * (t / m), 1e-9));
+            MALLOY_CHECK_TRUE(
+                approx_equal(total_linear_momentum3d(world.bodies()), force * t, 1e-6));
+        }
+
+        // --- The force scales with mass, which is what makes it a force and not
+        //     gravity. Two spheres of the same size but different density feel
+        //     the same force; the lighter accelerates more, in inverse
+        //     proportion to mass, and both gain the same momentum (equal
+        //     impulse). This reads the mass computed in M25 to M27. ---
+        {
+            const Real dt = 0.001;
+            const Vec3 force{5.0, 0.0, 0.0};
+            RigidBody3D light = rigid_body_from(mass_properties_3d(
+                std::vector<SolidSphere>{SolidSphere{Vec3{}, 0.5, 1000.0}}));
+            RigidBody3D heavy = rigid_body_from(mass_properties_3d(
+                std::vector<SolidSphere>{SolidSphere{Vec3{}, 0.5, 4000.0}}));
+            Rigid3DSettings settings;
+            settings.force = force;
+            Rigid3DWorld world{SimulationSettings{dt}, {light, heavy}, settings};
+            for (int i = 0; i < 1000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const RigidBody3D& l = world.bodies()[0];
+            const RigidBody3D& h = world.bodies()[1];
+            MALLOY_CHECK_TRUE(l.velocity.x > h.velocity.x); // lighter is faster
+            // Equal impulse: m v is the same for both (each is F.x t).
+            MALLOY_CHECK_NEAR(l.mass * l.velocity.x, h.mass * h.velocity.x, 1e-9);
+            // The speed ratio is the inverse mass ratio (4x denser is 4x slower).
+            MALLOY_CHECK_NEAR(l.velocity.x / h.velocity.x, h.mass / l.mass, 1e-9);
+        }
+
+        // --- A centre-of-mass force makes NO torque: its lever arm is zero. A
+        //     tumbling body run with a force has bit-for-bit the same angular
+        //     velocity and orientation as the same body run free, while its
+        //     linear velocity differs. The linear and rotational halves are
+        //     orthogonal. ---
+        {
+            const Real dt = 0.005;
+            RigidBody3D body;
+            body.inertia = Vec3{2.0, 3.0, 5.0}; // asymmetric, so it tumbles
+            body.angular_velocity = Vec3{0.5, 4.0, 0.2};
+            body.orientation = malloy::math::from_axis_angle(Vec3{1.0, 1.0, 1.0}, 0.5);
+            body.mass = 3.0;
+            Rigid3DSettings pushed;
+            pushed.force = Vec3{3.0, -1.0, 2.0};
+            Rigid3DWorld forced{SimulationSettings{dt}, {body}, pushed};
+            Rigid3DWorld free{SimulationSettings{dt}, {body}, Rigid3DSettings{}};
+            for (int i = 0; i < 500; ++i)
+            {
+                MALLOY_CHECK_TRUE(forced.step().ok());
+                MALLOY_CHECK_TRUE(free.step().ok());
+                MALLOY_CHECK_TRUE(approx_equal(forced.bodies()[0].angular_velocity,
+                                               free.bodies()[0].angular_velocity, 0.0));
+                MALLOY_CHECK_TRUE(approx_equal(forced.bodies()[0].orientation,
+                                               free.bodies()[0].orientation, 0.0));
+            }
+            // The force did act, so the linear velocities are not equal.
+            MALLOY_CHECK_FALSE(approx_equal(forced.bodies()[0].velocity,
+                                            free.bodies()[0].velocity, 1e-9));
+        }
+
+        // --- The energy law. Kinetic plus the force potential decreases by
+        //     exactly (1/2) |F|^2 / m dt^2 per step, semi-implicit Euler's
+        //     second-order shed for a constant acceleration a = F/m (the same
+        //     shape as the gravity drift, carrying the 1/m the acceleration
+        //     does not). A non-spinning sphere, so all the energy is
+        //     translational. ---
+        {
+            const Real dt = 0.002;
+            const Vec3 force{4.0, -2.0, 1.0};
+            RigidBody3D body = rigid_body_from(mass_properties_3d(
+                std::vector<SolidSphere>{SolidSphere{Vec3{}, 0.4, 2000.0}}));
+            const Real m = body.mass;
+            Rigid3DSettings settings;
+            settings.force = force;
+            Rigid3DWorld world{SimulationSettings{dt}, {body}, settings};
+            const Real per_step =
+                0.5 * malloy::math::length_squared(force) / m * dt * dt;
+            Real worst = 0.0;
+            for (int i = 0; i < 300; ++i)
+            {
+                const Real before = total_kinetic_energy3d(world.bodies()) +
+                                    total_force_potential3d(world.bodies(), force);
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const Real after = total_kinetic_energy3d(world.bodies()) +
+                                   total_force_potential3d(world.bodies(), force);
+                worst = std::fmax(worst, std::abs((after - before) + per_step));
+            }
+            MALLOY_CHECK_TRUE(worst < 1e-12);
+        }
+
+        // --- The complete wrench: force AND torque, at once. The body's angular
+        //     state matches a torque-only run (the force adds no torque) and its
+        //     linear velocity matches a force-only run (the torque adds no
+        //     force), both bit for bit. The halves do not interfere, which is
+        //     what lets an off-centre push be written as force plus couple. ---
+        {
+            const Real dt = 0.002;
+            RigidBody3D body;
+            body.inertia = Vec3{2.0, 3.0, 5.0};
+            body.angular_velocity = Vec3{0.4, 0.1, -0.3};
+            body.orientation = malloy::math::from_axis_angle(Vec3{0.0, 1.0, 0.0}, 0.3);
+            body.mass = 5.0;
+            const Vec3 force{2.0, 1.0, -1.0};
+            const Vec3 torque{0.3, -0.5, 0.2};
+            Rigid3DSettings wrench_settings;
+            wrench_settings.force = force;
+            wrench_settings.torque = torque;
+            Rigid3DSettings force_only;
+            force_only.force = force;
+            Rigid3DSettings torque_only;
+            torque_only.torque = torque;
+            Rigid3DWorld wrench{SimulationSettings{dt}, {body}, wrench_settings};
+            Rigid3DWorld linear{SimulationSettings{dt}, {body}, force_only};
+            Rigid3DWorld angular{SimulationSettings{dt}, {body}, torque_only};
+            for (int i = 0; i < 300; ++i)
+            {
+                MALLOY_CHECK_TRUE(wrench.step().ok());
+                MALLOY_CHECK_TRUE(linear.step().ok());
+                MALLOY_CHECK_TRUE(angular.step().ok());
+                MALLOY_CHECK_TRUE(approx_equal(wrench.bodies()[0].angular_velocity,
+                                               angular.bodies()[0].angular_velocity, 0.0));
+                MALLOY_CHECK_TRUE(approx_equal(wrench.bodies()[0].velocity,
+                                               linear.bodies()[0].velocity, 0.0));
+            }
+        }
+
+        // --- The force potential: the sum of -(F . r), no mass factor (the
+        //     force is uniform, not mass-scaled like gravity's m g), and zero
+        //     for a zero force. ---
+        {
+            RigidBody3D a;
+            a.position = Vec3{1.0, 2.0, 3.0};
+            a.mass = 2.0;
+            RigidBody3D b;
+            b.position = Vec3{-1.0, 0.0, 4.0};
+            b.mass = 5.0;
+            const Vec3 force{10.0, 0.0, -2.0};
+            const Real expected =
+                -(malloy::math::dot(force, a.position) + malloy::math::dot(force, b.position));
+            MALLOY_CHECK_NEAR(total_force_potential3d({a, b}, force), expected, 1e-12);
+            MALLOY_CHECK_NEAR(total_force_potential3d({a, b}, Vec3{}), 0.0, 0.0);
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

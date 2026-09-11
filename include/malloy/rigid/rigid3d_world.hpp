@@ -12,8 +12,8 @@
 
 namespace malloy::rigid
 {
-// Settings for the 3D rigid world: a constant torque (M21), and gravity,
-// restitution and ground planes for contacts (M22).
+// Settings for the 3D rigid world: a constant torque (M21), a constant applied
+// force (M28), and gravity, restitution and ground planes for contacts (M22).
 //
 // The torque is in the WORLD frame, not the body frame. That is a deliberate
 // choice and it is what makes M21's headline invariant clean: the physical law
@@ -33,6 +33,20 @@ namespace malloy::rigid
 struct Rigid3DSettings
 {
     math::Vec3 torque{};
+
+    // A constant applied FORCE, in the world frame: the translational half of a
+    // wrench whose rotational half is `torque` above. It is applied as the
+    // acceleration F/m it produces, before the position update, so unlike
+    // `gravity` it scales with 1/mass. That is the whole difference between a
+    // force and an acceleration, and it is why the force reads the body's mass
+    // (now computed from geometry, M25 to M27). It acts through the centre of
+    // mass, so on its own it makes no torque; an off-centre push is this force
+    // plus the couple r x F carried by `torque`, which is what makes the pair a
+    // complete wrench. It is a single constant SETTING applied as forcing, NOT
+    // the force accumulator rule 5 defers: M28 is that rule's dedicated
+    // milestone for a translational force, and adds one force, not an
+    // accumulation of them. Zero by default, so a pre-M28 world is unchanged.
+    math::Vec3 force{};
 
     // Bounciness of every contact. 1 is perfectly elastic and conserves kinetic
     // energy across a bounce; 0 is perfectly inelastic, so the body stops
@@ -67,9 +81,10 @@ struct Rigid3DSettings
     std::vector<collide::Plane3> ground;
 
     // Valid when the torque is SQUARABLE (it enters |u|^2 in the drift law),
-    // restitution is in [0, 1] and finite, friction is non-negative and finite,
-    // gravity is SQUARABLE (its square enters the free-flight energy drift), and
-    // every ground plane is valid.
+    // the force is SQUARABLE (its square enters the free-flight energy drift, as
+    // gravity's does), restitution is in [0, 1] and finite, friction is
+    // non-negative and finite, gravity is SQUARABLE, and every ground plane is
+    // valid.
     bool is_valid() const;
 };
 
@@ -105,6 +120,9 @@ public:
     //      position update, which keeps this semi-implicit Euler. An
     //      acceleration, so it does not scale with mass and no body is exempt
     //      (every RigidBody3D is movable; the ground is geometry, not a body).
+    //      Then add the acceleration F/m of the applied FORCE (M28), which DOES
+    //      scale with mass and acts through the centre of mass, so it changes
+    //      the velocity but makes no torque. Both are zero by default.
     //
     //   1. integrate the angular velocity with Euler's equations, in the body
     //      frame, where the inertia is diagonal, using FORWARD Euler (the rate
@@ -257,4 +275,16 @@ math::Real total_kinetic_energy3d(const std::vector<RigidBody3D>& bodies);
 // step, the same drift M12 and M15 measured in two dimensions.
 math::Real total_potential_energy3d(const std::vector<RigidBody3D>& bodies,
                                     const math::Vec3& gravity);
+
+// Potential energy of the constant applied FORCE: the sum of -(F . r), r the
+// centre of mass, F the world-frame force setting. Zero when the force is zero.
+// The force does work F . dr as a body moves, so this is the potential whose
+// decrease matches that work, exactly as the gravity potential above does for
+// gravity. Kinetic plus both potentials is the quantity conserved in free
+// flight if the integrator were exact; semi-implicit Euler instead sheds
+// (1/2)(sum |F|^2 / m) dt^2 per free-flight step, the force's analogue of the
+// gravity drift (the per-body acceleration is F/m, so its square carries the
+// 1/m the gravity term does not).
+math::Real total_force_potential3d(const std::vector<RigidBody3D>& bodies,
+                                   const math::Vec3& force);
 } // namespace malloy::rigid

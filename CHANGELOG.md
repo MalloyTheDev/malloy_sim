@@ -827,6 +827,56 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M28] - 2026-09-11  (a constant applied force on a 3D body)
+
+### Added
+
+- A constant applied FORCE on `Rigid3DSettings`, in the world frame: the
+  translational half of a wrench, where M21's torque is the rotational half.
+- `rigid::total_force_potential3d`, the potential energy of that force,
+  -(F . r) summed over bodies, so energy still balances when a force acts.
+
+### The other half of the wrench
+
+M21 put a torque on a 3D body; M28 puts a force. It enters the step as the
+acceleration F/m it produces, in the same place gravity does (before the
+position update, which keeps the world semi-implicit), but unlike gravity it
+scales with 1/mass. That is the whole difference between a force and an
+acceleration, and it is why the force reads the body's mass, now computed from
+geometry (M25 to M27). It acts through the centre of mass, so on its own it
+makes no torque: a centre-of-mass force has no lever arm.
+
+Together the force and torque settings express any constant wrench at the centre
+of mass, which is how an off-centre push is represented (a force plus the couple
+r x F). So M28 needs no application point and no lever-arm machinery: the couple
+is the torque that is already there.
+
+It is a single constant SETTING applied as forcing, not the force accumulator
+rule 5 defers. M28 is that rule's dedicated milestone for a translational force,
+and it adds one force, not a pipeline that sums many; the rule now reads as a
+ban on accumulators rather than on forces.
+
+### Invariants
+
+Newton's second law, discretely exact in momentum: a body from rest under a
+constant force reaches velocity (F/m) t and momentum F t, because each step adds
+the impulse F dt exactly. The force scales with mass, so two spheres of the same
+size and different density gain the same momentum while the lighter goes faster,
+in inverse proportion to mass, which reads the mass computed in M25 to M27. A
+centre-of-mass force makes no torque: a tumbling body pushed by a force has
+bit-for-bit the same angular velocity and orientation as the same body left
+free, while its velocity differs. The complete wrench is orthogonal: with force
+and torque both set, the angular state matches a torque-only run and the
+velocity a force-only run, both exactly. And kinetic plus the force potential
+sheds exactly (1/2) |F|^2 / m dt^2 per free-flight step, the force's analogue of
+the gravity drift.
+
+### Mutation testing
+
+Six mutations, all caught: the force having no effect, the force not divided by
+mass, its sign flipped, the force validation dropped, and the force potential's
+sign flipped or wrongly mass-scaled.
+
 ## [M27] - 2026-09-11  (mesh mass properties)
 
 ### Added

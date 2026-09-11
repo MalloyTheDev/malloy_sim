@@ -19,9 +19,11 @@ collision radius and bounced it off a ground plane, the project's first 3D
 contact; M23 added friction, so a sliding sphere rolls; M24 made two spheres collide,
 conserving momentum; M25 computes a body's mass and inertia from its geometry,
 M26 does the same for boxes and assembles compound bodies from primitives, and
-M27 does it for an arbitrary triangle mesh. The rest is still 2D and is the
-larger share of the project: a translational force on a 3D body, and 3D
-versions of the remaining domains. 3D is the destination rather than a possibility left
+M27 does it for an arbitrary triangle mesh; and M28 pushes a body with a
+constant applied force, the translational half of a wrench to go with M21's
+torque. The rest is still 2D and is the larger share of the project: more 3D
+contact geometry, and 3D versions of the remaining domains. 3D is the
+destination rather than a possibility left
 open, and each remaining piece is its own milestone: see
 `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
@@ -33,7 +35,8 @@ magnetic fields, gravity in three dimensions, 3D rigid-body rotation both free
 and under an applied torque, a sphere bouncing on a 3D ground plane, friction
 that makes a sliding sphere roll, sphere-against-sphere collisions, mass
 properties computed from 3D geometry, box mass properties with compound
-assembly, and mass properties of an arbitrary triangle mesh (milestones M1-M27).
+assembly, mass properties of an arbitrary triangle mesh, and a constant applied
+force on a 3D body (milestones M1-M28).
 
 ## Locked baseline
 
@@ -58,7 +61,8 @@ response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
 **M17: friction**, **M18: charged particles**, **M19: 3D gravity**,
 **M20: 3D rotation**, **M21: 3D torque**, **M22: 3D contact**,
 **M23: 3D friction**, **M24: 3D sphere pairs**, **M25: 3D mass properties**,
-**M26: box mass properties**, **M27: mesh mass properties**). The project builds clean under
+**M26: box mass properties**, **M27: mesh mass properties**,
+**M28: applied force**). The project builds clean under
 MSVC (`/W4 /permissive-`), and all 14 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
@@ -263,6 +267,7 @@ built-in scenarios shown above.
 | M25 | 3D mass properties: mass and inertia computed from geometry | ✅ Done |
 | M26 | box mass properties and combine: compound bodies from primitives | ✅ Done |
 | M27 | mesh mass properties: inertia of an arbitrary triangle mesh | ✅ Done |
+| M28 | a constant applied force on a 3D body: the other half of a wrench | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -280,10 +285,10 @@ Intended, not yet built, and never added speculatively
   (a sphere on a ground plane), M23 friction for it, and M24 sphere-against-
   sphere collisions, M25 mass properties from geometry (with `Mat3` and a
   symmetric eigensolver), M26 box mass properties with `combine` (compound
-  bodies assembled from primitives), and M27 mass properties of an arbitrary
-  triangle mesh (signed-tetrahedron volume integrals); a translational force on
-  a 3D body, and 3D versions of the remaining domains are each their own
-  milestone
+  bodies assembled from primitives), M27 mass properties of an arbitrary
+  triangle mesh (signed-tetrahedron volume integrals), and M28 a constant
+  applied force (the translational half of a wrench); more 3D contact geometry,
+  and 3D versions of the remaining domains are each their own milestone
   (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is

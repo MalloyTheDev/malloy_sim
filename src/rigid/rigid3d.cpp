@@ -233,7 +233,8 @@ bool RigidBody3D::is_valid() const
 
 bool Rigid3DSettings::is_valid() const
 {
-    if (!math::is_squarable(torque) || !math::is_squarable(gravity))
+    if (!math::is_squarable(torque) || !math::is_squarable(force) ||
+        !math::is_squarable(gravity))
     {
         return false;
     }
@@ -289,7 +290,7 @@ Rigid3DWorld::Rigid3DWorld(sim_core::SimulationSettings simulation_settings,
 sim_core::StepStatus Rigid3DWorld::validate() const
 {
     if (!simulation_settings_.is_valid() || // dt > 0, finite
-        !settings_.is_valid())              // torque squarable
+        !settings_.is_valid())              // torque, force, gravity squarable
     {
         return sim_core::StepStatus::InvalidSettings;
     }
@@ -322,6 +323,16 @@ sim_core::StepResult Rigid3DWorld::step()
         //     mass, and every RigidBody3D is movable (the ground is geometry,
         //     not a body). Zero by default, so a pre-M22 world is unchanged.
         body.velocity += settings_.gravity * dt;
+
+        //     Then the applied FORCE (M28), as the acceleration F/m it
+        //     produces. Unlike gravity this scales with 1/mass, which is the
+        //     whole difference between a force and an acceleration and is why it
+        //     needs the body's mass (computed from geometry, M25 to M27). It
+        //     acts through the centre of mass, so it makes no torque; the
+        //     rotational half of a wrench is the torque in step (1). Zero by
+        //     default, and F = 0 leaves this line adding a zero vector, so a
+        //     pre-M28 world is unchanged bit for bit.
+        body.velocity += (settings_.force / body.mass) * dt;
 
         // (1) Euler's equations, in the body frame, stepped with FORWARD
         //     Euler: the rate is evaluated wholly at the old angular velocity
@@ -456,6 +467,20 @@ math::Real total_potential_energy3d(const std::vector<RigidBody3D>& bodies,
     for (const RigidBody3D& body : bodies)
     {
         potential -= body.mass * math::dot(gravity, body.position);
+    }
+    return potential;
+}
+
+math::Real total_force_potential3d(const std::vector<RigidBody3D>& bodies,
+                                   const math::Vec3& force)
+{
+    // Sum of -(F . r), r the centre of mass. The applied force is uniform, not
+    // mass-scaled like gravity's m g, so there is no mass factor here. Zero when
+    // the force is zero.
+    math::Real potential = 0.0;
+    for (const RigidBody3D& body : bodies)
+    {
+        potential -= math::dot(force, body.position);
     }
     return potential;
 }
