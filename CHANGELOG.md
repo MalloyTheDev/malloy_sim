@@ -5,6 +5,35 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- M19 shipped without scenario parse tests for `type nbody3d` or the `body3`
+  key, while every other domain has them. Rule 16 requires malformed-input
+  tests and the parser is where malformed input arrives, so the milestone was
+  not finished.
+
+  Now covered: all seven `body3` fields with distinct nonzero values, so a
+  transposed or dropped one shows and the z components in particular are not
+  hidden by zeros; six fields refused, since a 2D body line is not a 3D one
+  with a component missing; `body` refused inside `nbody3d` so a scenario
+  cannot half-convert; `body3` refused in every other domain; `g` and
+  `softening` shown to reach the shared `NBodySettings` and not to leak into
+  the charge domain; another domain's keys refused inside `nbody3d`; and a
+  softening whose square overflows refused by the same bound the 2D world has.
+
+  Four mutations, all caught: `body3` accepted anywhere, its y and z read in
+  the wrong order, `g` no longer serving `nbody3d`, and `softening` routed to
+  the wrong settings.
+
+- docs/09's scope-creep watchlist still listed collision, rigid bodies and 3D
+  among things not to add. All three have had their milestone, and unlike
+  docs/02 that file is live guidance rather than a historical specification, so
+  the list is now separated from what has shipped. The note added with it is
+  the durable part: the rule is the "until a milestone calls for it" clause,
+  not the list of names, because a list goes stale as milestones land and the
+  discipline does not.
+
+
 ### Added
 
 - Issue #20: `malloy_particles` gains `total_angular_momentum`, which it had no

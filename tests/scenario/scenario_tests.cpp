@@ -1182,6 +1182,89 @@ int main()
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
 
+    // --- M19: type nbody3d parses into the 3D fields. Every value is distinct
+    //     and no component is zero, so a dropped or transposed one shows. The
+    //     z components in particular would be invisible in a configuration
+    //     that left them at zero. ---
+    {
+        std::istringstream in("type nbody3d\n"
+                              "g 2.5\n"
+                              "softening 0.125\n"
+                              "body3 3.5   1.0 -2.0  4.0   -0.5  0.25 -0.75\n"
+                              "body3 0.25 -6.0  7.5 -8.5    1.5 -2.5   3.5\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::NBody3D);
+
+        // g and softening are shared with the 2D gravity world, because they
+        // mean the same thing in either dimension.
+        MALLOY_CHECK_NEAR(r.scenario.nbody_settings.g, 2.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.nbody_settings.softening, 0.125, eps);
+
+        MALLOY_CHECK_EQ(r.scenario.bodies3d.size(), std::size_t{2});
+        const auto& first = r.scenario.bodies3d[0];
+        MALLOY_CHECK_NEAR(first.mass, 3.5, eps);
+        MALLOY_CHECK_NEAR(first.position.x, 1.0, eps);
+        MALLOY_CHECK_NEAR(first.position.y, -2.0, eps);
+        MALLOY_CHECK_NEAR(first.position.z, 4.0, eps);
+        MALLOY_CHECK_NEAR(first.velocity.x, -0.5, eps);
+        MALLOY_CHECK_NEAR(first.velocity.y, 0.25, eps);
+        MALLOY_CHECK_NEAR(first.velocity.z, -0.75, eps);
+        MALLOY_CHECK_TRUE(first.is_valid());
+
+        const auto& second = r.scenario.bodies3d[1];
+        MALLOY_CHECK_NEAR(second.position.z, -8.5, eps);
+        MALLOY_CHECK_NEAR(second.velocity.z, 3.5, eps);
+
+        // Nothing leaked into another domain's state.
+        MALLOY_CHECK_TRUE(r.scenario.bodies.empty());
+        MALLOY_CHECK_NEAR(r.scenario.charge_settings.softening, 0.0, 0.0);
+    }
+    {
+        // Seven fields are required, not six: a 2D body line is not a 3D one
+        // with a component missing.
+        std::istringstream in("type nbody3d\nbody3 1.0  0 0 0  0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // And the 2D key is not accepted here, so a scenario cannot silently
+        // half-convert.
+        std::istringstream in("type nbody3d\nbody 1.0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // body3 belongs to this domain and to no other.
+        std::istringstream in("type nbody\nbody3 1.0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type charges\nbody3 1.0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // A key belonging to another domain is refused inside nbody3d, which is
+        // what makes a typo in `type` surface immediately rather than running
+        // the wrong simulation.
+        std::istringstream in("type nbody3d\nrestitution 0.5\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type nbody3d\nbfield 1.0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        std::istringstream in("type nbody3d\nground 0 1 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+    }
+    {
+        // A softening whose square overflows is refused by the settings, the
+        // same bound the 2D world has, since both use NBodySettings.
+        std::istringstream in("type nbody3d\nsoftening 1e200\nbody3 1 0 0 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_FALSE(r.scenario.nbody_settings.is_valid());
+    }
+
     std::cout << "malloy_scenario_tests passed\n";
     return 0;
 }
