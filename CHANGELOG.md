@@ -827,6 +827,51 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M32] - 2026-09-12  (colliding particles in three dimensions)
+
+### Added
+
+- `particles::Particle3D`, `particles::ParticleSettings3D` and
+  `particles::ParticleWorld3D`, the 3D sibling of the M10 particle domain:
+  spheres that collide and are confined to a box, with the diagnostics
+  `total_momentum3d`, `total_kinetic_energy3d`, `total_potential_energy3d`,
+  `total_angular_momentum3d` and `total_energy3d`.
+- `collide::Aabb3`, an axis-aligned 3D box, the walls the particles are confined
+  to (the 3D sibling of `Aabb`).
+- A `particles3d` scenario type (`particle3`, `bounds3`, and the shared
+  `restitution` and `gravity3` keys) and the `particle_collision3d` template.
+  Twenty-one templates now, across ten domains.
+
+### The last domain to reach three dimensions
+
+Every one of the five domains now has a 3D form; M32 lifts the last of them.
+Particles collide as spheres, which is the geometry M22 and M24 already built,
+so the contact response is the 2D one with a Vec3 normal: a positional
+correction plus an equal-and-opposite impulse along the line of centres, which
+imparts no spin (a particle has no orientation). Wall containment is a per-axis
+clamp-and-reflect against an `Aabb3`, with a third axis added. Gravity and the
+diagnostics lift the same way.
+
+### Invariants
+
+An elastic head-on collision conserves both total momentum (the impulse is equal
+and opposite) and total kinetic energy (a perfect bounce loses none), and equal
+masses swap velocities; an inelastic one keeps the momentum but sheds energy. A
+particle confined to the box never escapes on any axis and, with elastic walls,
+keeps its speed exactly. And a run confined to the z = 0 plane matches the 2D
+`ParticleWorld` step for step, including gravity, walls and the divide-by-mass,
+which ties the new world to the proven one. The shipped `particle_collision3d`
+template sends two spheres head-on along the space diagonal and holds momentum
+and energy through the bounce.
+
+### Mutation testing
+
+Twelve mutations, all caught: the collision impulse's equal-and-opposite split,
+its restitution factor and closing-velocity guard, the wall clamp, the gravity
+kick, the particle validation, the momentum, kinetic and potential diagnostics,
+`Aabb3`'s min-less-than-max check, and the scenario loader's field order and
+gravity routing.
+
 ## [M31] - 2026-09-11  (spring networks in three dimensions)
 
 ### Added

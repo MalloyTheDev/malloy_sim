@@ -12,15 +12,24 @@
 #include <vector>
 
 using malloy::collide::Aabb;
+using malloy::collide::Aabb3;
 using malloy::math::Real;
 using malloy::math::Vec2;
+using malloy::math::Vec3;
 using malloy::particles::Particle2D;
+using malloy::particles::Particle3D;
 using malloy::particles::ParticleSettings;
+using malloy::particles::ParticleSettings3D;
 using malloy::particles::ParticleWorld;
+using malloy::particles::ParticleWorld3D;
 using malloy::particles::total_potential_energy;
+using malloy::particles::total_potential_energy3d;
 using malloy::particles::total_energy;
+using malloy::particles::total_energy3d;
 using malloy::particles::total_kinetic_energy;
+using malloy::particles::total_kinetic_energy3d;
 using malloy::particles::total_momentum;
+using malloy::particles::total_momentum3d;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
 
@@ -690,6 +699,163 @@ int main()
         const std::vector<Particle2D> radial = {
             Particle2D{Vec2{3.0, 4.0}, Vec2{-6.0, -8.0}, 1.0, 0.1}};
         MALLOY_CHECK_NEAR(total_angular_momentum(radial), 0.0, eps);
+    }
+
+    // --- M32: colliding particles in three dimensions. The 3D sibling of the
+    //     M10 domain: spheres collide (the M22/M24 geometry) and are confined to
+    //     a 3D box. Elastic collisions conserve momentum and energy; walls carry
+    //     momentum away; and a z = 0 run matches the 2D world. ---
+    {
+        using malloy::math::approx_equal;
+        const auto particle3 = [](Vec3 position, Vec3 velocity, Real mass, Real radius) {
+            Particle3D p;
+            p.position = position;
+            p.velocity = velocity;
+            p.mass = mass;
+            p.radius = radius;
+            return p;
+        };
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Aabb3 room{Vec3{-100.0, -100.0, -100.0}, Vec3{100.0, 100.0, 100.0}};
+
+        // --- Validation. ---
+        {
+            MALLOY_CHECK_TRUE(particle3(Vec3{}, Vec3{}, 1.0, 0.5).is_valid());
+            MALLOY_CHECK_TRUE(particle3(Vec3{}, Vec3{}, 1.0, 0.0).is_valid()); // a point
+            MALLOY_CHECK_FALSE(particle3(Vec3{}, Vec3{}, 0.0, 0.5).is_valid());
+            MALLOY_CHECK_FALSE(particle3(Vec3{}, Vec3{}, 1.0, -0.5).is_valid());
+            MALLOY_CHECK_FALSE(particle3(Vec3{0.0, 0.0, nan3}, Vec3{}, 1.0, 0.5).is_valid());
+            ParticleSettings3D good;
+            good.bounds = room;
+            MALLOY_CHECK_TRUE(good.is_valid());
+            ParticleSettings3D bad_rest;
+            bad_rest.restitution = 1.5;
+            MALLOY_CHECK_FALSE(bad_rest.is_valid());
+            ParticleSettings3D bad_gravity;
+            bad_gravity.gravity = Vec3{0.0, inf3, 0.0};
+            MALLOY_CHECK_FALSE(bad_gravity.is_valid());
+            ParticleSettings3D bad_bounds; // min > max on an axis
+            bad_bounds.bounds = Aabb3{Vec3{1.0, 1.0, 1.0}, Vec3{-1.0, 1.0, 1.0}};
+            MALLOY_CHECK_FALSE(bad_bounds.is_valid());
+            // A particle wider than the box is rejected (it would fight two walls).
+            ParticleSettings3D small_box;
+            small_box.bounds = Aabb3{Vec3{-0.4, -0.4, -0.4}, Vec3{0.4, 0.4, 0.4}};
+            ParticleWorld3D tight{SimulationSettings{0.01}, small_box,
+                                  {particle3(Vec3{}, Vec3{}, 1.0, 0.5)}};
+            MALLOY_CHECK_TRUE(tight.step().status == StepStatus::InvalidState);
+        }
+
+        // --- An elastic head-on collision conserves momentum AND kinetic
+        //     energy, and the equal masses swap velocities. No walls, no
+        //     gravity, restitution 1. ---
+        {
+            ParticleSettings3D settings;
+            settings.restitution = 1.0;
+            settings.bounds = room;
+            ParticleWorld3D world{SimulationSettings{0.001}, settings,
+                                  {particle3(Vec3{-2.0, 0.0, 0.0}, Vec3{3.0, 0.0, 0.0}, 1.0, 0.5),
+                                   particle3(Vec3{2.0, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0}, 1.0, 0.5)}};
+            const Vec3 p0 = total_momentum3d(world.particles());
+            const Real e0 = total_kinetic_energy3d(world.particles());
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(approx_equal(total_momentum3d(world.particles()), p0, 1e-9));
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(world.particles()), e0, 1e-9);
+            // Equal masses swap along the line of centres: 3 -> -1 and -1 -> 3.
+            MALLOY_CHECK_NEAR(world.particles()[0].velocity.x, -1.0, 1e-9);
+            MALLOY_CHECK_NEAR(world.particles()[1].velocity.x, 3.0, 1e-9);
+        }
+
+        // --- An inelastic collision keeps momentum but sheds energy. ---
+        {
+            ParticleSettings3D settings;
+            settings.restitution = 0.5;
+            settings.bounds = room;
+            ParticleWorld3D world{SimulationSettings{0.001}, settings,
+                                  {particle3(Vec3{-2.0, 0.0, 0.0}, Vec3{3.0, 0.0, 0.0}, 1.0, 0.5),
+                                   particle3(Vec3{2.0, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0}, 1.0, 0.5)}};
+            const Vec3 p0 = total_momentum3d(world.particles());
+            const Real e0 = total_kinetic_energy3d(world.particles());
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(approx_equal(total_momentum3d(world.particles()), p0, 1e-9));
+            MALLOY_CHECK_TRUE(total_kinetic_energy3d(world.particles()) < e0 - 0.1);
+        }
+
+        // --- The box confines a particle, on every axis including the new z:
+        //     one aimed diagonally at a corner stays inside and reverses on each
+        //     wall it meets. ---
+        {
+            ParticleSettings3D settings;
+            settings.restitution = 1.0;
+            settings.bounds = Aabb3{Vec3{-1.0, -1.0, -1.0}, Vec3{1.0, 1.0, 1.0}};
+            ParticleWorld3D world{SimulationSettings{0.01}, settings,
+                                  {particle3(Vec3{}, Vec3{0.7, -0.5, 0.9}, 1.0, 0.2)}};
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const Vec3& x = world.particles()[0].position;
+                // Never escapes the box (allowing the sphere radius).
+                MALLOY_CHECK_TRUE(x.x >= -1.0 - 1e-9 && x.x <= 1.0 + 1e-9);
+                MALLOY_CHECK_TRUE(x.y >= -1.0 - 1e-9 && x.y <= 1.0 + 1e-9);
+                MALLOY_CHECK_TRUE(x.z >= -1.0 - 1e-9 && x.z <= 1.0 + 1e-9);
+            }
+            // Elastic walls preserve the speed exactly.
+            MALLOY_CHECK_NEAR(malloy::math::length(world.particles()[0].velocity),
+                              std::sqrt(0.49 + 0.25 + 0.81), 1e-12);
+        }
+
+        // --- It reduces to the 2D domain: the same particles in the z = 0
+        //     plane, with gravity in the plane, trace the same xy path as
+        //     ParticleWorld and never leave it. ---
+        {
+            const Real dt = 0.005;
+            ParticleSettings s2;
+            s2.restitution = 0.8;
+            s2.gravity = Vec2{0.3, -2.0};
+            s2.bounds = Aabb{Vec2{-5.0, -5.0}, Vec2{5.0, 5.0}};
+            ParticleSettings3D s3;
+            s3.restitution = 0.8;
+            s3.gravity = Vec3{0.3, -2.0, 0.0};
+            s3.bounds = Aabb3{Vec3{-5.0, -5.0, -5.0}, Vec3{5.0, 5.0, 5.0}};
+            ParticleWorld w2{SimulationSettings{dt}, s2,
+                             {Particle2D{Vec2{-1.0, 2.0}, Vec2{1.0, 0.0}, 1.0, 0.4},
+                              Particle2D{Vec2{1.0, 2.0}, Vec2{-1.0, 0.5}, 2.0, 0.4}}};
+            ParticleWorld3D w3{SimulationSettings{dt}, s3,
+                               {particle3(Vec3{-1.0, 2.0, 0.0}, Vec3{1.0, 0.0, 0.0}, 1.0, 0.4),
+                                particle3(Vec3{1.0, 2.0, 0.0}, Vec3{-1.0, 0.5, 0.0}, 2.0, 0.4)}};
+            for (int i = 0; i < 800; ++i)
+            {
+                MALLOY_CHECK_TRUE(w2.step().ok());
+                MALLOY_CHECK_TRUE(w3.step().ok());
+                for (std::size_t k = 0; k < 2; ++k)
+                {
+                    const auto& a = w2.particles()[k];
+                    const auto& c = w3.particles()[k];
+                    MALLOY_CHECK_TRUE(approx_equal(c.position, Vec3{a.position.x, a.position.y, 0.0}, 1e-10));
+                    MALLOY_CHECK_TRUE(approx_equal(c.velocity, Vec3{a.velocity.x, a.velocity.y, 0.0}, 1e-10));
+                }
+            }
+        }
+
+        // --- The diagnostics pin their factors, before any step. ---
+        {
+            const std::vector<Particle3D> two = {
+                particle3(Vec3{1.0, 0.0, 0.0}, Vec3{0.0, 2.0, 0.0}, 3.0, 0.5),
+                particle3(Vec3{0.0, 0.0, 4.0}, Vec3{-1.0, 0.0, 0.0}, 2.0, 0.5)};
+            // p = 3*(0,2,0) + 2*(-1,0,0) = (-2, 6, 0).
+            MALLOY_CHECK_TRUE(approx_equal(total_momentum3d(two), Vec3{-2.0, 6.0, 0.0}, 1e-12));
+            // KE = 0.5*3*4 + 0.5*2*1 = 6 + 1 = 7.
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(two), 7.0, 1e-12);
+            // U = sum of -m (g . r). With g = (0,0,-10) the only nonzero term is
+            // the second body at z = 4: -2 * (-10 * 4) = 80.
+            MALLOY_CHECK_NEAR(total_potential_energy3d(two, Vec3{0.0, 0.0, -10.0}), 80.0, 1e-12);
+        }
     }
 
     std::cout << "malloy_particles_tests passed\n";

@@ -50,8 +50,11 @@ using malloy::springs::SpringWorld3D;
 using malloy::nbody::total_energy;
 using malloy::particles::total_energy;
 using malloy::particles::total_momentum;
+using malloy::particles::Particle3D;
 using malloy::particles::ParticleSettings;
+using malloy::particles::ParticleSettings3D;
 using malloy::particles::ParticleWorld;
+using malloy::particles::ParticleWorld3D;
 using malloy::scenario::parse_scenario_file;
 using malloy::scenario::ScenarioType;
 
@@ -71,6 +74,8 @@ constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
 constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
 constexpr auto& spring_kinetic_energy3d = malloy::springs::total_kinetic_energy3d;
 constexpr auto& spring_elastic_energy3d = malloy::springs::total_elastic_energy3d;
+constexpr auto& particle_total_energy3d = malloy::particles::total_energy3d;
+constexpr auto& particle_momentum3d = malloy::particles::total_momentum3d;
 } // namespace
 using malloy::scenario::ScenarioParseResult;
 using malloy::sim_core::SimulationSettings;
@@ -192,6 +197,53 @@ int run_particles(const char* title, const SimulationSettings& sim,
                   << total_momentum(now).y << '\n';
         std::cout << std::fixed;
         print_view(view, positions_of(now));
+    };
+
+    return drive(title, world, report, steps, output_every);
+}
+
+// The orthographic flattening for 3D particles: plot (x, y), drop z, the same
+// honest limit as the other 3D runners until rendering has its own milestone.
+std::vector<Vec2> projected(const std::vector<malloy::particles::Particle3D>& particles)
+{
+    std::vector<Vec2> points;
+    points.reserve(particles.size());
+    for (const auto& p : particles)
+    {
+        points.push_back(Vec2{p.position.x, p.position.y});
+    }
+    return points;
+}
+
+// Runs one 3D colliding-particle scenario. A tenth concrete runner and the
+// tenth branch of the dispatch switch: ADR 0006 once more, still no base class.
+int run_particles3d(const char* title, const SimulationSettings& sim,
+                    const ParticleSettings3D& settings,
+                    std::vector<Particle3D> particles, int steps, int output_every)
+{
+    ParticleWorld3D world{sim, settings, std::move(particles)};
+
+    std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
+              << "  dt=" << sim.dt << "  steps=" << steps
+              << "  restitution=" << settings.restitution << "  (3D)" << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(projected(world.particles()));
+
+    const auto report = [&world, &view, &settings](std::int64_t step_index) {
+        const auto& now = world.particles();
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        std::cout << "   E " << std::setw(16) << particle_total_energy3d(now, settings.gravity)
+                  << "   |p| " << std::setw(16)
+                  << malloy::math::length(particle_momentum3d(now)) << '\n';
+        std::cout << std::fixed;
+        print_view(view, projected(now));
     };
 
     return drive(title, world, report, steps, output_every);
@@ -669,6 +721,9 @@ int main(int argc, char** argv)
         case ScenarioType::Springs3D:
             return run_springs3d(argv[1], s.simulation, s.spring_network3d,
                                  s.spring_bodies3d, s.steps, s.output_every);
+        case ScenarioType::Particles3D:
+            return run_particles3d(argv[1], s.simulation, s.particle3d_settings,
+                                   s.particle_list3d, s.steps, s.output_every);
         }
         return 1;
     }

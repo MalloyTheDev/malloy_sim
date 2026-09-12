@@ -49,6 +49,21 @@ struct Plane3
     bool is_valid() const;
 };
 
+// An axis-aligned box in 3D (M32), the 3D sibling of `Aabb`: the region between
+// a minimum and maximum corner. Used as the walls a particle world confines its
+// particles to, exactly as `Aabb` is in 2D. Unlike `Box3` it does not rotate,
+// which is the whole point of an AXIS-aligned box: its faces are the coordinate
+// planes, so a wall test is a per-axis comparison and needs no separating axis.
+struct Aabb3
+{
+    math::Vec3 min{};
+    math::Vec3 max{};
+
+    // Valid when min <= max on every axis and every value is finite. A
+    // zero-volume box (min == max) is allowed and means a point.
+    bool is_valid() const;
+};
+
 // An ORIENTED box (M30): a centre, half-widths along its own three axes, and an
 // orientation that turns those axes into the world. The first non-sphere shape
 // with a pose, and the first whose contact with a plane is a set of points (its

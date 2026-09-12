@@ -47,9 +47,9 @@ an applied torque (M21), bouncing off ground planes under gravity (M22),
 rolling with friction (M23), colliding with each other (M24), and pushed by a
 constant applied force to go with the torque (M28), and their mass and inertia
 can be computed from geometry (M25), for spheres, boxes and arbitrary triangle
-meshes (M27) assembled into compound bodies (M26). Everything else is still 2D,
-and that is still the bulk of the project: one of the five domains (particles),
-box-against-box contact geometry, and the 3D version of that last domain.
+meshes (M27) assembled into compound bodies (M26). All five domains now have a
+3D form as well as a 2D one; what remains of the 3D arc is box-against-box
+contact geometry, and then rendering and quantum, each its own milestone.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -60,7 +60,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M31 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M32 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -72,7 +72,8 @@ friction for 3D contacts, sphere-against-sphere collisions, 3D mass
 properties (inertia from geometry), box mass properties with compound
 assembly, mesh mass properties for arbitrary shapes, a constant applied
 force on a 3D body, charged particles in three dimensions, an oriented box
-resting and tumbling on a ground plane, and spring networks in three dimensions.
+resting and tumbling on a ground plane, spring networks in three dimensions,
+and colliding particles in three dimensions.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -92,11 +93,12 @@ properties and combine: compound bodies assembled from primitives), M27
 constant applied force on a 3D body, the translational half of a wrench) and M29
 (charged particles in three dimensions, with the full vector Lorentz force and
 helical motion) and M30 (an oriented box resting and tumbling on a ground
-plane, the first non-sphere 3D collision) and M31 (spring networks in three
-dimensions: deformable structures) are all done. See
+plane, the first non-sphere 3D collision), M31 (spring networks in three
+dimensions: deformable structures) and M32 (colliding particles in three
+dimensions, the last domain to gain a 3D form) are all done. See
 `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M32 or later) unless explicitly asked, and
+Do not start any further milestone (M33 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 

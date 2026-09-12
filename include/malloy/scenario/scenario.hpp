@@ -8,6 +8,8 @@
 #include <malloy/nbody/body3d.hpp>
 #include <malloy/nbody/nbody_settings.hpp>
 #include <malloy/particles/particle2d.hpp>
+#include <malloy/particles/particle3d.hpp>
+#include <malloy/particles/particle3d_settings.hpp>
 #include <malloy/charges/charge3d_settings.hpp>
 #include <malloy/charges/charge_settings.hpp>
 #include <malloy/charges/charged_particle2d.hpp>
@@ -40,6 +42,7 @@ enum class ScenarioType
     Rigid3D,
     Charges3D,
     Springs3D,
+    Particles3D,
 };
 
 // A complete, runnable scenario for one domain.
@@ -63,6 +66,10 @@ struct Scenario
     // type == Particles
     particles::ParticleSettings particle_settings{};
     std::vector<particles::Particle2D> particle_list;
+
+    // type == Particles3D
+    particles::ParticleSettings3D particle3d_settings{};
+    std::vector<particles::Particle3D> particle_list3d;
 
     // type == Rigid
     std::vector<rigid::RigidBody2D> rigid_bodies;
@@ -113,7 +120,7 @@ struct ScenarioParseResult
 // Common to every domain:
 //
 //   type <nbody|particles|rigid|springs|charges|nbody3d|rigid3d|charges3d|
-//         springs3d>        which domain           (default nbody)
+//         springs3d|particles3d>  which domain     (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
@@ -300,6 +307,18 @@ struct ScenarioParseResult
 //
 //   spring_body3 <mass> <px> <py> <pz> <vx> <vy> <vz>
 //   spring <a> <b> <rest_length> <stiffness> <damping>
+//
+// type particles3d:
+//
+//   Colliding spheres in a 3D box under gravity. The 3D form of type particles;
+//   the restitution key is shared, and the box and gravity take three
+//   components.
+//
+//   restitution <value>              bounciness in [0, 1]        (default 1.0)
+//   gravity3 <gx> <gy> <gz>          uniform acceleration        (default 0 0 0)
+//   bounds3 <minx> <miny> <minz> <maxx> <maxy> <maxz>            (default the
+//                                    unit box -1 -1 -1 to 1 1 1)
+//   particle3 <mass> <radius> <px> <py> <pz> <vx> <vy> <vz>
 //
 // A key belonging to another domain is a parse error, so a typo in `type`
 // surfaces immediately rather than silently running the wrong simulation.

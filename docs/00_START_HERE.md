@@ -5,12 +5,12 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M31 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M32 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
-runs all nine scenario types. Gravity, colliding particles, rigid bodies,
-spring networks and charged particles are the finished domains, and four of
-them (gravity, rigid bodies, charges and springs) now run in three dimensions
-as well as two. See `README.md` and `CHANGELOG.md`.
+runs all ten scenario types. Gravity, colliding particles, rigid bodies,
+spring networks and charged particles are the finished domains, and all five of
+them now run in three dimensions as well as two. See `README.md` and
+`CHANGELOG.md`.
 
 ## Where this is going
 
@@ -29,9 +29,11 @@ constant applied force, the translational half of a wrench; and M29 takes
 charged particles into three dimensions, where the magnetic field is a vector
 and a charge spirals along it; M30 gives a rigid body a box collider, so an
 oriented box rests and tumbles on the ground, the first non-sphere 3D collision;
-and M31 takes spring networks into three dimensions, so a structure can deform
-in space. Everything else is still 2D, which is most of the project, and each
-remaining piece is its own milestone.
+M31 takes spring networks into three dimensions, so a structure can deform in
+space; and M32 takes colliding particles into three dimensions, the last of the
+five domains to gain a 3D form. All five now run in space as well as the plane;
+what remains of the 3D arc is box-against-box contact geometry, then rendering,
+each its own milestone.
 
 That destination is why some of the current code looks the way it does: the
 scalar angle and scalar inertia in `RigidBody2D` are 2D specializations of the
@@ -69,7 +71,7 @@ completion.
 
 ## What's next
 
-M1-M31 are done. The classical mechanics track is complete, including the
+M1-M32 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
 halfplane ground of M16 and the Coulomb friction of M17, and M18 added
@@ -80,9 +82,10 @@ added friction, M24 collided two spheres, M25 computes mass and inertia from
 geometry, M26 adds box mass properties and `combine` for compound bodies, M27
 computes them for an arbitrary triangle mesh, M28 adds a constant applied
 force to go with M21's torque, M29 takes charged particles into three
-dimensions, M30 lands an oriented box on a ground plane, and M31 takes spring
-networks into three dimensions.
-Five finished domains sit behind multi-domain dispatch, across nine
+dimensions, M30 lands an oriented box on a ground plane, M31 takes spring
+networks into three dimensions, and M32 takes colliding particles into three
+dimensions.
+Five finished domains sit behind multi-domain dispatch, across ten
 scenario types.
 Work stays gated one milestone at a time; see
 `docs/07_POST_M5_ROADMAP.md`.

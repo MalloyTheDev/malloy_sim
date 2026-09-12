@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M31). These boundaries are in force
+> All modules below are implemented (M2-M32). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -48,13 +48,13 @@ Not responsible for physics, body types, simulation state, terminal control sequ
 
 ## `malloy_collide`
 
-Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid. Since M22 it also carries the 3D primitives `Sphere` and `Plane3`, and since M30 the oriented `Box3`, whose contact with a plane is the manifold of its penetrating corners (a list, not a single point).
+Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid. Since M22 it also carries the 3D primitives `Sphere` and `Plane3`, since M30 the oriented `Box3`, whose contact with a plane is the manifold of its penetrating corners (a list, not a single point), and since M32 the axis-aligned `Aabb3` (the walls a 3D particle box confines to).
 
 Not responsible for density, mass, inertia, bodies, velocity, contact response, integration, broadphase acceleration, or scenario loading. The area properties stop at geometry: turning them into mass properties belongs to whichever domain owns bodies (ADR 0007). Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
 
 ## `malloy_particles`
 
-Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy.
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form.
 
 Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, gravity, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 

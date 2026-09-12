@@ -812,6 +812,29 @@ int main()
                     return 1;
                 }
             }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Particles3D)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.particle_list3d.size() >= 2);
+                malloy::particles::ParticleWorld3D world{r.scenario.simulation,
+                                                         r.scenario.particle3d_settings,
+                                                         r.scenario.particle_list3d};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                const auto& settings = r.scenario.particle3d_settings;
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.particles();
+                    if (q == "energy")
+                        return malloy::particles::total_energy3d(b, settings.gravity);
+                    if (q == "kinetic") return malloy::particles::total_kinetic_energy3d(b);
+                    if (q == "momentum_x") return malloy::particles::total_momentum3d(b).x;
+                    if (q == "momentum_y") return malloy::particles::total_momentum3d(b).y;
+                    if (q == "momentum_z") return malloy::particles::total_momentum3d(b).z;
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
+                {
+                    return 1;
+                }
+            }
             else
             {
                 MALLOY_CHECK_TRUE(r.scenario.particle_list.size() >= 2);
@@ -888,6 +911,33 @@ int main()
         MALLOY_CHECK_NEAR(r.scenario.particle_list[0].position.y, 2.0, eps);
         MALLOY_CHECK_NEAR(r.scenario.particle_list[0].velocity.x, 3.0, eps);
         MALLOY_CHECK_NEAR(r.scenario.particle_list[0].velocity.y, 4.0, eps);
+    }
+
+    // --- M32: a particles3d scenario parses into the 3D particle fields. Every
+    //     component distinct, so a dropped or swapped axis in the loader shows. ---
+    {
+        std::istringstream in("type particles3d\n"
+                              "restitution 0.25\n"
+                              "gravity3 0.1 0.2 -0.3\n"
+                              "bounds3 -2 -3 -4 5 6 7\n"
+                              "particle3 1.5 0.4  1.0 2.0 3.0  -4.0 -5.0 -6.0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Particles3D);
+        MALLOY_CHECK_NEAR(r.scenario.particle3d_settings.restitution, 0.25, eps);
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            r.scenario.particle3d_settings.gravity, malloy::math::Vec3{0.1, 0.2, -0.3}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            r.scenario.particle3d_settings.bounds.min, malloy::math::Vec3{-2.0, -3.0, -4.0}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            r.scenario.particle3d_settings.bounds.max, malloy::math::Vec3{5.0, 6.0, 7.0}, eps));
+        MALLOY_CHECK_EQ(r.scenario.particle_list3d.size(), std::size_t{1});
+        MALLOY_CHECK_NEAR(r.scenario.particle_list3d[0].mass, 1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.particle_list3d[0].radius, 0.4, eps);
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            r.scenario.particle_list3d[0].position, malloy::math::Vec3{1.0, 2.0, 3.0}, eps));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            r.scenario.particle_list3d[0].velocity, malloy::math::Vec3{-4.0, -5.0, -6.0}, eps));
     }
 
     // --- A key from the wrong domain is an error, so a typo in `type` surfaces

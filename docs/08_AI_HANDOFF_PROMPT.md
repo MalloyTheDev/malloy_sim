@@ -24,7 +24,8 @@ Before doing anything, read:
 
 Current status:
 
-M1-M31 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
+M1-M32 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
+dimensions (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
 both torque-free and under a constant applied torque, a sphere bouncing on a 3D
@@ -37,7 +38,7 @@ networks in two and (M31) three dimensions, and charged particles in electric
 and magnetic fields in two and
 (M29) three dimensions, where the field is a vector and a charge spirals along
 it, are the five finished domains, and the scenario format dispatches
-between them with a type key across nine scenario types. The classical mechanics track is complete
+between them with a type key across ten scenario types. The classical mechanics track is complete
 (docs/07_POST_M5_ROADMAP.md).
 
 Do not start any further milestone unless I explicitly ask, and then work only

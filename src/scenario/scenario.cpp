@@ -69,8 +69,8 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number,
                                   "type requires nbody, particles, rigid, springs, "
-                                  "charges, nbody3d, rigid3d, charges3d or "
-                                  "springs3d");
+                                  "charges, nbody3d, rigid3d, charges3d, "
+                                  "springs3d or particles3d");
             }
             if (value == "nbody")
             {
@@ -107,6 +107,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "springs3d")
             {
                 scenario.type = ScenarioType::Springs3D;
+            }
+            else if (value == "particles3d")
+            {
+                scenario.type = ScenarioType::Particles3D;
             }
             else
             {
@@ -217,12 +221,13 @@ ScenarioParseResult parse_scenario(std::istream& input)
         else if (key == "restitution")
         {
             if (scenario.type != ScenarioType::Particles &&
+                scenario.type != ScenarioType::Particles3D &&
                 scenario.type != ScenarioType::Rigid &&
                 scenario.type != ScenarioType::Rigid3D)
             {
-                return make_error(
-                    line_number,
-                    "restitution belongs to type particles, rigid or rigid3d");
+                return make_error(line_number,
+                                  "restitution belongs to type particles, "
+                                  "particles3d, rigid or rigid3d");
             }
             saw_domain_key = true;
             math::Real value{};
@@ -230,9 +235,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "restitution requires a number");
             }
-            // Write only the field the declared domain actually reads. Setting
-            // both would leave a rigid scenario carrying a particle setting it
-            // never uses, which reads as a mistake to anyone inspecting it.
+            // Write only the field the declared domain actually reads.
             if (scenario.type == ScenarioType::Rigid3D)
             {
                 scenario.rigid3d_settings.restitution = value;
@@ -240,6 +243,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (scenario.type == ScenarioType::Particles)
             {
                 scenario.particle_settings.restitution = value;
+            }
+            else if (scenario.type == ScenarioType::Particles3D)
+            {
+                scenario.particle3d_settings.restitution = value;
             }
             else
             {
@@ -408,9 +415,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "gravity3")
         {
-            if (scenario.type != ScenarioType::Rigid3D)
+            if (scenario.type != ScenarioType::Rigid3D &&
+                scenario.type != ScenarioType::Particles3D)
             {
-                return make_error(line_number, "gravity3 belongs to type rigid3d");
+                return make_error(line_number,
+                                  "gravity3 belongs to type rigid3d or particles3d");
             }
             saw_domain_key = true;
             math::Real gx{};
@@ -420,7 +429,14 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "gravity3 requires: gx gy gz");
             }
-            scenario.rigid3d_settings.gravity = math::Vec3{gx, gy, gz};
+            if (scenario.type == ScenarioType::Particles3D)
+            {
+                scenario.particle3d_settings.gravity = math::Vec3{gx, gy, gz};
+            }
+            else
+            {
+                scenario.rigid3d_settings.gravity = math::Vec3{gx, gy, gz};
+            }
         }
         else if (key == "plane3")
         {
@@ -663,6 +679,50 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             scenario.particle_list.push_back(particles::Particle2D{
                 math::Vec2{px, py}, math::Vec2{vx, vy}, mass, radius});
+        }
+        else if (key == "bounds3")
+        {
+            if (scenario.type != ScenarioType::Particles3D)
+            {
+                return make_error(line_number, "bounds3 belongs to type particles3d");
+            }
+            saw_domain_key = true;
+            math::Real min_x{};
+            math::Real min_y{};
+            math::Real min_z{};
+            math::Real max_x{};
+            math::Real max_y{};
+            math::Real max_z{};
+            if (!(tokens >> min_x >> min_y >> min_z >> max_x >> max_y >> max_z))
+            {
+                return make_error(line_number,
+                                  "bounds3 requires: minx miny minz maxx maxy maxz");
+            }
+            scenario.particle3d_settings.bounds = collide::Aabb3{
+                math::Vec3{min_x, min_y, min_z}, math::Vec3{max_x, max_y, max_z}};
+        }
+        else if (key == "particle3")
+        {
+            if (scenario.type != ScenarioType::Particles3D)
+            {
+                return make_error(line_number, "particle3 belongs to type particles3d");
+            }
+            saw_domain_key = true;
+            math::Real mass{};
+            math::Real radius{};
+            math::Real px{};
+            math::Real py{};
+            math::Real pz{};
+            math::Real vx{};
+            math::Real vy{};
+            math::Real vz{};
+            if (!(tokens >> mass >> radius >> px >> py >> pz >> vx >> vy >> vz))
+            {
+                return make_error(line_number,
+                                  "particle3 requires: mass radius px py pz vx vy vz");
+            }
+            scenario.particle_list3d.push_back(particles::Particle3D{
+                math::Vec3{px, py, pz}, math::Vec3{vx, vy, vz}, mass, radius});
         }
         else if (key == "rigid_body")
         {

@@ -137,9 +137,10 @@ target_link_libraries(malloy_collide
         malloy::project_warnings
 )
 
-# malloy_particles (M10): 2D colliding particles (compiled STATIC).
+# malloy_particles (M10): colliding particles in 2D and (M32) 3D (STATIC).
 add_library(malloy_particles STATIC
     src/particles/particles.cpp
+    src/particles/particles3d.cpp
 )
 add_library(malloy::particles ALIAS malloy_particles)
 target_include_directories(malloy_particles PUBLIC include)

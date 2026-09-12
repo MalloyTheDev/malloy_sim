@@ -1,0 +1,61 @@
+# MalloySim scenario: an elastic particle collision in three dimensions (M32).
+#
+# This is what M32 adds: colliding particles off the plane. Particles collide as
+# spheres (the geometry M22 and M24 built) and are confined to a 3D box. The 2D
+# domain's contact response, wall containment and diagnostics all lift to Vec3;
+# only the body and the box gain a third component.
+#
+# Two equal masses approach head-on along the space diagonal and bounce
+# elastically. Because the collision is elastic (restitution 1) and no particle
+# ever reaches a wall (the box is large), two quantities are conserved exactly:
+# total momentum, because the collision impulse is equal and opposite, and total
+# kinetic energy, because a perfectly elastic bounce loses none.
+
+type particles3d
+
+dt 0.001
+steps 4000
+output_every 500
+
+restitution 1.0
+
+# A large box, so the two never touch a wall during the run: only then is
+# momentum conserved (a wall is immovable and would carry some away).
+bounds3 -100.0 -100.0 -100.0   100.0 100.0 100.0
+
+# particle3 <mass> <radius> <px py pz> <vx vy vz>
+# Approaching along the (1,1,1) diagonal so all three axes are exercised, with a
+# net drift so the conserved momentum is not trivially zero.
+particle3 1.0 0.5  -3.0 -3.0 -3.0    2.0  2.0  2.0
+particle3 1.0 0.5   3.0  3.0  3.0   -1.0 -1.0 -1.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   7.50000000e+00   |p|   1.73205081e+00
+#   step   4000   E   7.50000000e+00   |p|   1.73205081e+00
+#
+# The invariants:
+#
+# 1. Total momentum is conserved: m v summed is (2,2,2) + (-1,-1,-1) = (1,1,1),
+#    before and after the bounce, because the impulse is equal and opposite.
+#    (|p| = sqrt(3) ~ 1.732.)
+#
+# 2. Total kinetic energy is conserved: 0.5*1*(4+4+4) + 0.5*1*(1+1+1) = 6 + 1.5
+#    = 7.5. A perfectly elastic collision (restitution 1) loses none, and with
+#    no gravity the energy is purely kinetic. After the head-on elastic bounce
+#    the two equal masses have swapped velocities along the line of centres, so
+#    the sums are unchanged.
+#
+# On the ASCII view (an orthographic projection down z): two points sliding
+# together along the diagonal, touching near the origin, and sliding back apart.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    momentum_x  1.00000000e+00   tol 1e-12
+# check step 0    momentum_y  1.00000000e+00   tol 1e-12
+# check step 0    momentum_z  1.00000000e+00   tol 1e-12
+# check step 0    energy      7.50000000e+00   tol 1e-12
+# check step 4000 momentum_x  1.00000000e+00   tol 1e-9
+# check step 4000 momentum_y  1.00000000e+00   tol 1e-9
+# check step 4000 momentum_z  1.00000000e+00   tol 1e-9
+# check step 4000 energy      7.50000000e+00   tol 1e-9

@@ -19,6 +19,12 @@ bool Plane3::is_valid() const
            std::abs(math::length_squared(normal) - math::Real{1}) <= math::Real{1e-12};
 }
 
+bool Aabb3::is_valid() const
+{
+    return math::is_finite(min) && math::is_finite(max) && min.x <= max.x &&
+           min.y <= max.y && min.z <= max.z;
+}
+
 bool Box3::is_valid() const
 {
     return half_extents.x > math::Real{0} && half_extents.y > math::Real{0} &&
