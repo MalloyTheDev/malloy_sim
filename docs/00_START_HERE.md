@@ -5,7 +5,7 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M29 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M30 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all eight scenario types. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and three of
@@ -27,8 +27,10 @@ M26 does the same for boxes and assembles compound bodies from primitives; and
 M27 does it for an arbitrary closed triangle mesh; M28 pushes a body with a
 constant applied force, the translational half of a wrench; and M29 takes
 charged particles into three dimensions, where the magnetic field is a vector
-and a charge spirals along it. Everything else is still 2D, which is most of
-the project, and each remaining piece is its own milestone.
+and a charge spirals along it; and M30 gives a rigid body a box collider, so an
+oriented box rests and tumbles on the ground, the first non-sphere 3D collision.
+Everything else is still 2D, which is most of the project, and each remaining
+piece is its own milestone.
 
 That destination is why some of the current code looks the way it does: the
 scalar angle and scalar inertia in `RigidBody2D` are 2D specializations of the
@@ -66,7 +68,7 @@ completion.
 
 ## What's next
 
-M1-M29 are done. The classical mechanics track is complete, including the
+M1-M30 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
 halfplane ground of M16 and the Coulomb friction of M17, and M18 added
@@ -76,8 +78,8 @@ put a constant torque on it, M22 bounced a sphere off a ground plane, M23
 added friction, M24 collided two spheres, M25 computes mass and inertia from
 geometry, M26 adds box mass properties and `combine` for compound bodies, M27
 computes them for an arbitrary triangle mesh, M28 adds a constant applied
-force to go with M21's torque, and M29 takes charged particles into three
-dimensions.
+force to go with M21's torque, M29 takes charged particles into three
+dimensions, and M30 lands an oriented box on a ground plane.
 Five finished domains sit behind multi-domain dispatch, across eight
 scenario types.
 Work stays gated one milestone at a time; see

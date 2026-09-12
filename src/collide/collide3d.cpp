@@ -19,6 +19,13 @@ bool Plane3::is_valid() const
            std::abs(math::length_squared(normal) - math::Real{1}) <= math::Real{1e-12};
 }
 
+bool Box3::is_valid() const
+{
+    return half_extents.x > math::Real{0} && half_extents.y > math::Real{0} &&
+           half_extents.z > math::Real{0} && math::is_finite(half_extents) &&
+           math::is_unit(orientation) && math::is_finite(center);
+}
+
 namespace
 {
 // Signed distance from a point to the plane's surface: positive in free space,
@@ -125,6 +132,70 @@ std::optional<Contact3> contact(const Sphere& a, const Sphere& b)
     // Midway between the two surfaces along the normal, as for every other pair.
     result.point =
         a.center + result.normal * (a.radius - result.penetration / math::Real{2});
+    return result;
+}
+
+namespace
+{
+// The eight corners of an oriented box, in a fixed order (the sign bits of the
+// three local axes), so any loop over them repeats a run (docs/04).
+void box_corners(const Box3& box, math::Vec3 (&out)[8])
+{
+    for (int i = 0; i < 8; ++i)
+    {
+        const math::Real sx = (i & 1) ? math::Real{1} : math::Real{-1};
+        const math::Real sy = (i & 2) ? math::Real{1} : math::Real{-1};
+        const math::Real sz = (i & 4) ? math::Real{1} : math::Real{-1};
+        const math::Vec3 local{sx * box.half_extents.x, sy * box.half_extents.y,
+                               sz * box.half_extents.z};
+        out[i] = box.center + math::rotate(box.orientation, local);
+    }
+}
+} // namespace
+
+bool overlaps(const Box3& box, const Plane3& plane)
+{
+    if (!box.is_valid() || !plane.is_valid())
+    {
+        return false;
+    }
+    math::Vec3 corners[8];
+    box_corners(box, corners);
+    for (const math::Vec3& corner : corners)
+    {
+        if (signed_distance(plane, corner) <= math::Real{0}) // touching counts
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<Contact3> contacts(const Box3& box, const Plane3& plane)
+{
+    std::vector<Contact3> result;
+    if (!box.is_valid() || !plane.is_valid())
+    {
+        return result;
+    }
+    math::Vec3 corners[8];
+    box_corners(box, corners);
+    for (const math::Vec3& corner : corners)
+    {
+        const math::Real distance = signed_distance(plane, corner);
+        if (distance > math::Real{0})
+        {
+            continue; // this corner is in free space
+        }
+        const math::Real depth = -distance;
+        Contact3 hit;
+        hit.normal = -plane.normal; // from the box toward the solid, no fallback
+        hit.penetration = depth;
+        // Midway between the corner and the surface along the plane normal, the
+        // same convention the sphere pairs use.
+        hit.point = corner + plane.normal * (depth / math::Real{2});
+        result.push_back(hit);
+    }
     return result;
 }
 } // namespace malloy::collide

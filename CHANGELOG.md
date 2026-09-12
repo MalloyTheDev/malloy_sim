@@ -827,6 +827,68 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M30] - 2026-09-11  (an oriented box on a ground plane)
+
+### Added
+
+- `collide::Box3`, an oriented box (centre, half-widths, orientation), with
+  `overlaps(Box3, Plane3)` and `contacts(Box3, Plane3)`, the first contact query
+  that returns a MANIFOLD (the list of the box's penetrating corners) rather
+  than a single point.
+- `rigid::RigidBody3D::half_extents`, a box collider: when set, the body
+  collides as an oriented box against ground planes instead of as a sphere. Zero
+  (the default) keeps the sphere behaviour, so every pre-M30 body is unchanged.
+- A `rigid_box3d` scenario key, whose inertia is computed from the box and mass
+  (M26) rather than typed in, and the `box_drop` template. Nineteen templates
+  now, across eight domains.
+
+### The first non-sphere 3D collision
+
+Until now a 3D body only ever collided as a sphere, even though M25 to M27 could
+compute the inertia of a box or an arbitrary mesh. M30 closes that loop for a box
+against a plane. It needs no separating-axis search: a plane has one normal, so
+the box is inside the solid exactly where its corners are, and the eight corners
+tested against that normal are the whole story. Up to four touch at once (a flat
+face), so the contact is a manifold.
+
+That manifold is reduced to a SINGLE contact at the centroid of the penetrating
+corners, resolved through the same impulse core the sphere uses. For a flat face
+the centroid lies directly below the centre of mass, so the normal impulse
+passes through it and makes no torque: a flat drop stays flat and its angular
+momentum is conserved exactly, where a per-corner sequential solver would have
+spun it up out of nothing. For a corner or edge landing the centroid is that
+corner or edge, the correct lever arm, so the box tips and tumbles. A full
+per-corner manifold with the iterative solver a stack needs is a later
+milestone, the same boundary the 2D solver drew.
+
+A box's inertia and its collision shape describe the one box, because
+`rigid_box3d` computes the inertia from the geometry (M26). Box against box,
+which needs a separating-axis test and an edge-edge case, is deferred; a box
+collides with ground planes only.
+
+### Invariants
+
+A flat symmetric drop induces no spin and no horizontal drift, exactly, through
+the whole bounce, and settles resting with the centre of mass at half a side
+height. A corner-first landing does spin the box up and never sinks through the
+floor. A box placed at rest stays put. The geometry is checked against closed
+forms: an axis-aligned cube reports its four bottom corners at the right depth
+(and their x*y products cancel, so all four sign combinations are present), and
+a box tilted 45 degrees reports exactly the two corners that dip below, at
+0.5*sqrt(2) - h.
+
+### Mutation testing
+
+Twelve mutations. Ten caught (one after tightening the corner test so a
+collapsed corner set no longer passes): the corner enumeration, the penetration
+depth and its sign, the contact normal in both the geometry and the resolution,
+the deepest-penetration push-out, the box-collider validation, and the scenario
+loader's density, half-extents and computed inertia. Two survive: reading a zero
+half-extent as a box is a true equivalent (the resulting `Box3` is invalid and
+yields no contact either way), and not averaging the manifold centroid is a
+coverage gap, since it changes the lever arm only on an off-centre landing whose
+exact spin the symmetric tests here do not pin.
+
 ## [M29] - 2026-09-11  (charged particles in three dimensions)
 
 ### Added

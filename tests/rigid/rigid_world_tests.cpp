@@ -4754,6 +4754,136 @@ int main()
         }
     }
 
+    // --- M30: an oriented box against a ground plane. The first non-sphere 3D
+    //     collision. A box gets a box collider (half_extents), and its contact
+    //     with a plane is the manifold of its penetrating corners, reduced to a
+    //     single centroid contact. A flat drop must stay flat (no spurious
+    //     torque); a corner landing must tip (a real lever arm). ---
+    {
+        using malloy::math::from_axis_angle;
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::SolidBox;
+
+        // A box body whose inertia is computed from its geometry (M26), as the
+        // scenario loader does, then given the box collider and a pose.
+        const auto box_body = [&](const Vec3& half, Real mass, const Vec3& position,
+                                  const Quat& orientation) {
+            const Real density = mass / (8.0 * half.x * half.y * half.z);
+            RigidBody3D body =
+                rigid_body_from(mass_properties_3d(SolidBox{Vec3{}, half, Quat{}, density}));
+            body.half_extents = half;
+            body.position = position;
+            body.orientation = orientation;
+            return body;
+        };
+        const auto floor_settings = [](Real restitution, Real friction) {
+            Rigid3DSettings s;
+            s.gravity = Vec3{0.0, 0.0, -4.0};
+            s.restitution = restitution;
+            s.friction = friction;
+            s.ground.push_back(malloy::collide::Plane3{Vec3{0.0, 0.0, 1.0}, 0.0});
+            return s;
+        };
+        const Vec3 half{0.5, 0.5, 0.5};
+
+        // --- A flat, symmetric drop induces NO spin and NO horizontal drift:
+        //     the centroid contact lies below the centre of mass, so its normal
+        //     impulse makes no torque. The cube settles resting with its centre
+        //     at half a side height. This is the headline invariant. ---
+        {
+            RigidBody3D body = box_body(half, 1.0, Vec3{0.0, 0.0, 2.0}, Quat{});
+            Rigid3DWorld world{SimulationSettings{0.002}, {body}, floor_settings(0.5, 0.0)};
+            Real worst_spin = 0.0;
+            Real worst_horizontal = 0.0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const RigidBody3D& b = world.bodies()[0];
+                worst_spin = std::fmax(worst_spin, malloy::math::length(b.angular_velocity));
+                worst_horizontal = std::fmax(
+                    worst_horizontal, std::abs(b.velocity.x) + std::abs(b.velocity.y));
+            }
+            MALLOY_CHECK_TRUE(worst_spin < 1e-12);       // symmetric: no torque
+            MALLOY_CHECK_TRUE(worst_horizontal < 1e-12); // symmetric: no drift
+            const RigidBody3D& b = world.bodies()[0];
+            MALLOY_CHECK_NEAR(b.position.z, 0.5, 1e-2);      // resting at half height
+            MALLOY_CHECK_TRUE(malloy::math::length(b.velocity) < 0.1);
+        }
+
+        // --- The box collider is what stops it: a box body (radius 0) rests on
+        //     the plane, while a body with neither a box nor a sphere collider
+        //     falls straight through. ---
+        {
+            RigidBody3D solid = box_body(half, 1.0, Vec3{0.0, 0.0, 1.5}, Quat{});
+            RigidBody3D ghost = box_body(half, 1.0, Vec3{0.0, 0.0, 1.5}, Quat{});
+            ghost.half_extents = Vec3{}; // no box, and radius is 0: does not collide
+            Rigid3DWorld world{SimulationSettings{0.002},
+                               {solid, ghost}, floor_settings(0.0, 0.0)};
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(world.bodies()[0].position.z > 0.4);   // caught on the floor
+            MALLOY_CHECK_TRUE(world.bodies()[1].position.z < -3.0);  // fell through
+        }
+
+        // --- A corner-first landing DOES spin the box up: the contact is now
+        //     off the centre of mass, so it has a lever arm. It tips and never
+        //     sinks through the floor. ---
+        {
+            RigidBody3D body =
+                box_body(half, 1.0, Vec3{0.0, 0.0, 2.0}, from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.6));
+            Rigid3DWorld world{SimulationSettings{0.002}, {body}, floor_settings(0.2, 0.5)};
+            Real peak_spin = 0.0;
+            Real lowest_center = 10.0;
+            bool landed = false;
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const RigidBody3D& b = world.bodies()[0];
+                if (i > 400) // after it has reached the floor
+                {
+                    peak_spin = std::fmax(peak_spin, malloy::math::length(b.angular_velocity));
+                    lowest_center = std::fmin(lowest_center, b.position.z);
+                }
+            }
+            landed = world.bodies()[0].position.z > 0.3;
+            MALLOY_CHECK_TRUE(peak_spin > 0.1);      // the corner torqued it
+            MALLOY_CHECK_TRUE(lowest_center > 0.0);  // never sank through
+            MALLOY_CHECK_TRUE(landed);               // came to rest above the floor
+        }
+
+        // --- A box placed exactly at rest stays put: no drift, no spin, no
+        //     sinking, over a long run. ---
+        {
+            RigidBody3D body = box_body(half, 1.0, Vec3{0.0, 0.0, 0.5}, Quat{});
+            Rigid3DWorld world{SimulationSettings{0.002}, {body}, floor_settings(0.5, 0.0)};
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            const RigidBody3D& b = world.bodies()[0];
+            MALLOY_CHECK_NEAR(b.position.z, 0.5, 1e-2);
+            MALLOY_CHECK_TRUE(malloy::math::length(b.velocity) < 0.05);
+            MALLOY_CHECK_TRUE(malloy::math::length(b.angular_velocity) < 1e-12);
+        }
+
+        // --- Validation: a non-positive or non-finite half-extent is an invalid
+        //     body, so the world refuses to step. ---
+        {
+            RigidBody3D bad = box_body(half, 1.0, Vec3{}, Quat{});
+            bad.half_extents = Vec3{-1.0, 0.5, 0.5};
+            Rigid3DWorld world{SimulationSettings{0.01}, {bad}, Rigid3DSettings{}};
+            MALLOY_CHECK_TRUE(world.step().status == StepStatus::InvalidState);
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

@@ -1,0 +1,83 @@
+# MalloySim scenario: an oriented box dropped onto a ground plane (M30).
+#
+# This is the first non-sphere collision in the project. Until M30 a 3D body
+# only ever collided as a sphere, even though M25 to M27 could compute the
+# inertia of a box or an arbitrary mesh. M30 gives a rigid body a box collider
+# and resolves it against a plane.
+#
+# A box against a plane needs no separating-axis search: a plane has one
+# normal, so the box is inside the solid exactly where its corners are, and the
+# eight corners tested against that normal are the whole story. Up to four touch
+# at once (a flat face), so the contact is a manifold. That manifold is resolved
+# as a single contact at the CENTROID of the penetrating corners: for a flat
+# face the centroid sits directly below the centre of mass, so the normal
+# impulse passes through it and applies NO torque.
+#
+# That is the invariant to watch here. A unit cube is dropped flat, with no
+# spin, straight down onto the floor. It must land flat and stay flat: its
+# angular momentum stays exactly zero through the bounce, because a symmetric
+# landing exerts no net torque. A per-corner solver that resolved the four
+# corners one at a time would break the symmetry and spin the cube up out of
+# nothing; this one does not.
+#
+# The cube's inertia is not typed in: `rigid_box3d` computes it from the box and
+# the mass (M26). It falls from a height, bounces with restitution 0.5 losing
+# energy each time, and settles resting on the floor with its centre of mass at
+# half a side height.
+
+type rigid3d
+
+dt 0.002
+steps 2000
+output_every 200
+
+# A gentle gravity and a floor at z = 0, its normal pointing up out of the solid.
+gravity3 0.0 0.0 -4.0
+restitution 0.5
+plane3 0.0 0.0 1.0 0.0
+
+# rigid_box3d <mass> <hx hy hz> <px py pz> <axisx axisy axisz angle> <vx vy vz> <wx wy wz>
+#
+# A unit cube (half-widths 0.5), centre of mass starting at z = 2, unrotated,
+# at rest. It falls, its bottom face reaching the floor when the centre of mass
+# is at z = 0.5.
+rigid_box3d 1.0  0.5 0.5 0.5   0.0 0.0 2.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0 0.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   8.00000000e+00   |L|   0.00000000e+00   |p|   0.00000000e+00
+#   step   2000   E   2.00000356e+00   |L|   0.00000000e+00   |p|   ~2.7e-03
+#
+# The invariants:
+#
+# 1. Angular momentum is zero at every step. In free fall there is no torque; at
+#    the landing the centroid contact sits below the centre of mass, so the
+#    normal impulse makes none either. A flat drop stays flat. This is the
+#    headline: the manifold is resolved without a spurious torque.
+#
+# 2. There is no horizontal motion. The drop is symmetric, so momentum along x
+#    and y is exactly zero throughout.
+#
+# 3. Energy starts at the potential of a mass-1 body at height 2 in g = 4:
+#    -m (g . r) = -1 * (-4 * 2) = 8, with no kinetic part. It falls to about 2,
+#    the potential of the same body resting with its centre of mass at z = 0.5
+#    (-1 * (-4 * 0.5) = 2): the bounces at restitution 0.5 have shed the rest.
+#
+# On the ASCII view (an orthographic projection down z): a single point at the
+# origin, since the cube's centre only moves along the viewing axis.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# The rigid3d `energy` quantity is kinetic only (the app's E column adds the
+# gravitational potential the story above quotes), and it is near zero at rest,
+# so it is not the useful thing to pin here. The invariants are: no horizontal
+# motion and no rotation, both exactly zero through the whole drop and bounce,
+# which is what says the symmetric landing exerts no spurious torque.
+# check step 0    momentum_x  0.00000000e+00   tol 1e-12
+# check step 0    momentum_y  0.00000000e+00   tol 1e-12
+# check step 2000 momentum_x  0.00000000e+00   tol 1e-12
+# check step 2000 momentum_y  0.00000000e+00   tol 1e-12
+# check step 2000 spin_x      0.00000000e+00   tol 1e-9
+# check step 2000 spin_y      0.00000000e+00   tol 1e-9
+# check step 2000 spin_z      0.00000000e+00   tol 1e-9
+# check step 2000 angular_z   0.00000000e+00   tol 1e-9

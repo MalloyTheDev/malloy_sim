@@ -162,6 +162,19 @@ struct ScenarioParseResult
 //     frame. That is the frame in which Euler's equations are diagonal, and for
 //     a body loaded unrotated the two coincide.
 //
+//   rigid_box3d <mass> <hx> <hy> <hz>
+//               <px> <py> <pz>
+//               <axisx> <axisy> <axisz> <angle>
+//               <vx> <vy> <vz>
+//               <wx> <wy> <wz>
+//
+//     A body that collides as an ORIENTED BOX rather than a sphere (M30), of
+//     half-widths hx, hy, hz along its own axes. Its inertia is COMPUTED from
+//     the box and mass (M26), not given, so shape and inertia always agree;
+//     there is no radius and no Ix Iy Iz. The pose and velocity fields are
+//     exactly as for rigid_body3d. A box collides with ground planes only so
+//     far; box against box is a later milestone.
+//
 //   torque <tx> <ty> <tz>   a constant WORLD-frame torque on every body
 //                           (default 0 0 0, the torque-free M20 case)
 //

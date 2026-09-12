@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/vec3.hpp>
@@ -30,6 +31,7 @@ struct Contact3
 // shape never overlaps anything.
 bool overlaps(const Sphere& sphere, const Plane3& plane);
 bool overlaps(const Sphere& a, const Sphere& b);
+bool overlaps(const Box3& box, const Plane3& plane);
 
 // Sphere against plane. Like circle against halfplane, this has NO fallback:
 // the normal is the plane's own, exactly -plane.normal for every configuration,
@@ -44,4 +46,21 @@ std::optional<Contact3> contact(const Sphere& sphere, const Plane3& plane);
 // +x, exactly as the 2D circle pair does (a documented, deterministic choice
 // rather than a divide by zero).
 std::optional<Contact3> contact(const Sphere& a, const Sphere& b);
+
+// An oriented box against a plane (M30). Unlike the sphere pairs this returns a
+// MANIFOLD, one Contact3 per box corner that is inside the solid (signed
+// distance <= 0), because a box resting on a plane touches it at up to four
+// corners at once and a single point could not hold it flat. Each entry has:
+//
+//   normal       -plane.normal, the box's push-out direction (the plane
+//                supplies it, so there is no fallback), the same for every
+//                corner in the manifold.
+//   penetration  how far that corner is below the surface; never negative.
+//   point        that corner, moved half its penetration back toward the
+//                surface, matching the midway convention of the other pairs.
+//
+// The corners are enumerated in a fixed order (the sign bits of the local
+// axes), so a run repeats (docs/04). Empty when the box is clear of the plane
+// or either shape is invalid; never throws.
+std::vector<Contact3> contacts(const Box3& box, const Plane3& plane);
 } // namespace malloy::collide

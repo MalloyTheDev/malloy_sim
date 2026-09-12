@@ -10,6 +10,7 @@
 #include <malloy/collide/shapes.hpp>
 #include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/vec2.hpp>
+#include <malloy/rigid/mass_properties3d.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/springs/springs.hpp>
 
@@ -329,6 +330,58 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.angular_velocity = math::Vec3{wx, wy, wz};
             // Always a unit quaternion, which is why the file gives an axis and
             // an angle rather than four components.
+            body.orientation = math::from_axis_angle(math::Vec3{ax, ay, az}, angle);
+            scenario.rigid_bodies3d.push_back(body);
+        }
+        else if (key == "rigid_box3d")
+        {
+            if (scenario.type != ScenarioType::Rigid3D)
+            {
+                return make_error(line_number, "rigid_box3d belongs to type rigid3d");
+            }
+            saw_domain_key = true;
+            math::Real mass{};
+            math::Real hx{};
+            math::Real hy{};
+            math::Real hz{};
+            math::Real px{};
+            math::Real py{};
+            math::Real pz{};
+            math::Real ax{};
+            math::Real ay{};
+            math::Real az{};
+            math::Real angle{};
+            math::Real vx{};
+            math::Real vy{};
+            math::Real vz{};
+            math::Real wx{};
+            math::Real wy{};
+            math::Real wz{};
+            if (!(tokens >> mass >> hx >> hy >> hz >> px >> py >> pz >> ax >> ay >>
+                  az >> angle >> vx >> vy >> vz >> wx >> wy >> wz))
+            {
+                return make_error(line_number,
+                                  "rigid_box3d requires: mass hx hy hz px py pz "
+                                  "axisx axisy axisz angle vx vy vz wx wy wz");
+            }
+            // The inertia is COMPUTED from the box's geometry and mass (M26),
+            // not typed in, so the collision shape and the inertia always
+            // describe the one box. Density follows from mass and volume; an
+            // axis-aligned box's principal frame is the identity, so the moments
+            // drop straight in. A degenerate box gives a zero-mass result whose
+            // invalid body the domain's validate() then rejects.
+            const math::Vec3 half_extents{hx, hy, hz};
+            const math::Real volume = math::Real{8} * hx * hy * hz;
+            const math::Real density = mass / volume;
+            const rigid::MassProperties3D properties = rigid::mass_properties_3d(
+                rigid::SolidBox{math::Vec3{}, half_extents, math::Quat{}, density});
+            rigid::RigidBody3D body;
+            body.mass = mass;
+            body.inertia = properties.inertia;
+            body.half_extents = half_extents;
+            body.position = math::Vec3{px, py, pz};
+            body.velocity = math::Vec3{vx, vy, vz};
+            body.angular_velocity = math::Vec3{wx, wy, wz};
             body.orientation = math::from_axis_angle(math::Vec3{ax, ay, az}, angle);
             scenario.rigid_bodies3d.push_back(body);
         }

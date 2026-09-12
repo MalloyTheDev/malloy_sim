@@ -178,12 +178,56 @@ void resolve_pair(const Participant& a, const Participant& b,
     apply_impulse(b, -friction_impulse);
 }
 
-// A sphere against one immovable ground plane (M22, M23): the plane is the null
-// participant. The arm is the radius along the contact normal, the sphere's
-// lowest point against the plane.
+// A body collides as an oriented box when all three half-extents are positive;
+// otherwise it uses the sphere radius. Zero half-extents (the default) is not a
+// box, so a pre-M30 body keeps its sphere behaviour.
+bool body_is_box(const RigidBody3D& body)
+{
+    return body.half_extents.x > math::Real{0} &&
+           body.half_extents.y > math::Real{0} && body.half_extents.z > math::Real{0};
+}
+
+// A body against one immovable ground plane (M22, M23 for a sphere; M30 for a
+// box): the plane is the null participant.
 void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
                       const Rigid3DSettings& settings)
 {
+    const Participant ground{nullptr, math::Vec3{}};
+
+    if (body_is_box(body))
+    {
+        // A box against a plane touches at up to four corners at once. Rather
+        // than resolve each corner in sequence, which would inject a spurious
+        // torque on a symmetric landing (the corners are handled one at a time,
+        // so the body is no longer symmetric by the second), the coplanar
+        // manifold is reduced to a SINGLE contact at the CENTROID of the
+        // penetrating corners, resolved with the deepest penetration. For a
+        // flat face that centroid lies directly below the centre of mass, so
+        // the normal impulse passes through it and makes no torque: a flat drop
+        // stays flat and its angular momentum is conserved. For a corner or
+        // edge landing the centroid is that corner or edge, which is the
+        // correct lever arm, so the box tips and tumbles as it should. A full
+        // per-corner manifold with an iterative solver, needed to stand a
+        // stack, is a later milestone (the same boundary the 2D solver drew).
+        const collide::Box3 shape{body.position, body.half_extents, body.orientation};
+        const std::vector<collide::Contact3> hits = collide::contacts(shape, plane);
+        if (hits.empty())
+        {
+            return;
+        }
+        math::Vec3 centroid{};
+        math::Real deepest = math::Real{0};
+        for (const collide::Contact3& hit : hits)
+        {
+            centroid += hit.point;
+            deepest = std::fmax(deepest, hit.penetration);
+        }
+        centroid = centroid / static_cast<math::Real>(hits.size());
+        const Participant box_body{&body, centroid - body.position};
+        resolve_pair(box_body, ground, -plane.normal, deepest, settings);
+        return;
+    }
+
     if (!(body.radius > math::Real{0})) // zero radius does not collide
     {
         return;
@@ -195,7 +239,6 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
         return;
     }
     const Participant sphere{&body, hit->normal * body.radius};
-    const Participant ground{nullptr, math::Vec3{}};
     resolve_pair(sphere, ground, hit->normal, hit->penetration, settings);
 }
 
@@ -205,6 +248,13 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
 void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
                        const Rigid3DSettings& settings)
 {
+    // Body against body is spheres only so far. A box collides with ground
+    // planes (above) but not yet with another body, which needs a
+    // separating-axis test and an edge-edge case; a box body is skipped here.
+    if (body_is_box(a) || body_is_box(b))
+    {
+        return;
+    }
     if (!(a.radius > math::Real{0}) || !(b.radius > math::Real{0}))
     {
         return; // either without a shape does not collide
@@ -227,6 +277,8 @@ bool RigidBody3D::is_valid() const
            inertia.x > math::Real{0} && inertia.y > math::Real{0} &&
            inertia.z > math::Real{0} && math::is_finite(inertia) &&
            radius >= math::Real{0} && math::is_finite(radius) &&
+           half_extents.x >= math::Real{0} && half_extents.y >= math::Real{0} &&
+           half_extents.z >= math::Real{0} && math::is_finite(half_extents) &&
            math::is_unit(orientation) && math::is_squarable(position) &&
            math::is_squarable(velocity) && math::is_squarable(angular_velocity);
 }

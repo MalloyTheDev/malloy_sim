@@ -1455,6 +1455,38 @@ int main()
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
     {
+        // M30: rigid_box3d builds a box body whose inertia is COMPUTED from the
+        // box and mass, not given. Seventeen fields: mass, three half-widths,
+        // position, axis+angle, velocity, angular velocity.
+        std::istringstream in(
+            "type rigid3d\n"
+            "rigid_box3d 48.0  3.0 2.0 1.0   4.0 -5.0 6.0   0 0 1 0   1 0 0   0 0 2\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_EQ(r.scenario.rigid_bodies3d.size(), std::size_t{1});
+        const auto& body = r.scenario.rigid_bodies3d[0];
+        MALLOY_CHECK_NEAR(body.mass, 48.0, 1e-12);
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(body.half_extents,
+                                                     malloy::math::Vec3{3.0, 2.0, 1.0}, 0.0));
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+            body.position, malloy::math::Vec3{4.0, -5.0, 6.0}, 0.0));
+        // Inertia is the solid box's, (1/3) m (h_j^2 + h_k^2) with h the half
+        // widths: m = 48, so about x it is 16*(2^2 + 1^2) = 80, about y
+        // 16*(3^2 + 1^2) = 160, about z 16*(3^2 + 2^2) = 208. eigen_symmetric
+        // returns them ascending, the same values as the M26 box tests.
+        MALLOY_CHECK_NEAR(body.inertia.x, 80.0, 1e-9);
+        MALLOY_CHECK_NEAR(body.inertia.y, 160.0, 1e-9);
+        MALLOY_CHECK_NEAR(body.inertia.z, 208.0, 1e-9);
+    }
+    {
+        // rigid_box3d belongs to rigid3d only, and needs all seventeen fields.
+        std::istringstream wrong_type(
+            "type rigid\nrigid_box3d 1 1 1 1 0 0 0 0 0 1 0 0 0 0 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(wrong_type).ok);
+        std::istringstream too_few("type rigid3d\nrigid_box3d 1 1 1 1 0 0 0\n");
+        MALLOY_CHECK_FALSE(parse_scenario(too_few).ok);
+    }
+    {
         // `restitution` and `friction` are accepted for rigid3d (M22, M23),
         // but the 2D `gravity` and `ground` keys are not: 3D uses `gravity3`
         // and `plane3`, so a 2D key here is a mistake, not a silent

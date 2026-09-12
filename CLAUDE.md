@@ -49,7 +49,7 @@ constant applied force to go with the torque (M28), and their mass and inertia
 can be computed from geometry (M25), for spheres, boxes and arbitrary triangle
 meshes (M27) assembled into compound bodies (M26). Everything else is still 2D,
 and that is still the bulk of the project: two of the five domains (particles
-and springs), more 3D contact geometry, and 3D versions of those two.
+and springs), box-against-box contact geometry, and 3D versions of those two.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -60,7 +60,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M29 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M30 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -71,7 +71,8 @@ applied torque on a 3D body, a sphere bouncing on a 3D ground plane, Coulomb
 friction for 3D contacts, sphere-against-sphere collisions, 3D mass
 properties (inertia from geometry), box mass properties with compound
 assembly, mesh mass properties for arbitrary shapes, a constant applied
-force on a 3D body, and charged particles in three dimensions.
+force on a 3D body, charged particles in three dimensions, and an oriented box
+resting and tumbling on a ground plane.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -90,9 +91,11 @@ properties and combine: compound bodies assembled from primitives), M27
 (mesh mass properties: the inertia of an arbitrary triangle mesh), M28 (a
 constant applied force on a 3D body, the translational half of a wrench) and M29
 (charged particles in three dimensions, with the full vector Lorentz force and
-helical motion) are all done. See `docs/07_POST_M5_ROADMAP.md`.
+helical motion) and M30 (an oriented box resting and tumbling on a ground
+plane, the first non-sphere 3D collision) are all done. See
+`docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M30 or later) unless explicitly asked, and
+Do not start any further milestone (M31 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -111,9 +114,9 @@ M5: terminal N-body demo               [done]
 1. Do not jump ahead; work one milestone at a time.
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
-4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. 3D body against body is spheres only; oriented boxes and SAT are not implemented in either dimension, and 2D body against body is still disc against disc. Particle contacts remain normal-only.
+4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. M30 added `collide::Box3` against a plane (an oriented box's penetrating corners, resolved as one centroid contact), so a box can rest and tumble on the ground. 3D body against BODY is still spheres only, and box-against-box (which needs SAT and an edge-edge case) is not implemented in either dimension; 2D body against body is still disc against disc. Particle contacts remain normal-only.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force. Gravity is a setting applied as an acceleration, not a force. M21 added a constant applied TORQUE and M28 a constant applied FORCE, each a single constant SETTING applied as forcing (F/m for the force, Euler forcing for the torque), NOT a force/torque ACCUMULATOR: do not add an accumulator that sums many force producers, or persistent per-body forces, to `malloy_rigid` until their dedicated milestone.
-6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core), M25 (`math::Mat3` and 3D mass properties: a compound body's inertia TENSOR, computed from geometry by the parallel-axis theorem and diagonalized to principal moments), M26 (`SolidBox` mass properties and `combine`, so a compound body is assembled from primitives of any kind, plus `math::to_mat3`), M27 (`SolidMesh` mass properties: the inertia of any closed triangle mesh by signed-tetrahedron volume integrals, plus `math::trace`), and M28 (a constant applied FORCE, the translational half of a wrench, as the acceleration F/m, plus `total_force_potential3d`). Mass properties now cover an arbitrary shape and a body can be both pushed (M28 force) and turned (M21 torque); more 3D contact geometry (SAT for boxes), and 3D versions of the remaining domains are NOT started and each needs its own milestone. The 3D contacts are impulses, gravity is an acceleration, and the force and torque are constant settings applied as forcing (the M10/M15/M17/M21 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` still stores three principal moments rather than a 3x3 matrix, deliberately: M25, M26 and M27 diagonalize the tensor at construction, so the body never has to carry one. Do not add any of it speculatively; the 2D types stay supported.
+6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core), M25 (`math::Mat3` and 3D mass properties: a compound body's inertia TENSOR, computed from geometry by the parallel-axis theorem and diagonalized to principal moments), M26 (`SolidBox` mass properties and `combine`, so a compound body is assembled from primitives of any kind, plus `math::to_mat3`), M27 (`SolidMesh` mass properties: the inertia of any closed triangle mesh by signed-tetrahedron volume integrals, plus `math::trace`), M28 (a constant applied FORCE, the translational half of a wrench, as the acceleration F/m, plus `total_force_potential3d`), M29 (charged particles in three dimensions: the full vector Lorentz force and helical motion) and M30 (`collide::Box3` against a plane, so an oriented box rests and tumbles on the ground; the box collider is `RigidBody3D::half_extents`). Mass properties now cover an arbitrary shape, a body can be both pushed (M28 force) and turned (M21 torque), and a box collides with the ground; box-against-box contact geometry (SAT), and 3D versions of the remaining two domains (particles and springs), are NOT started and each needs its own milestone. The 3D contacts are impulses, gravity is an acceleration, and the force and torque are constant settings applied as forcing (the M10/M15/M17/M21 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` still stores three principal moments rather than a 3x3 matrix, deliberately: M25 to M27 diagonalize the tensor at construction, so the body never has to carry one. Do not add any of it speculatively; the 2D types stay supported.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
 9. Do not add Catch2/GoogleTest unless explicitly asked.

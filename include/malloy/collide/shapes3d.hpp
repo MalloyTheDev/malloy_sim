@@ -1,5 +1,6 @@
 #pragma once
 
+#include <malloy/math/quat.hpp>
 #include <malloy/math/vec3.hpp>
 
 namespace malloy::collide
@@ -45,6 +46,27 @@ struct Plane3
     // the reason Halfplane gives: the signed distance is only a distance when
     // the normal is unit, and a caller with arbitrary input (the scenario
     // loader) normalizes once at the boundary and rejects what cannot be.
+    bool is_valid() const;
+};
+
+// An ORIENTED box (M30): a centre, half-widths along its own three axes, and an
+// orientation that turns those axes into the world. The first non-sphere shape
+// with a pose, and the first whose contact with a plane is a set of points (its
+// penetrating corners) rather than a single one.
+//
+// Against a PLANE it needs no separating-axis search: a plane has one normal,
+// so a box is inside the solid exactly where its corners are, and the eight
+// corners tested against that one normal are the whole story. Box against box,
+// which does need SAT and an edge-edge case, is a later milestone.
+struct Box3
+{
+    math::Vec3 center{};
+    math::Vec3 half_extents{}; // half the width along each of the box's own axes
+    math::Quat orientation{};  // the box frame in the world frame
+
+    // Valid when every half-extent is strictly positive and finite (a box with
+    // no width is not a box), the orientation is a unit quaternion, and the
+    // centre is finite.
     bool is_valid() const;
 };
 } // namespace malloy::collide

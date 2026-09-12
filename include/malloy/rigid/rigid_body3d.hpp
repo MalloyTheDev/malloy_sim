@@ -62,10 +62,25 @@ struct RigidBody3D
     // friction, its own milestone.
     math::Real radius{0.0};
 
+    // Collision box half-widths along the body's own axes (M30). When all three
+    // are strictly positive the body collides as an ORIENTED BOX of these
+    // half-widths, turned by `orientation` and centred on the centre of mass,
+    // and the sphere `radius` is ignored. When they are zero (the default) the
+    // body falls back to the sphere collider, so every pre-M30 body is
+    // unchanged. A box built from `mass_properties_3d(SolidBox)` sets these to
+    // the same half-widths, so its collision shape and its inertia describe the
+    // one box.
+    //
+    // A box collides only with ground planes so far; box against box (and box
+    // against sphere), which need a separating-axis test and an edge-edge case,
+    // are a later milestone.
+    math::Vec3 half_extents{};
+
     // Valid when mass and all three principal moments are strictly positive and
     // finite, the orientation is a unit quaternion, the radius is non-negative
-    // and finite, and position, velocity and angular velocity are SQUARABLE
-    // rather than merely finite (docs/04).
+    // and finite, the box half-extents are non-negative and finite, and
+    // position, velocity and angular velocity are SQUARABLE rather than merely
+    // finite (docs/04).
     bool is_valid() const;
 };
 

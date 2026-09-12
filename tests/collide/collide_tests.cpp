@@ -679,6 +679,104 @@ int main()
         MALLOY_CHECK_FALSE((contact(Sphere{Vec3{}, -1.0}, Sphere{Vec3{}, 1.0}).has_value()));
     }
 
+    // --- M30: Box3 against Plane3. An oriented box has up to four corners
+    //     against a plane at once, so this returns a manifold (a list), unlike
+    //     the single-point sphere pairs. No separating-axis search is needed:
+    //     the plane has one normal, and the eight corners tested against it are
+    //     the whole story. ---
+    {
+        using malloy::collide::Box3;
+        using malloy::collide::contacts;
+        using malloy::collide::overlaps;
+        using malloy::collide::Plane3;
+        using malloy::math::from_axis_angle;
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Plane3 floor{Vec3{0.0, 0.0, 1.0}, 0.0};
+
+        // Validation: positive finite half-extents, a unit orientation, a finite
+        // centre.
+        MALLOY_CHECK_TRUE((Box3{Vec3{}, Vec3{0.5, 0.5, 0.5}, Quat{}}.is_valid()));
+        MALLOY_CHECK_FALSE((Box3{Vec3{}, Vec3{0.0, 0.5, 0.5}, Quat{}}.is_valid())); // no width
+        MALLOY_CHECK_FALSE((Box3{Vec3{}, Vec3{-1.0, 0.5, 0.5}, Quat{}}.is_valid()));
+        MALLOY_CHECK_FALSE((Box3{Vec3{}, Vec3{0.5, inf3, 0.5}, Quat{}}.is_valid()));
+        MALLOY_CHECK_FALSE(
+            (Box3{Vec3{0.0, nan3, 0.0}, Vec3{0.5, 0.5, 0.5}, Quat{}}.is_valid()));
+        MALLOY_CHECK_FALSE(
+            (Box3{Vec3{}, Vec3{0.5, 0.5, 0.5}, Quat{2.0, Vec3{}}}.is_valid())); // not unit
+
+        // Clear of the floor: no overlap, no contacts.
+        MALLOY_CHECK_FALSE((overlaps(Box3{Vec3{0.0, 0.0, 1.0}, Vec3{0.5, 0.5, 0.5}, Quat{}}, floor)));
+        MALLOY_CHECK_TRUE(
+            contacts(Box3{Vec3{0.0, 0.0, 1.0}, Vec3{0.5, 0.5, 0.5}, Quat{}}, floor).empty());
+
+        // An axis-aligned cube with its centre 0.3 above the floor, half-width
+        // 0.5: its four bottom corners are 0.2 below the surface, its four top
+        // corners well above. Four contacts, each 0.2 deep, normal -z.
+        {
+            const Box3 box{Vec3{0.0, 0.0, 0.3}, Vec3{0.5, 0.5, 0.5}, Quat{}};
+            MALLOY_CHECK_TRUE(overlaps(box, floor));
+            const auto hits = contacts(box, floor);
+            MALLOY_CHECK_TRUE(hits.size() == 4);
+            Real x_times_y = 0.0;
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, 0.2, eps);
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, Vec3{0.0, 0.0, -1.0}, 0.0));
+                // Midway between the corner (z = -0.2) and the surface (z = 0).
+                MALLOY_CHECK_NEAR(hit.point.z, -0.1, eps);
+                x_times_y += hit.point.x * hit.point.y;
+            }
+            // The four bottom corners are (+-0.5, +-0.5), all four sign
+            // combinations, so the products x*y cancel to zero. A corner set
+            // that collapsed x and y onto the same axis would sum to 1 instead.
+            MALLOY_CHECK_NEAR(x_times_y, 0.0, eps);
+        }
+
+        // Tilted 45 degrees about x, centre at z = 0.6: exactly two corners dip
+        // below, each by 0.5*sqrt(2) - 0.6. A single dropped or transposed axis
+        // would change the count or the depth.
+        {
+            const Box3 box{Vec3{0.0, 0.0, 0.6}, Vec3{0.5, 0.5, 0.5},
+                           from_axis_angle(Vec3{1.0, 0.0, 0.0}, 0.78539816339744830961)};
+            const auto hits = contacts(box, floor);
+            MALLOY_CHECK_TRUE(hits.size() == 2);
+            const Real expected = 0.5 * std::sqrt(2.0) - 0.6;
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, expected, 1e-9);
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, Vec3{0.0, 0.0, -1.0}, 0.0));
+            }
+        }
+
+        // A tilted plane whose normal has all three components nonzero, so a
+        // dropped axis in the corner test shows. The box straddles it.
+        {
+            const Vec3 n = malloy::math::normalize(Vec3{1.0, 2.0, 2.0});
+            const Plane3 ramp{n, 0.0};
+            const Box3 box{Vec3{}, Vec3{0.5, 0.5, 0.5}, Quat{}}; // centred on the surface
+            MALLOY_CHECK_TRUE(overlaps(box, ramp));
+            const auto hits = contacts(box, ramp);
+            // The centre is on the surface, so four corners are inside and four
+            // out; each reported normal is the plane's own, negated.
+            MALLOY_CHECK_TRUE(hits.size() == 4);
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, n * -1.0, 1e-15));
+                MALLOY_CHECK_TRUE(hit.penetration > 0.0);
+            }
+        }
+
+        // Invalid inputs give an empty manifold.
+        MALLOY_CHECK_TRUE(
+            contacts(Box3{Vec3{}, Vec3{-1.0, 0.5, 0.5}, Quat{}}, floor).empty());
+        MALLOY_CHECK_TRUE(contacts(Box3{Vec3{}, Vec3{0.5, 0.5, 0.5}, Quat{}},
+                                   Plane3{Vec3{0.0, 0.0, 2.0}, 0.0})
+                              .empty());
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }
