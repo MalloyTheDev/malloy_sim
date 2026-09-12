@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M36 are complete, so this is the live roadmap for what comes next.
+M1-M37 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -50,6 +50,7 @@ M33 - box against box (SAT)                 [done]
 M34 - box against a sphere                  [done]
 M35 - Coulomb friction for particles        [done]
 M36 - 2D oriented boxes (SAT)               [done]
+M37 - a 2D box on a ground plane            [done]
 ```
 
 ## Track 1: classical mechanics depth (active)

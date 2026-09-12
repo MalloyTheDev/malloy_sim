@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <vector>
 
 #include <malloy/math/math.hpp>
 
@@ -520,6 +521,69 @@ std::optional<Contact> contact(const Obb2& a, const Obb2& b)
     {
         // A face of b separates: a's deepest vertex into b (support along +n).
         result.point = support(make_obb2(a), n) - n * (depth / math::Real{2});
+    }
+    return result;
+}
+
+namespace
+{
+// The four corners of an oriented 2D box, in a fixed order (the sign bits of its
+// two local axes), so any loop over them repeats a run (docs/04). The 2D copy of
+// `box_corners` in the 3D module.
+void box2_corners(const Obb2& box, math::Vec2 (&out)[4])
+{
+    const Obb2Frame f = make_obb2(box);
+    for (int i = 0; i < 4; ++i)
+    {
+        const math::Real sx = (i & 1) ? math::Real{1} : math::Real{-1};
+        const math::Real sy = (i & 2) ? math::Real{1} : math::Real{-1};
+        out[i] = f.c + f.u[0] * (sx * f.e[0]) + f.u[1] * (sy * f.e[1]);
+    }
+}
+} // namespace
+
+bool overlaps(const Obb2& box, const Halfplane& plane)
+{
+    if (!box.is_valid() || !plane.is_valid())
+    {
+        return false;
+    }
+    math::Vec2 corners[4];
+    box2_corners(box, corners);
+    for (const math::Vec2& corner : corners)
+    {
+        if (signed_distance(plane, corner) <= math::Real{0}) // touching counts
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane)
+{
+    std::vector<Contact> result;
+    if (!box.is_valid() || !plane.is_valid())
+    {
+        return result;
+    }
+    math::Vec2 corners[4];
+    box2_corners(box, corners);
+    for (const math::Vec2& corner : corners)
+    {
+        const math::Real distance = signed_distance(plane, corner);
+        if (distance > math::Real{0})
+        {
+            continue; // this corner is in free space
+        }
+        const math::Real depth = -distance;
+        Contact hit;
+        hit.normal = -plane.normal; // from the box toward the solid, no fallback
+        hit.penetration = depth;
+        // Midway between the corner and the surface along the plane normal, the
+        // same convention every pair uses.
+        hit.point = corner + plane.normal * (depth / math::Real{2});
+        result.push_back(hit);
     }
     return result;
 }

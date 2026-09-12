@@ -1,0 +1,70 @@
+# MalloySim scenario: an oriented box dropped onto a ground plane in 2D (M37).
+#
+# The 2D rigid domain has always collided its bodies as discs. M36 added a box
+# collider and box-against-box collision; M37 lets that box rest on a ground
+# plane (a Halfplane), the 2D sibling of the 3D box on a plane (M30). A box
+# against a plane needs no separating-axis search: the plane has one normal, so
+# the box is inside the solid exactly where its corners are, and the four corners
+# tested against that normal are the whole story. Up to two touch at once (a flat
+# edge), so the contact is a manifold, resolved as a SINGLE contact at the
+# CENTROID of the penetrating corners: for a flat edge that centroid sits
+# directly below the centre of mass, so the normal impulse passes through it and
+# applies NO torque.
+#
+# That is the invariant to watch. A unit square is dropped flat, with no spin,
+# straight down onto the floor. It must land flat and stay flat: its angular
+# momentum stays exactly zero through the bounce, because a symmetric landing
+# exerts no net torque, and it never drifts sideways. A per-corner solver that
+# resolved the two corners one at a time would break the symmetry and spin the
+# square up out of nothing; this one does not.
+#
+# The square's inertia is computed from the box and the mass, not typed in. It
+# falls, bounces with restitution 0.5 losing energy each time, and settles
+# resting on the floor with its centre at half a side height (y = 0.5).
+
+type rigid
+
+dt 0.002
+steps 2000
+output_every 200
+
+# A gentle gravity and a floor at y = 0, its normal pointing up out of the solid.
+gravity 0.0 -4.0
+restitution 0.5
+ground 0.0 1.0 0.0
+
+# rigid_box <mass> <hx hy> <px py> <angle> <vx vy> <omega>
+#
+# A unit square (half-widths 0.5), centre of mass starting at y = 2, unrotated,
+# at rest. It falls, its bottom edge reaching the floor when the centre is at
+# y = 0.5.
+rigid_box 1.0  0.5 0.5  0.0 2.0  0.0  0.0 0.0  0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   momentum_x 0.00000000e+00   angular 0.00000000e+00
+#   step   2000   momentum_x 0.00000000e+00   angular 0.00000000e+00
+#
+# The invariants:
+#
+# 1. Angular momentum is zero at every step. In free fall there is no torque; at
+#    the landing the centroid contact sits below the centre of mass, so the
+#    normal impulse makes none either. A flat drop stays flat. This is the
+#    headline: the manifold is resolved without a spurious torque.
+#
+# 2. There is no horizontal motion. The drop is symmetric, so momentum along x is
+#    exactly zero throughout.
+#
+# On the ASCII view (an orthographic view of the plane): a single point on the y
+# axis that descends and halts, since the square's centre only moves along y.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# The rigid `energy` quantity adds the gravitational potential and is near the
+# resting value, so the telling invariants are the two that must be exactly zero:
+# no horizontal motion and no rotation, both held through the whole drop and
+# bounce, which is what says the symmetric landing exerts no spurious torque.
+# check step 0    momentum_x  0.00000000e+00   tol 1e-12
+# check step 0    angular     0.00000000e+00   tol 1e-12
+# check step 2000 momentum_x  0.00000000e+00   tol 1e-12
+# check step 2000 angular     0.00000000e+00   tol 1e-9

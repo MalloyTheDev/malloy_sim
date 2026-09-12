@@ -257,6 +257,43 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settin
 void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
                     const RigidSettings& settings)
 {
+    RigidBody2D ground;
+    ground.mass = std::numeric_limits<math::Real>::infinity();
+    ground.inertia = std::numeric_limits<math::Real>::infinity();
+
+    // A box against the ground touches at up to two corners at once (M37), so
+    // like the 3D box on a plane (M30) the corner manifold is reduced to a
+    // SINGLE contact at the CENTROID of the penetrating corners, resolved with
+    // the deepest penetration. For a flat drop that centroid sits directly below
+    // the centre of mass, so the normal impulse passes through it and makes no
+    // torque: the box lands flat and stays flat. For a corner or edge landing the
+    // centroid is that corner or edge, the correct lever arm, so it tips. A full
+    // per-corner manifold with an iterative solver, needed to stand a stack, is a
+    // later milestone (the same boundary M30 and the 2D disc solver drew).
+    if (body_is_box2(body))
+    {
+        const collide::Obb2 shape{body.position, body.half_extents, body.angle};
+        const std::vector<collide::Contact> hits = collide::contacts(shape, plane);
+        if (hits.empty())
+        {
+            return;
+        }
+        math::Vec2 centroid{};
+        math::Real deepest = math::Real{0};
+        for (const collide::Contact& hit : hits)
+        {
+            centroid += hit.point;
+            deepest = std::fmax(deepest, hit.penetration);
+        }
+        centroid = centroid / static_cast<math::Real>(hits.size());
+        collide::Contact manifold;
+        manifold.normal = -plane.normal; // from the box toward the solid, no fallback
+        manifold.penetration = deepest;
+        manifold.point = centroid;
+        apply_contact(body, ground, manifold, settings);
+        return;
+    }
+
     if (body.radius <= math::Real{0})
     {
         return; // a zero radius means the body does not take part in contacts
@@ -268,10 +305,6 @@ void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
     {
         return;
     }
-
-    RigidBody2D ground;
-    ground.mass = std::numeric_limits<math::Real>::infinity();
-    ground.inertia = std::numeric_limits<math::Real>::infinity();
     apply_contact(body, ground, *hit, settings);
 }
 

@@ -2033,6 +2033,112 @@ int main()
         }
     }
 
+    // --- M37: a 2D box on a ground plane (Halfplane), the 2D sibling of M30. A
+    //     box body's contact with the floor is the manifold of its penetrating
+    //     corners reduced to a single centroid contact, so a flat drop stays flat
+    //     (no spurious torque) and a corner landing tips. ---
+    {
+        using malloy::math::Vec2;
+        const Vec2 half{0.5, 0.5};
+        const auto box_body = [&](const Vec2& position, Real angle) {
+            RigidBody2D b;
+            b.mass = 1.0;
+            b.inertia = 1.0 * (half.x * half.x + half.y * half.y) / 3.0; // solid box
+            b.half_extents = half;
+            b.position = position;
+            b.angle = angle;
+            return b;
+        };
+        const auto floor_settings = [](Real restitution, Real friction) {
+            RigidSettings s;
+            s.gravity = Vec2{0.0, -4.0};
+            s.restitution = restitution;
+            s.friction = friction;
+            s.ground.push_back(malloy::collide::Halfplane{Vec2{0.0, 1.0}, 0.0});
+            return s;
+        };
+
+        // A flat, symmetric drop induces NO spin and NO horizontal drift: the
+        // centroid contact lies below the centre of mass, so its normal impulse
+        // makes no torque. The square settles with its centre at half a side
+        // height. This is the headline invariant.
+        {
+            RigidBody2D body = box_body(Vec2{0.0, 2.0}, 0.0);
+            RigidWorld w{SimulationSettings{0.002}, {body}, floor_settings(0.5, 0.0)};
+            Real worst_spin = 0.0;
+            Real worst_drift = 0.0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                const RigidBody2D& b = w.bodies()[0];
+                worst_spin = std::fmax(worst_spin, std::abs(b.angular_velocity));
+                worst_drift = std::fmax(worst_drift, std::abs(b.velocity.x));
+            }
+            MALLOY_CHECK_TRUE(worst_spin < 1e-12);  // symmetric: no torque
+            MALLOY_CHECK_TRUE(worst_drift < 1e-12); // symmetric: no drift
+            const RigidBody2D& b = w.bodies()[0];
+            MALLOY_CHECK_NEAR(b.position.y, 0.5, 1e-2); // resting at half height
+            MALLOY_CHECK_TRUE(malloy::math::length(b.velocity) < 0.1);
+        }
+
+        // The box collider is what stops it: a box body (radius 0) rests on the
+        // floor, while a body with neither a box nor a disc falls through.
+        {
+            RigidBody2D solid = box_body(Vec2{0.0, 1.5}, 0.0);
+            RigidBody2D ghost = box_body(Vec2{0.0, 1.5}, 0.0);
+            ghost.half_extents = Vec2{}; // no box, and radius 0: does not collide
+            RigidWorld w{SimulationSettings{0.002}, {solid, ghost}, floor_settings(0.0, 0.0)};
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_TRUE(w.bodies()[0].position.y > 0.4);  // caught on the floor
+            MALLOY_CHECK_TRUE(w.bodies()[1].position.y < -3.0); // fell through
+        }
+
+        // A corner-first landing DOES spin the box up: the contact is off the
+        // centre of mass, so it has a lever arm. It tips and comes to rest above
+        // the floor.
+        {
+            RigidBody2D body = box_body(Vec2{0.0, 2.0}, 0.4); // tilted
+            RigidWorld w{SimulationSettings{0.002}, {body}, floor_settings(0.2, 0.5)};
+            Real peak_spin = 0.0;
+            for (int i = 0; i < 3000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                if (i > 400) // after it has reached the floor
+                {
+                    peak_spin = std::fmax(peak_spin, std::abs(w.bodies()[0].angular_velocity));
+                }
+            }
+            MALLOY_CHECK_TRUE(peak_spin > 0.1);              // the corner torqued it
+            MALLOY_CHECK_TRUE(w.bodies()[0].position.y > 0.0); // never sank through
+        }
+
+        // A box placed exactly at rest stays put: no drift, no spin, no sinking.
+        {
+            RigidBody2D body = box_body(Vec2{0.0, 0.5}, 0.0);
+            RigidWorld w{SimulationSettings{0.002}, {body}, floor_settings(0.5, 0.0)};
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            const RigidBody2D& b = w.bodies()[0];
+            MALLOY_CHECK_NEAR(b.position.y, 0.5, 1e-2);
+            MALLOY_CHECK_TRUE(malloy::math::length(b.velocity) < 0.05);
+            MALLOY_CHECK_TRUE(std::abs(b.angular_velocity) < 1e-12);
+        }
+
+        // Validation: a non-positive half-extent is an invalid body, so the world
+        // refuses to step.
+        {
+            RigidBody2D bad = box_body(Vec2{}, 0.0);
+            bad.half_extents = Vec2{-1.0, 0.5};
+            RigidWorld w{SimulationSettings{0.01}, {bad}, RigidSettings{}};
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+        }
+    }
+
     // --- M20: rotation in three dimensions.
     //
     //     This is the one part of 3D that cannot be reached from the 2D code by

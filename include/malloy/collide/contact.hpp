@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include <malloy/collide/shapes.hpp>
 #include <malloy/math/vec2.hpp>
@@ -36,6 +37,7 @@ bool overlaps(const Aabb& a, const Aabb& b);
 bool overlaps(const Circle& circle, const Aabb& box);
 bool overlaps(const Circle& circle, const Halfplane& plane);
 bool overlaps(const Obb2& a, const Obb2& b);
+bool overlaps(const Obb2& box, const Halfplane& plane);
 
 // Full contact queries. Return no value when the shapes do not overlap or when
 // either shape is invalid; these never throw (docs/04).
@@ -71,4 +73,21 @@ std::optional<Contact> contact(const Circle& circle, const Halfplane& plane);
 // width with a fixed sign, the analogue of the circle pair's +x. Returns no
 // value when they do not overlap or either box is invalid; never throws.
 std::optional<Contact> contact(const Obb2& a, const Obb2& b);
+
+// An oriented box against a halfplane (M37), the 2D sibling of `Box3` against a
+// plane (M30). Like that pair, and unlike the single-point queries, this returns
+// a MANIFOLD: one Contact per box corner that lies inside the solid (signed
+// distance <= 0), because a box resting on a floor touches it at up to two
+// corners at once and a single point could not hold it flat. Each entry has:
+//
+//   normal       -plane.normal, the box's push-out direction (the plane supplies
+//                it, so there is no fallback), the same for every corner.
+//   penetration  how far that corner is below the surface; never negative.
+//   point        that corner, moved half its penetration back toward the
+//                surface, matching the midway convention of the other pairs.
+//
+// The corners are enumerated in a fixed order (the sign bits of the local axes),
+// so a run repeats (docs/04). Empty when the box is clear of the plane or either
+// shape is invalid; never throws.
+std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane);
 } // namespace malloy::collide

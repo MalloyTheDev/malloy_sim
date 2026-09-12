@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M36). These boundaries are in force
+> All modules below are implemented (M2-M37). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -62,7 +62,7 @@ Not responsible for collision geometry (that is `malloy_collide`), orientation, 
 
 Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
 
-Also responsible for rigid contact response since M14: disc against disc contacts (and, since M36, box against box, when a `RigidBody2D` carries a `half_extents` box collider and collides through `collide::Obb2`; box against disc and box against a ground plane are deferred), impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
+Also responsible for rigid contact response since M14: disc against disc contacts (and, since M36, box against box, when a `RigidBody2D` carries a `half_extents` box collider and collides through `collide::Obb2`, and since M37 box against a `Halfplane` ground, the corner manifold reduced to one centroid contact as M30 does in 3D; box against disc is deferred), impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
 
 Since M16 a world also owns immovable ground planes, carried in `RigidSettings`. They are `collide::Halfplane` values, so the geometry stays in `malloy_collide` and `malloy_rigid` only resolves against it.
 

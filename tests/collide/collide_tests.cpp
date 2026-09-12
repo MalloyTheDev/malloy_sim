@@ -1182,6 +1182,86 @@ int main()
         }
     }
 
+    // --- M37: Obb2 against a Halfplane, the 2D sibling of Box3 against a plane
+    //     (M30). A box on a floor touches at up to two corners, so this returns a
+    //     manifold (a list), not a single point. No separating-axis search: the
+    //     plane has one normal, and the four corners tested against it are the
+    //     whole story. ---
+    {
+        using malloy::collide::contacts;
+        using malloy::collide::Halfplane;
+        using malloy::collide::Obb2;
+        using malloy::collide::overlaps;
+        using malloy::math::Vec2;
+
+        const Vec2 half{0.5, 0.5};
+        // Floor at y = 0, normal pointing up out of the solid below it.
+        const Halfplane floor{Vec2{0.0, 1.0}, 0.0};
+
+        // Clear of the floor: no overlap, no contacts.
+        {
+            const Obb2 box{Vec2{0.0, 1.0}, half, 0.0};
+            MALLOY_CHECK_FALSE(overlaps(box, floor));
+            MALLOY_CHECK_TRUE(contacts(box, floor).empty());
+        }
+
+        // A flat square with its centre 0.3 above the floor: its two bottom
+        // corners are 0.2 below the surface, its two top corners above. Two
+        // contacts, each 0.2 deep, normal -y. The two bottom corners are at
+        // x = +-0.5, so their x sums to zero: the centroid sits under the centre
+        // of mass, which is what makes a flat drop induce no torque.
+        {
+            const Obb2 box{Vec2{0.0, 0.3}, half, 0.0};
+            MALLOY_CHECK_TRUE(overlaps(box, floor));
+            const auto hits = contacts(box, floor);
+            MALLOY_CHECK_TRUE(hits.size() == 2);
+            Real sum_x = 0.0;
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, 0.2, eps);
+                MALLOY_CHECK_VEC2_NEAR(hit.normal, Vec2(0.0, -1.0), eps);
+                MALLOY_CHECK_NEAR(hit.point.y, -0.1, eps); // midway: corner -0.2, surface 0
+                sum_x += hit.point.x;
+            }
+            MALLOY_CHECK_NEAR(sum_x, 0.0, eps); // centroid under the centre of mass
+        }
+
+        // Tilted 45 degrees, centre at y = 0.5: only the single lowest corner
+        // dips below (at y = 0.5 - sqrt(0.5)), the two side corners sit exactly on
+        // y = 0.5 and the top well above. One contact, a corner landing.
+        {
+            const Obb2 box{Vec2{0.0, 0.5}, half, 0.78539816339744830961}; // pi/4
+            const auto hits = contacts(box, floor);
+            MALLOY_CHECK_TRUE(hits.size() == 1);
+            MALLOY_CHECK_NEAR(hits[0].penetration, std::sqrt(0.5) - 0.5, 1e-9);
+            MALLOY_CHECK_VEC2_NEAR(hits[0].normal, Vec2(0.0, -1.0), eps);
+        }
+
+        // A sloped floor whose normal has both components nonzero, so a dropped
+        // axis in the corner test would show. The box straddles it.
+        {
+            const Vec2 n = malloy::math::normalize(Vec2{1.0, 2.0});
+            const Halfplane ramp{n, 0.0};
+            const Obb2 box{Vec2{}, half, 0.0}; // centred on the surface
+            MALLOY_CHECK_TRUE(overlaps(box, ramp));
+            const auto hits = contacts(box, ramp);
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_VEC2_NEAR(hit.normal, n * -1.0, 1e-15);
+                MALLOY_CHECK_TRUE(hit.penetration > 0.0);
+            }
+        }
+
+        // Invalid inputs give an empty manifold.
+        {
+            const Obb2 bad{Vec2{}, Vec2{-1.0, 0.5}, 0.0};
+            MALLOY_CHECK_TRUE(contacts(bad, floor).empty());
+            MALLOY_CHECK_FALSE(overlaps(bad, floor));
+            const Obb2 good{Vec2{}, half, 0.0};
+            MALLOY_CHECK_TRUE(contacts(good, Halfplane{Vec2{0.0, 2.0}, 0.0}).empty());
+        }
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

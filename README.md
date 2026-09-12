@@ -47,8 +47,8 @@ force on a 3D body, charged particles in three dimensions with helical
 motion, an oriented box resting and tumbling on a ground plane, spring
 networks in three dimensions, colliding particles in three dimensions,
 box-against-box collision, box-against-sphere collision, Coulomb friction
-for particle contacts, and box-against-box collision in two dimensions
-(milestones M1-M36).
+for particle contacts, box-against-box collision in two dimensions, and a 2D
+box resting on a ground plane (milestones M1-M37).
 
 ## Locked baseline
 
@@ -114,7 +114,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 25 templates ship across 10 domains, and
+and runnable with the shipped binary. 26 templates ship across 10 domains, and
 every one is parsed, validated and stepped by the test suite. Both numbers are
 checked against the directory by the scenario tests, so neither can go stale.
 
@@ -311,8 +311,9 @@ Intended, not yet built, and never added speculatively
   dimensions, M32 colliding particles in three dimensions (all five domains
   now have a 3D form), M33 box against box by the separating-axis test, M34
   box against a sphere (the last movable pair), M35 Coulomb friction for
-  particle contacts, and M36 box against box in the 2D rigid domain; rendering
-  is the remaining piece of the 3D arc, its own milestone
+  particle contacts, M36 box against box in the 2D rigid domain, and M37 a 2D
+  box resting on a ground plane; rendering is the remaining piece of the 3D arc,
+  its own milestone
   (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is
@@ -323,8 +324,9 @@ Intended, not yet built, and never added speculatively
 - the full box-box contact MANIFOLD and an iterative stacking solver (M33 and
   M36 added box-against-box in 3D and 2D by the separating-axis test, but each
   reduced to a single contact point: a bounce, not a stack); box against disc
-  (2D) and box against a ground plane are also not built yet (M34 added
-  box-against-sphere, so every 3D movable pair collides)
+  in 2D is also not built yet (M34 added box-against-sphere and M30/M37 put a
+  box on the ground in both dimensions, so the rest of the collision matrix is
+  filled)
 - persistent forces and force/torque accumulators (gravity is a setting applied
   as an acceleration, not a registered force producer)
 - vehicles, fluids, thermodynamics, electromagnetism

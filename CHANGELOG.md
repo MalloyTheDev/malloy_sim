@@ -827,6 +827,57 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M37] - 2026-09-12  (a 2D box on a ground plane)
+
+### Added
+
+- `collide::overlaps(Obb2, Halfplane)` and `collide::contacts(Obb2, Halfplane)`
+  (a manifold, plural), the 2D sibling of `Box3` against a plane (M30): the box
+  corners that lie inside the solid, each a contact with the plane's own normal.
+- Box-against-ground contact response in `RigidWorld`: a box body now rests on
+  the `Halfplane` ground planes in `RigidSettings`. The corner manifold is
+  reduced to a single contact at the centroid of the penetrating corners with
+  the deepest penetration, exactly as M30 does in 3D, so a flat drop exerts no
+  spurious torque.
+- The `box_drop2d` template: a square dropped flat onto a floor, landing and
+  staying flat. Twenty-six templates now, across ten domains.
+
+### The box M36 built can now rest on the ground
+
+M36 gave the 2D rigid domain a box collider and box-against-box collision, but a
+box in a world with a ground plane fell straight through it: only the disc path
+resolved against a `Halfplane`. This closes that gap the same way M30 did in 3D.
+A box against a plane needs no separating-axis search, because the plane carries
+its own normal; the four corners tested against it are the whole story, and the
+up-to-two that touch at once form a manifold. Reducing that manifold to one
+centroid contact is what keeps a flat, symmetric drop from spinning up out of
+nothing: the centroid sits directly below the centre of mass, so the normal
+impulse has no lever arm, while a corner or edge landing lands the centroid off
+the centre of mass and tips as it should. A full per-corner manifold with an
+iterative solver, which a resting stack needs, stays deferred (rule 12). Box
+against a disc in 2D is still deferred, as box against sphere was after M33.
+
+### Invariants
+
+The geometry tests pin the manifold on a flat drop (two corners, each the right
+depth, normal -plane.normal, and their x summing to zero so the centroid is under
+the centre of mass), on a 45-degree corner landing (one contact), and on a sloped
+plane whose normal has both components nonzero; `overlaps` agrees with a nonempty
+manifold, and invalid inputs give an empty one. The dynamics tests hold the
+headline: a flat drop keeps angular velocity and horizontal velocity at zero to
+machine precision and settles at half a side height, a corner-first drop spins up
+and comes to rest above the floor, a resting box stays put, and a body without a
+box collider falls through while a box body is caught. The `box_drop2d` template
+pins horizontal momentum and angular momentum at zero through the whole drop.
+
+### Mutation testing
+
+Six mutations, all caught: forcing a corner sign bit so the corners are wrong,
+inverting the box/halfplane overlap test, keeping the free corners instead of the
+penetrating ones, flipping the contact normal, giving the penetration the wrong
+sign, and flipping the ground normal in the rigid box branch so the box would be
+driven into the floor. No equivalents this time.
+
 ## [M36] - 2026-09-12  (2D oriented boxes)
 
 ### Added
