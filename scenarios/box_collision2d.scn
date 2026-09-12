@@ -1,0 +1,69 @@
+# MalloySim scenario: two oriented boxes colliding in the plane (M36).
+#
+# The 2D rigid domain (M11) has always collided its bodies as discs. M36 gives a
+# 2D rigid body a box collider and resolves two boxes against each other by the
+# separating-axis test (SAT), the 2D sibling of the 3D box-box collision (M33).
+# In 2D the SAT is simpler: only four candidate axes (the two face normals of
+# each box) and no edge-edge case, because in the plane an edge's separating
+# direction is already one of those face normals. The axis of least overlap is
+# the contact normal; the pair is resolved through the SAME impulse core the
+# discs and the ground use (ADR 0008).
+#
+# It is one contact point, not a manifold: enough for a correct bounce, not a
+# resting stack (that needs an iterative solver a later milestone owns). The
+# point sits on a face corner, a documented approximation, so even this head-on
+# hit imparts a little spin. What stays EXACT is total linear momentum.
+#
+# A heavy box (mass 2) on the left moving right meets a light box (mass 1) on the
+# right moving left. They collide near the origin, bounce with restitution 0.5,
+# and separate. Because the only force is the equal-and-opposite contact impulse,
+# TOTAL linear momentum never changes: it is 2*(+1) + 1*(-1) = +1 along x at
+# every step. The collision is real, not a fly-through: kinetic energy, exact at
+# the start, drops once they touch because the bounce is inelastic.
+
+type rigid
+
+dt 0.002
+steps 2000
+output_every 200
+
+restitution 0.5
+
+# rigid_box <mass> <hx hy> <px py> <angle> <vx vy> <omega>
+#
+# A heavy unit square on the left, moving right at 1. Its inertia is computed
+# from the box, not typed in.
+rigid_box 2.0  0.5 0.5  -1.2 0.0  0.0   1.0 0.0  0.0
+# A light unit square on the right, moving left at 1.
+rigid_box 1.0  0.5 0.5   1.2 0.0  0.0  -1.0 0.0  0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   energy 1.50000000e+00   momentum_x 1.00000000e+00
+#   step   2000   energy 4.24713076e-01   momentum_x 1.00000000e+00
+#
+# (`energy` is the rigid kinetic energy; with no gravity there is no potential
+# term, so it is the whole energy, translational plus rotational.)
+#
+# The invariants:
+#
+# 1. Total linear momentum along x is exactly +1 at every step. The contact
+#    impulse is equal and opposite, and nothing else acts, so what one box gains
+#    the other loses. This is the headline: two movable 2D boxes exchange
+#    momentum through the shared impulse core.
+#
+# 2. Kinetic energy starts at 0.5*2*1^2 + 0.5*1*1^2 = 1.5 (both squares at rest
+#    rotationally, moving at speed 1). After the restitution-0.5 bounce it is
+#    lower: the collision removed energy, so this is a real contact and not a
+#    fly-through. The remaining value is pinned below so the scenario test would
+#    catch a regression to a fly-through.
+#
+# On the ASCII view (an orthographic view of the plane): two points on the x
+# axis that approach, meet and separate.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    energy      1.50000000e+00   tol 1e-9
+# check step 0    momentum_x  1.00000000e+00   tol 1e-12
+# check step 2000 momentum_x  1.00000000e+00   tol 1e-10
+# check step 2000 energy      4.24713076e-01   tol 1e-6

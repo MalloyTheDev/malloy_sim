@@ -1078,6 +1078,110 @@ int main()
         }
     }
 
+    // --- M36: Obb2 against Obb2, the 2D separating-axis test (the 2D sibling of
+    //     the Box3 pair). Only the four face axes, and no edge-edge case, since
+    //     in 2D an edge's separating direction is already a face normal. One
+    //     predicate drives overlaps() and contact(); ground truth is
+    //     hand-computed. ---
+    {
+        using malloy::collide::Obb2;
+        using malloy::collide::contact;
+        using malloy::collide::overlaps;
+        using malloy::math::Vec2;
+
+        const Vec2 half{0.5, 0.5};
+
+        // Clear of each other along x: no overlap, no contact.
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{Vec2{2.0, 0.0}, half, 0.0};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_FALSE(c.has_value());
+        }
+
+        // Face of a: two axis-aligned boxes overlapping 0.2 along x. Normal +x,
+        // penetration 0.2, contact midway in the overlap slab. The mirror with b
+        // on the negative side flips the normal to -x, pinning the sign.
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{Vec2{0.8, 0.0}, half, 0.0};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_VEC2_NEAR(c->normal, Vec2(1.0, 0.0), eps);
+            MALLOY_CHECK_NEAR(c->penetration, 0.2, eps);
+            MALLOY_CHECK_NEAR(c->point.x, 0.4, eps);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+
+            const Obb2 b_neg{Vec2{-0.8, 0.0}, half, 0.0};
+            const auto c_neg = contact(a, b_neg);
+            MALLOY_CHECK_TRUE(overlaps(a, b_neg) == c_neg.has_value());
+            MALLOY_CHECK_TRUE(c_neg.has_value());
+            MALLOY_CHECK_VEC2_NEAR(c_neg->normal, Vec2(-1.0, 0.0), eps);
+            MALLOY_CHECK_NEAR(c_neg->point.x, -0.4, eps);
+        }
+
+        // Exact touch: boxes one unit apart share an edge. Touching counts;
+        // nudging b a hair further apart separates them (the predicate is strict).
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 touch{Vec2{1.0, 0.0}, half, 0.0};
+            const auto c = contact(a, touch);
+            MALLOY_CHECK_TRUE(overlaps(a, touch) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_NEAR(c->penetration, 0.0, eps);
+            MALLOY_CHECK_VEC2_NEAR(c->normal, Vec2(1.0, 0.0), eps);
+            const Obb2 apart{Vec2{1.0 + 1e-6, 0.0}, half, 0.0};
+            const auto c2 = contact(a, apart);
+            MALLOY_CHECK_TRUE(overlaps(a, apart) == c2.has_value());
+            MALLOY_CHECK_FALSE(c2.has_value());
+        }
+
+        // Face of b: b is turned 30 degrees and pushed along its OWN x-axis, so
+        // the tightest axis is b's face normal, not a's. Normal is b's local x,
+        // penetration follows from the projected radii along it. This is the
+        // mirror of the FaceA branch and would break if the two were confused.
+        {
+            const Real angle = 0.52359877559829887308; // pi / 6
+            const Vec2 bx{std::cos(angle), std::sin(angle)}; // b local x in world
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{bx * 1.0, half, angle};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_VEC2_NEAR(c->normal, bx, 1e-9);
+            const Real expected = 0.5 * (std::cos(angle) + std::sin(angle)) + 0.5 - 1.0;
+            MALLOY_CHECK_NEAR(c->penetration, expected, 1e-9);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+        }
+
+        // Coincident centres, different sizes: every direction overlaps, so no
+        // axis separates and the least-combined-width axis wins (here x, 0.8 < the
+        // 0.9 along y). A fixed, repeatable fallback, the box analogue of the
+        // circle pair's +x, with no divide by zero.
+        {
+            const Vec2 c0{1.0, -1.0};
+            const Obb2 a{c0, Vec2{0.5, 0.5}, 0.0};
+            const Obb2 b{c0, Vec2{0.3, 0.4}, 0.0};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_VEC2_NEAR(c->normal, Vec2(1.0, 0.0), eps);
+            MALLOY_CHECK_NEAR(c->penetration, 0.8, eps);
+        }
+
+        // An invalid box never overlaps or contacts anything.
+        {
+            const Obb2 good{Vec2{}, half, 0.0};
+            const Obb2 bad{Vec2{}, Vec2{-1.0, 0.5}, 0.0};
+            MALLOY_CHECK_FALSE(overlaps(good, bad));
+            MALLOY_CHECK_FALSE(contact(good, bad).has_value());
+            MALLOY_CHECK_FALSE(overlaps(bad, good));
+            MALLOY_CHECK_FALSE(contact(bad, good).has_value());
+        }
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

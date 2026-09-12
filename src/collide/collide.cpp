@@ -70,6 +70,13 @@ bool Aabb::is_valid() const
            min.y <= max.y;
 }
 
+bool Obb2::is_valid() const
+{
+    return half_extents.x > math::Real{0} && half_extents.y > math::Real{0} &&
+           math::is_finite(half_extents) && math::is_finite(center) &&
+           math::is_finite(orientation);
+}
+
 // ----------------------------------------------------------------------------
 // Area properties
 // ----------------------------------------------------------------------------
@@ -361,6 +368,159 @@ std::optional<Contact> contact(const Circle& circle, const Aabb& box)
     // surfaces along the normal.
     result.point = circle.center +
                    result.normal * (circle.radius - result.penetration / math::Real{2});
+    return result;
+}
+
+namespace
+{
+// An oriented 2D box reduced to the working form the SAT wants: two orthonormal
+// axes, the matching half-widths, and the centre. The 2D sibling of the `Obb`
+// helper behind the box/box test in 3D.
+struct Obb2Frame
+{
+    math::Vec2 u[2];
+    math::Real e[2];
+    math::Vec2 c;
+};
+
+Obb2Frame make_obb2(const Obb2& box)
+{
+    const math::Real cs = std::cos(box.orientation);
+    const math::Real sn = std::sin(box.orientation);
+    return Obb2Frame{{math::Vec2{cs, sn}, math::Vec2{-sn, cs}},
+                     {box.half_extents.x, box.half_extents.y}, box.center};
+}
+
+// Half-width of the box's shadow on `axis` (unit for every axis tested here), so
+// this radius and the centre gap are both true distances and comparable.
+math::Real projected_radius(const Obb2Frame& o, const math::Vec2& axis)
+{
+    return o.e[0] * std::abs(math::dot(o.u[0], axis)) +
+           o.e[1] * std::abs(math::dot(o.u[1], axis));
+}
+
+// The corner of the box farthest along `d`: step from the centre by each
+// half-width toward `d`. Places the face contact on the deepest vertex.
+math::Vec2 support(const Obb2Frame& o, const math::Vec2& d)
+{
+    math::Vec2 p = o.c;
+    for (int k = 0; k < 2; ++k)
+    {
+        const math::Real s =
+            math::dot(o.u[k], d) >= math::Real{0} ? math::Real{1} : math::Real{-1};
+        p = p + o.u[k] * (s * o.e[k]);
+    }
+    return p;
+}
+
+enum Axis2Kind
+{
+    FaceA2,
+    FaceB2
+};
+
+struct MinAxis2
+{
+    math::Vec2 axis;
+    math::Real overlap;
+    Axis2Kind kind;
+};
+
+// The one SAT core behind both `overlaps` and `contact`, so they cannot
+// disagree. Tests the four face axes (two per box); returns false the instant
+// one separates the boxes, otherwise fills `out` with the axis of least overlap.
+// Two coincident centres are not special-cased: every gap is zero, no axis
+// separates, and the least-overlap axis is the one of least combined width, a
+// fixed repeatable choice.
+bool box2_min_axis(const Obb2& a, const Obb2& b, MinAxis2& out)
+{
+    const Obb2Frame fa = make_obb2(a);
+    const Obb2Frame fb = make_obb2(b);
+    const math::Vec2 t = b.center - a.center;
+
+    bool have = false;
+    auto test = [&](const math::Vec2& axis, Axis2Kind kind) -> bool
+    {
+        const math::Real gap = std::abs(math::dot(t, axis));
+        const math::Real overlap =
+            projected_radius(fa, axis) + projected_radius(fb, axis) - gap;
+        if (overlap < math::Real{0})
+        {
+            return false; // a separating axis: the boxes are apart
+        }
+        if (!have || overlap < out.overlap)
+        {
+            out = MinAxis2{axis, overlap, kind};
+            have = true;
+        }
+        return true;
+    };
+
+    for (int k = 0; k < 2; ++k)
+    {
+        if (!test(fa.u[k], FaceA2))
+        {
+            return false;
+        }
+    }
+    for (int k = 0; k < 2; ++k)
+    {
+        if (!test(fb.u[k], FaceB2))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+bool overlaps(const Obb2& a, const Obb2& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return false;
+    }
+    MinAxis2 axis;
+    return box2_min_axis(a, b, axis);
+}
+
+std::optional<Contact> contact(const Obb2& a, const Obb2& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return std::nullopt;
+    }
+    MinAxis2 m;
+    if (!box2_min_axis(a, b, m))
+    {
+        return std::nullopt;
+    }
+
+    const math::Vec2 t = b.center - a.center;
+    // Orient the axis from a toward b, like every pair. Coincident centres leave
+    // the sign as computed, a fixed choice (the box analogue of +x).
+    math::Vec2 n = m.axis;
+    if (math::dot(n, t) < math::Real{0})
+    {
+        n = -n;
+    }
+    // A bare touch can round to a hair-negative overlap; never report negative.
+    const math::Real depth = std::max(math::Real{0}, m.overlap);
+
+    Contact result;
+    result.normal = n;
+    result.penetration = depth;
+    if (m.kind == FaceA2)
+    {
+        // A face of a separates: contact on b's deepest vertex into a (its
+        // support along -n), nudged half the penetration back to the midpoint.
+        result.point = support(make_obb2(b), -n) + n * (depth / math::Real{2});
+    }
+    else
+    {
+        // A face of b separates: a's deepest vertex into b (support along +n).
+        result.point = support(make_obb2(a), n) - n * (depth / math::Real{2});
+    }
     return result;
 }
 } // namespace malloy::collide

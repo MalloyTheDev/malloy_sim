@@ -35,6 +35,7 @@ bool overlaps(const Circle& a, const Circle& b);
 bool overlaps(const Aabb& a, const Aabb& b);
 bool overlaps(const Circle& circle, const Aabb& box);
 bool overlaps(const Circle& circle, const Halfplane& plane);
+bool overlaps(const Obb2& a, const Obb2& b);
 
 // Full contact queries. Return no value when the shapes do not overlap or when
 // either shape is invalid; these never throw (docs/04).
@@ -57,4 +58,17 @@ std::optional<Contact> contact(const Circle& circle, const Aabb& box);
 // including a circle whose centre lies exactly on the line. The convention
 // still holds, so it points from the circle toward the solid side.
 std::optional<Contact> contact(const Circle& circle, const Halfplane& plane);
+
+// Oriented box against oriented box (M36), by the separating-axis theorem, the
+// 2D sibling of the `Box3` pair. Four axes are tested (the two face normals of
+// each box; 2D has no edge-edge case, because an edge's separating direction is
+// already one of those face normals), and the axis of least overlap is the
+// contact normal with its overlap the penetration. `overlaps` runs the same
+// predicate, so the two always agree. Like the box/box pair in 3D it reduces to
+// a SINGLE contact, placed on the deepest vertex of the other box: enough for a
+// bounce, not the manifold a resting stack needs (rule 12). Two coincident
+// centres are the degenerate case and fall back to the axis of least combined
+// width with a fixed sign, the analogue of the circle pair's +x. Returns no
+// value when they do not overlap or either box is invalid; never throws.
+std::optional<Contact> contact(const Obb2& a, const Obb2& b);
 } // namespace malloy::collide

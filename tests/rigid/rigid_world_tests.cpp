@@ -1946,6 +1946,93 @@ int main()
         MALLOY_CHECK_TRUE(w.bodies()[0].angle > 500.0);
     }
 
+    // --- M36: box against box in the 2D rigid domain, the separating-axis
+    //     contact fed through the SAME impulse core as the discs (ADR 0008),
+    //     reduced to a single contact point: a bounce, not a stack. Total linear
+    //     momentum stays exact; like the 3D box pair the single corner contact
+    //     imparts a little spin, which is why the energy check allows for it. ---
+    {
+        using malloy::math::Vec2;
+        const Vec2 half{0.5, 0.5};
+        const auto box_body = [&](Real mass, const Vec2& position, const Vec2& velocity) {
+            RigidBody2D b;
+            b.mass = mass;
+            b.inertia = mass * (half.x * half.x + half.y * half.y) / 3.0; // solid box
+            b.half_extents = half;
+            b.position = position;
+            b.velocity = velocity;
+            return b;
+        };
+
+        // Head-on along x, overlapping 0.1, unequal masses so the conserved
+        // momentum is a nonzero value. Total linear momentum holds at every
+        // restitution; the heavier body is slowed, so a real impulse fired.
+        for (const Real restitution : {0.0, 0.5, 1.0})
+        {
+            const std::vector<RigidBody2D> start{
+                box_body(2.0, Vec2{0.0, 0.0}, Vec2{1.0, 0.0}),
+                box_body(1.0, Vec2{0.9, 0.0}, Vec2{-1.0, 0.0})};
+            const Vec2 p0 = total_linear_momentum(start); // (1, 0)
+            RigidWorld w{SimulationSettings{0.002}, start, RigidSettings{restitution}};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_VEC2_NEAR(total_linear_momentum(w.bodies()), p0, 1e-10);
+            MALLOY_CHECK_TRUE(w.bodies()[0].velocity.x < 1.0 - 1e-6);
+        }
+
+        // Frictionless restitution 1 conserves total kinetic energy (translation
+        // plus the spin the corner contact imparts; 2D rotation is driftless, so
+        // this is tight); restitution below 1 strictly loses some.
+        {
+            const std::vector<RigidBody2D> start{
+                box_body(1.0, Vec2{0.0, 0.0}, Vec2{1.5, 0.0}),
+                box_body(1.0, Vec2{0.9, 0.0}, Vec2{-1.5, 0.0})};
+            const Real k0 = total_kinetic_energy(start);
+            RigidWorld elastic{SimulationSettings{0.002}, start, RigidSettings{1.0}};
+            RigidWorld lossy{SimulationSettings{0.002}, start, RigidSettings{0.4}};
+            for (int i = 0; i < 30; ++i)
+            {
+                MALLOY_CHECK_TRUE(elastic.step().ok());
+                MALLOY_CHECK_TRUE(lossy.step().ok());
+            }
+            MALLOY_CHECK_NEAR(total_kinetic_energy(elastic.bodies()), k0, 1e-9);
+            MALLOY_CHECK_TRUE(total_kinetic_energy(lossy.bodies()) < k0 - 0.1);
+        }
+
+        // A box against a DISC is deferred: the mix is skipped, so an overlapping
+        // box and disc pass through each other. This guards that scope boundary
+        // and will change when box/disc lands.
+        {
+            RigidBody2D box = box_body(1.0, Vec2{0.0, 0.0}, Vec2{1.0, 0.0});
+            RigidBody2D disc;
+            disc.mass = 1.0;
+            disc.inertia = 1.0;
+            disc.radius = 0.5; // a disc, not a box
+            disc.position = Vec2{0.6, 0.0};
+            disc.velocity = Vec2{-1.0, 0.0};
+            RigidWorld w{SimulationSettings{0.002}, {box, disc}, RigidSettings{1.0}};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            MALLOY_CHECK_NEAR(w.bodies()[0].velocity.x, 1.0, 1e-12);
+            MALLOY_CHECK_NEAR(w.bodies()[1].velocity.x, -1.0, 1e-12);
+        }
+
+        // Two boxes clear of each other never touch: no impulse, no change.
+        {
+            RigidWorld w{SimulationSettings{0.002},
+                         {box_body(1.0, Vec2{0.0, 0.0}, Vec2{}),
+                          box_body(1.0, Vec2{3.0, 0.0}, Vec2{})},
+                         RigidSettings{1.0}};
+            for (int i = 0; i < 100; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[0].velocity), 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[1].velocity), 0.0, 1e-12);
+        }
+    }
+
     // --- M20: rotation in three dimensions.
     //
     //     This is the one part of 3D that cannot be reached from the 2D code by

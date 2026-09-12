@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M35 are complete, so this is the live roadmap for what comes next.
+M1-M36 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -49,6 +49,7 @@ M32 - colliding particles in three dimensions [done]
 M33 - box against box (SAT)                 [done]
 M34 - box against a sphere                  [done]
 M35 - Coulomb friction for particles        [done]
+M36 - 2D oriented boxes (SAT)               [done]
 ```
 
 ## Track 1: classical mechanics depth (active)

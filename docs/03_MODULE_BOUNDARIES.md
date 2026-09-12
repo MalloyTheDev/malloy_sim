@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M35). These boundaries are in force
+> All modules below are implemented (M2-M36). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -48,7 +48,7 @@ Not responsible for physics, body types, simulation state, terminal control sequ
 
 ## `malloy_collide`
 
-Responsible for 2D collision primitives (`Circle`, `Aabb`), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid. Since M22 it also carries the 3D primitives `Sphere` and `Plane3`, since M30 the oriented `Box3`, whose contact with a plane is the manifold of its penetrating corners (a list, not a single point), since M32 the axis-aligned `Aabb3` (the walls a 3D particle box confines to), since M33 the separating-axis contact between two oriented boxes (`overlaps`/`contact(Box3, Box3)`), reduced to a single contact point (a bounce, not the full manifold a stack needs), and since M34 the box-against-sphere contact (`contact(Box3, Sphere)` and its reverse), by the box's nearest point to the sphere centre.
+Responsible for 2D collision primitives (`Circle`, `Aabb`, and since M36 the oriented `Obb2`, whose separating-axis contact with another `Obb2` is the 2D sibling of the `Box3` pair, a single contact point), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid. Since M22 it also carries the 3D primitives `Sphere` and `Plane3`, since M30 the oriented `Box3`, whose contact with a plane is the manifold of its penetrating corners (a list, not a single point), since M32 the axis-aligned `Aabb3` (the walls a 3D particle box confines to), since M33 the separating-axis contact between two oriented boxes (`overlaps`/`contact(Box3, Box3)`), reduced to a single contact point (a bounce, not the full manifold a stack needs), and since M34 the box-against-sphere contact (`contact(Box3, Sphere)` and its reverse), by the box's nearest point to the sphere centre.
 
 Not responsible for density, mass, inertia, bodies, velocity, contact response, integration, broadphase acceleration, or scenario loading. The area properties stop at geometry: turning them into mass properties belongs to whichever domain owns bodies (ADR 0007). Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
 
@@ -62,7 +62,7 @@ Not responsible for collision geometry (that is `malloy_collide`), orientation, 
 
 Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
 
-Also responsible for rigid contact response since M14: disc against disc contacts, impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
+Also responsible for rigid contact response since M14: disc against disc contacts (and, since M36, box against box, when a `RigidBody2D` carries a `half_extents` box collider and collides through `collide::Obb2`; box against disc and box against a ground plane are deferred), impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
 
 Since M16 a world also owns immovable ground planes, carried in `RigidSettings`. They are `collide::Halfplane` values, so the geometry stays in `malloy_collide` and `malloy_rigid` only resolves against it.
 

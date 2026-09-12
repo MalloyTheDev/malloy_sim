@@ -45,6 +45,14 @@ struct RigidBody2D
     // in free motion and impulses without being a contact participant.
     math::Real radius{0.0};
 
+    // Box collider (M36), an oriented box centred on the BODY ORIGIN with these
+    // half-widths and the body `angle`, the 2D sibling of `RigidBody3D`'s
+    // `half_extents`. Both components positive means the body collides as a box
+    // (against other boxes) instead of a disc; the default of zero means it is
+    // not a box, so a pre-M36 body keeps its disc behaviour. Box against disc,
+    // and box against a ground plane, are deferred to their own milestones.
+    math::Vec2 half_extents{};
+
     // Infinite mass and inertia mean immovable: a wall or a floor. M11 left
     // statics unrepresented on the grounds that nothing needed them until
     // contact response did (ADR 0007). Contact response now does, so they are

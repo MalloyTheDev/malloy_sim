@@ -31,6 +31,22 @@ struct Aabb
     bool is_valid() const;
 };
 
+// An oriented box in 2D (M36): a centre, half-widths along its OWN two axes, and
+// an orientation angle in radians. The 2D sibling of `Box3`. Its local axes are
+// (cos, sin) and (-sin, cos), so a zero angle is an `Aabb` of the same extents.
+// It is what lets a 2D rigid body collide as a box rather than a disc.
+struct Obb2
+{
+    math::Vec2 center{};
+    math::Vec2 half_extents{};
+    math::Real orientation{0.0};
+
+    // Valid when both half-extents are strictly positive and finite, and the
+    // centre and orientation are finite. A zero or negative extent is not a box,
+    // matching `Box3`.
+    bool is_valid() const;
+};
+
 // A halfplane: everything on one side of an infinite straight line. Used for
 // ground and walls, where a disc is the wrong shape and an Aabb is a lie
 // (a floor is not 40 units thick, and a body that tunnels past its far face

@@ -185,17 +185,53 @@ void apply_contact(RigidBody2D& a, RigidBody2D& b, const collide::Contact& conta
     b.angular_velocity += cross(arm_b, friction_impulse) * inverse_inertia_b;
 }
 
+// A body collides as an oriented box when both half-extents are positive;
+// otherwise it uses the disc radius. Zero half-extents (the default) is not a
+// box, so a pre-M36 body keeps its disc behaviour, mirroring `body_is_box` in
+// the 3D world.
+bool body_is_box2(const RigidBody2D& body)
+{
+    return body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0};
+}
+
 void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settings)
 {
-    if (a.radius <= math::Real{0} || b.radius <= math::Real{0})
-    {
-        return; // a zero radius means the body does not take part in contacts
-    }
     if (a.is_static() && b.is_static())
     {
         return; // nothing to do, and the effective mass would be zero
     }
 
+    const bool a_box = body_is_box2(a);
+    const bool b_box = body_is_box2(b);
+
+    // Box against box (M36): the separating-axis contact, reduced to a single
+    // point (a bounce, not a stack), fed through the SAME solver the discs use
+    // (ADR 0008). The box is centred on the body origin with the body angle, so
+    // like a disc its contact normal generally misses the centre of mass and so
+    // generates torque.
+    if (a_box && b_box)
+    {
+        const std::optional<collide::Contact> hit = collide::contact(
+            collide::Obb2{a.position, a.half_extents, a.angle},
+            collide::Obb2{b.position, b.half_extents, b.angle});
+        if (hit)
+        {
+            apply_contact(a, b, *hit, settings);
+        }
+        return;
+    }
+    // A box against a disc is deferred, as box against sphere was in 3D before
+    // M34: it needs its own closest-feature test rather than the SAT or the disc
+    // path, so the mix is skipped here.
+    if (a_box || b_box)
+    {
+        return;
+    }
+
+    if (a.radius <= math::Real{0} || b.radius <= math::Real{0})
+    {
+        return; // a zero radius means the body does not take part in contacts
+    }
     // Discs are centred on the body ORIGIN, so a contact normal generally does
     // not pass through the centre of mass. That offset is what creates torque.
     const std::optional<collide::Contact> hit =
@@ -247,6 +283,8 @@ bool RigidBody2D::is_valid() const
     // because NaN > 0 is false.
     return mass > math::Real{0} && inertia > math::Real{0} &&
            radius >= math::Real{0} && math::is_finite(radius) &&
+           half_extents.x >= math::Real{0} && half_extents.y >= math::Real{0} &&
+           math::is_finite(half_extents) &&
            math::is_finite(angle) && math::is_finite(angular_velocity) &&
            math::is_squarable(position) && math::is_squarable(velocity) &&
            math::is_squarable(local_center_of_mass);

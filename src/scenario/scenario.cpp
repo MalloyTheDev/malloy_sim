@@ -785,6 +785,38 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.position = math::Vec2{px, py};
             scenario.rigid_bodies.push_back(body);
         }
+        else if (key == "rigid_box")
+        {
+            if (scenario.type != ScenarioType::Rigid)
+            {
+                return make_error(line_number, "rigid_box belongs to type rigid");
+            }
+            saw_domain_key = true;
+            rigid::RigidBody2D body;
+            math::Real hx{};
+            math::Real hy{};
+            math::Real px{};
+            math::Real py{};
+            math::Real vx{};
+            math::Real vy{};
+            if (!(tokens >> body.mass >> hx >> hy >> px >> py >> body.angle >> vx >>
+                  vy >> body.angular_velocity))
+            {
+                return make_error(line_number,
+                                  "rigid_box requires: mass hx hy px py angle vx vy "
+                                  "omega");
+            }
+            body.half_extents = math::Vec2{hx, hy};
+            // Inertia of a solid box about its centre, m (w^2 + h^2) / 12 with
+            // w = 2 hx and h = 2 hy, computed here as the loader does for the 3D
+            // box so the file need not carry it.
+            body.inertia = body.mass *
+                           (math::Real{4} * hx * hx + math::Real{4} * hy * hy) /
+                           math::Real{12};
+            body.position = math::Vec2{px, py};
+            body.velocity = math::Vec2{vx, vy};
+            scenario.rigid_bodies.push_back(body);
+        }
         else if (key == "spring_body")
         {
             if (scenario.type != ScenarioType::Springs)

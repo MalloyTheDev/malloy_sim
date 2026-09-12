@@ -827,6 +827,64 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M36] - 2026-09-12  (2D oriented boxes)
+
+### Added
+
+- `collide::Obb2`, an oriented box in 2D (centre, half-widths, angle), and
+  `collide::overlaps(Obb2, Obb2)` / `contact(Obb2, Obb2)`: the separating-axis
+  test for two 2D boxes, the 2D sibling of the `Box3` pair. One shared min-axis
+  predicate drives both, so they cannot disagree.
+- A box collider on `RigidBody2D` (`half_extents`, the 2D sibling of
+  `RigidBody3D`'s), and box-against-box contact response in `RigidWorld`: two box
+  bodies resolve through the SAME impulse core the discs and ground planes use
+  (ADR 0008).
+- A `rigid_box` key for the `rigid` scenario type (mass, half-widths, pose,
+  velocity, spin; the box inertia is computed, not typed), and the
+  `box_collision2d` template: two squares colliding head-on and conserving
+  momentum. Twenty-five templates now, across ten domains.
+
+### The first non-disc collision in 2D
+
+The 2D rigid domain has collided its bodies as discs since M11; every non-sphere
+collision so far (M30, M33, M34) was in 3D. This gives 2D what 3D has. The SAT is
+simpler in the plane: only four candidate axes, the two face normals of each box,
+and no edge-edge case, because in 2D an edge's separating direction is already
+one of those face normals (3D needs nine edge cross products on top of the six
+faces). The axis of least overlap is the normal and its overlap the penetration;
+the contact point sits on the deepest vertex of the other box. Two coincident
+centres fall back to the least-combined-width axis with a fixed sign, the
+analogue of the circle pair's +x.
+
+Like the 3D box pair it reduces to a SINGLE contact point, so it is a bounce, not
+a resting stack (rule 12 defers the manifold and iterative solver), and that
+point sits on a face corner rather than the face centre, so even a head-on hit
+imparts a little spin; total linear momentum stays exact and, at frictionless
+restitution 1, so does total kinetic energy. A box against a disc, and a box
+against a ground plane, are deferred, exactly as box against sphere was after
+M33: they need their own closest-feature tests and are skipped for now.
+
+### Invariants
+
+The geometry tests pin the normal, penetration and contact point on a face of
+each box (including the sign when the second box sits on the negative side), on
+the exact touch, and on a tilted box placed along its own axis; `overlaps` and
+`contact` are asserted to agree on every case. The dynamics tests hold total
+linear momentum across a head-on collision at three restitutions, conserve total
+kinetic energy at frictionless restitution 1 and lose it below, and confirm the
+deferred box/disc mix and a non-touching pair both leave the bodies untouched.
+The `box_collision2d` template pins momentum at +1 through the bounce and the
+post-collision energy, so a regression to a fly-through would fail it.
+
+### Mutation testing
+
+Seven mutations, all caught: dropping a term from the 2D projected radius,
+inverting the separating-axis guard, selecting the axis of greatest overlap,
+disabling the a-to-b normal sign flip, taking the face contact on the wrong side,
+adding the centre gap instead of subtracting it, and making `body_is_box2` always
+false so the box wiring goes dead (caught by the dynamics tests, which then see
+the boxes pass through). No equivalents this time.
+
 ## [M35] - 2026-09-12  (Coulomb friction for particles)
 
 ### Added
