@@ -777,6 +777,148 @@ int main()
                               .empty());
     }
 
+    // --- M33: Box3 against Box3, by the separating-axis theorem. Unlike the
+    //     box/plane manifold this reduces to a SINGLE contact: enough for a
+    //     bounce, not a resting stack. One predicate drives both overlaps() and
+    //     contact(), so the two must agree everywhere. Ground truth for the
+    //     rotated cases was computed independently against all fifteen axes. ---
+    {
+        using malloy::collide::Box3;
+        using malloy::collide::contact;
+        using malloy::collide::overlaps;
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+
+        const Vec3 half{0.5, 0.5, 0.5};
+        const Quat none{}; // identity orientation
+
+        // overlaps() and contact() run the SAME predicate, so every case below
+        // asserts they agree (MALLOY_CHECK macros return from main on failure,
+        // so this stays inline rather than in a helper).
+
+        // Clear of each other along x: no overlap, no contact.
+        {
+            const Box3 a{Vec3{0.0, 0.0, 0.0}, half, none};
+            const Box3 b{Vec3{2.0, 0.0, 0.0}, half, none};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_FALSE(c.has_value());
+        }
+
+        // Face of a (FaceA): two axis-aligned cubes overlapping 0.2 along x.
+        // Normal is +x (from a toward b), penetration 0.2, and the contact x
+        // lands midway in the overlap slab [0.3, 0.5].
+        {
+            const Box3 a{Vec3{0.0, 0.0, 0.0}, half, none};
+            const Box3 b{Vec3{0.8, 0.0, 0.0}, half, none};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.2, eps);
+            MALLOY_CHECK_NEAR(c->point.x, 0.4, eps);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+
+            // The same pair with b on the NEGATIVE side: the normal must flip to
+            // -x (it always points from a toward b), which pins the sign
+            // convention rather than leaving it to a lucky axis orientation.
+            const Box3 b_neg{Vec3{-0.8, 0.0, 0.0}, half, none};
+            const auto c_neg = contact(a, b_neg);
+            MALLOY_CHECK_TRUE(overlaps(a, b_neg) == c_neg.has_value());
+            MALLOY_CHECK_TRUE(c_neg.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c_neg->normal, Vec3{-1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c_neg->penetration, 0.2, eps);
+            MALLOY_CHECK_NEAR(c_neg->point.x, -0.4, eps);
+        }
+
+        // Exact face touch: cubes one unit apart share a face. Touching counts,
+        // so a contact exists with zero penetration; nudging b a hair further
+        // apart separates them (the predicate is strict).
+        {
+            const Box3 a{Vec3{0.0, 0.0, 0.0}, half, none};
+            const Box3 touch{Vec3{1.0, 0.0, 0.0}, half, none};
+            const auto c = contact(a, touch);
+            MALLOY_CHECK_TRUE(overlaps(a, touch) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_NEAR(c->penetration, 0.0, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->point.x, 0.5, eps); // the shared face
+            const Box3 apart{Vec3{1.0 + 1e-6, 0.0, 0.0}, half, none};
+            const auto c2 = contact(a, apart);
+            MALLOY_CHECK_TRUE(overlaps(a, apart) == c2.has_value());
+            MALLOY_CHECK_FALSE(c2.has_value());
+        }
+
+        // Face of b (FaceB): b is turned 30 degrees about z and pushed along its
+        // OWN x-axis, so the tightest axis is b's face normal, not a's. This is
+        // the mirror of the FaceA branch and would break if the two were
+        // confused. The normal is b's local x; the penetration follows from the
+        // projected radii along it.
+        {
+            const Real angle = 0.52359877559829887308; // pi / 6
+            const Quat rot = from_axis_angle(Vec3{0.0, 0.0, 1.0}, angle);
+            const Vec3 bx{std::cos(angle), std::sin(angle), 0.0}; // b local x in world
+            const Real d = 1.0;
+            const Box3 a{Vec3{0.0, 0.0, 0.0}, half, none};
+            const Box3 b{bx * d, half, rot};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, bx, 1e-9));
+            const Real expected = 0.5 * (std::cos(angle) + std::sin(angle)) + 0.5 - d;
+            MALLOY_CHECK_NEAR(c->penetration, expected, 1e-9);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+        }
+
+        // Edge against edge, the ninth family of axes: a is an axis-aligned cube,
+        // b is tilted 45 degrees about (1,1,0) and offset along that same
+        // diagonal, so the least axis is cross(a.z, b.z) = normalize(1,1,0). No
+        // face of either box points that way, so a faces-only test could never
+        // find it. Penetration is exactly sqrt(2) - d.
+        {
+            const Real d = 1.2;
+            const Vec3 diag = normalize(Vec3{1.0, 1.0, 0.0});
+            const Quat rot =
+                from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.78539816339744830961); // pi / 4
+            const Box3 a{Vec3{0.0, 0.0, 0.0}, half, none};
+            const Box3 b{diag * d, half, rot};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, diag, 1e-9));
+            MALLOY_CHECK_NEAR(c->penetration, std::sqrt(2.0) - d, 1e-9);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+        }
+
+        // Coincident centres, different sizes: every direction overlaps, so no
+        // axis separates and the least-combined-radius axis wins (here x, the
+        // smallest radius sum). A fixed, repeatable fallback, the box analogue of
+        // the sphere pair's +x, with no divide by zero.
+        {
+            const Vec3 c0{1.0, -1.0, 2.0};
+            const Box3 a{c0, Vec3{0.5, 0.5, 0.5}, none};
+            const Box3 b{c0, Vec3{0.3, 0.4, 0.6}, none};
+            const auto c = contact(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.8, eps);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+        }
+
+        // An invalid box never overlaps or contacts anything.
+        {
+            const Box3 good{Vec3{}, half, none};
+            const Box3 bad{Vec3{}, Vec3{-1.0, 0.5, 0.5}, none};
+            MALLOY_CHECK_FALSE(overlaps(good, bad));
+            MALLOY_CHECK_FALSE(contact(good, bad).has_value());
+            MALLOY_CHECK_FALSE(overlaps(bad, good));
+            MALLOY_CHECK_FALSE(contact(bad, good).has_value());
+        }
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

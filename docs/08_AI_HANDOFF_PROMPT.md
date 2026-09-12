@@ -24,7 +24,7 @@ Before doing anything, read:
 
 Current status:
 
-M1-M32 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
+M1-M33 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
 dimensions (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
@@ -33,7 +33,9 @@ ground plane, rolling with friction, and colliding with another sphere, mass pro
 computed from 3D geometry (for spheres, boxes and arbitrary triangle meshes,
 assembled into compound bodies with combine), a constant applied force to go
 with the torque (the two halves of a wrench), an oriented box that rests and
-tumbles on a ground plane (M30, the first non-sphere 3D collision), spring
+tumbles on a ground plane (M30, the first non-sphere 3D collision), box against
+box (M33, two oriented boxes by the separating-axis test, resolved as one
+contact point), spring
 networks in two and (M31) three dimensions, and charged particles in electric
 and magnetic fields in two and
 (M29) three dimensions, where the field is a vector and a charge spirals along

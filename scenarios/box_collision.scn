@@ -1,0 +1,74 @@
+# MalloySim scenario: two oriented boxes colliding in free space (M33).
+#
+# This is the first 3D body-against-body collision that is not two spheres.
+# Until M33, a box could rest and tumble on a ground plane (M30) but passed
+# straight through another box; the only movable-pair collision in 3D was
+# sphere against sphere (M24). M33 adds the separating-axis test (SAT) for two
+# oriented boxes: of the fifteen candidate axes (three faces per box and the
+# nine edge cross products), the one of least overlap is the contact normal and
+# its overlap is the penetration. The pair is then resolved through the SAME
+# impulse core the spheres and the ground use (ADR 0008).
+#
+# It is one contact point, not a manifold: enough for a correct bounce, not for
+# a resting stack (that needs an iterative solver a later milestone owns). The
+# point sits on a face corner rather than the face centre, a documented
+# approximation, so even this head-on hit imparts a little spin. What stays
+# EXACT is the headline invariant below.
+#
+# Two cubes approach head-on along x in free space (no gravity, no ground). The
+# heavier one (mass 2) starts on the left moving right; the lighter one (mass 1)
+# starts on the right moving left. They meet near the origin, bounce with
+# restitution 0.5, and separate. Because the only force is the equal-and-
+# opposite contact impulse, TOTAL linear momentum never changes: it is
+# 2*(+1) + 1*(-1) = +1 along x at every step, before, during and after the hit.
+# The collision is real, not a fly-through: kinetic energy, exact at the start,
+# drops once they touch because the bounce is inelastic.
+
+type rigid3d
+
+dt 0.002
+steps 2000
+output_every 200
+
+restitution 0.5
+
+# rigid_box3d <mass> <hx hy hz> <px py pz> <axisx axisy axisz angle> <vx vy vz> <wx wy wz>
+#
+# A heavy unit cube on the left, moving right at 1.
+rigid_box3d 2.0  0.5 0.5 0.5   -1.2 0.0 0.0   0.0 0.0 1.0 0.0    1.0 0.0 0.0   0.0 0.0 0.0
+# A light unit cube on the right, moving left at 1.
+rigid_box3d 1.0  0.5 0.5 0.5    1.2 0.0 0.0   0.0 0.0 1.0 0.0   -1.0 0.0 0.0   0.0 0.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   energy 1.50000000e+00   momentum_x 1.00000000e+00
+#   step   2000   energy 3.20386205e-01   momentum_x 1.00000000e+00
+#
+# (`energy` is the rigid3d kinetic energy; with no gravity there is no potential
+# term, so it is the whole energy.)
+#
+# The invariants:
+#
+# 1. Total linear momentum along x is exactly +1 at every step. The contact
+#    impulse is equal and opposite, and nothing else acts, so what one box gains
+#    the other loses. This is the headline: two movable boxes exchange momentum
+#    through one shared impulse core.
+#
+# 2. Kinetic energy starts at 0.5*2*1^2 + 0.5*1*1^2 = 1.5 (both cubes at rest
+#    rotationally, moving at speed 1). After the restitution-0.5 bounce it settles
+#    at about 0.320: the collision removed energy, so this is a real contact and
+#    not a fly-through. (A trace of that energy, |L| ~ 1.4e-5, is the small spin
+#    the single-corner contact point imparts, the documented approximation of the
+#    reduced manifold; it is negligible beside the translational energy.) The
+#    remaining value is pinned below so the scenario test would catch a
+#    regression back to a fly-through.
+#
+# On the ASCII view (an orthographic projection down z): two points on the x
+# axis that approach, meet and separate.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    energy      1.50000000e+00   tol 1e-9
+# check step 0    momentum_x  1.00000000e+00   tol 1e-12
+# check step 2000 momentum_x  1.00000000e+00   tol 1e-10
+# check step 2000 energy      3.20386205e-01   tol 1e-6

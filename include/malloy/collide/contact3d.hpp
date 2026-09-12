@@ -32,6 +32,7 @@ struct Contact3
 bool overlaps(const Sphere& sphere, const Plane3& plane);
 bool overlaps(const Sphere& a, const Sphere& b);
 bool overlaps(const Box3& box, const Plane3& plane);
+bool overlaps(const Box3& a, const Box3& b);
 
 // Sphere against plane. Like circle against halfplane, this has NO fallback:
 // the normal is the plane's own, exactly -plane.normal for every configuration,
@@ -63,4 +64,23 @@ std::optional<Contact3> contact(const Sphere& a, const Sphere& b);
 // axes), so a run repeats (docs/04). Empty when the box is clear of the plane
 // or either shape is invalid; never throws.
 std::vector<Contact3> contacts(const Box3& box, const Plane3& plane);
+
+// Oriented box against oriented box (M33), by the separating-axis theorem.
+// Unlike the box/plane pair this reduces to a SINGLE contact rather than a
+// manifold: the goal here is a correct bounce (an exact normal and penetration
+// depth), not a stable resting stack, which needs the full contact manifold and
+// an iterative solver that rule 12 defers. Fifteen axes are tested (the three
+// face normals of each box and the nine pairwise edge cross products); the one
+// of least overlap is the separating direction, and its overlap is the
+// penetration. `overlaps` shares that same predicate, so the two agree exactly.
+//
+// The normal points from `a` toward `b`, as for every 3D pair. The contact
+// point depends on which axis won: a face axis places it on the deepest vertex
+// of the other box (moved half the penetration back toward the surface), an
+// edge-edge axis at the midpoint of the closest approach of the two edges. Two
+// coincident box centres are the one degenerate case and fall back to the axis
+// of least combined radius with a fixed sign, the analogue of the sphere pair's
+// fixed +x. Returns no value when they do not overlap or either box is invalid;
+// never throws (docs/04).
+std::optional<Contact3> contact(const Box3& a, const Box3& b);
 } // namespace malloy::collide

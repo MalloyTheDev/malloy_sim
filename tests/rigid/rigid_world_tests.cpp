@@ -4884,6 +4884,156 @@ int main()
         }
     }
 
+    // --- M33: box against box, the first 3D body-vs-body collision that is not
+    //     two spheres. It runs through the SAME impulse core (ADR 0008), with
+    //     the separating-axis contact standing in for the sphere one. Reduced to
+    //     a single contact point, so this is a bounce, not a stack (rule 12
+    //     defers the manifold and iterative solver a stack needs). That single
+    //     point sits on a face corner rather than the face centre, a documented
+    //     approximation, so even a head-on hit imparts a little spin. What stays
+    //     EXACT is total linear momentum (the impulse is equal and opposite) and,
+    //     at frictionless restitution 1, total kinetic energy. ---
+    {
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::SolidBox;
+        using malloy::rigid::total_kinetic_energy3d;
+        using malloy::rigid::total_linear_momentum3d;
+
+        const Vec3 half{0.5, 0.5, 0.5};
+        // A unit cube whose inertia comes from geometry (M26), as the loader
+        // builds one, then given the box collider, a pose and a velocity.
+        const auto cube = [&](Real mass, const Vec3& position, const Vec3& velocity,
+                              const Quat& orientation = Quat{}) {
+            const Real density = mass / (8.0 * half.x * half.y * half.z);
+            RigidBody3D body =
+                rigid_body_from(mass_properties_3d(SolidBox{Vec3{}, half, Quat{}, density}));
+            body.half_extents = half;
+            body.position = position;
+            body.velocity = velocity;
+            body.orientation = orientation;
+            return body;
+        };
+
+        // Head-on along x, overlapping 0.1, unequal masses so the conserved
+        // momentum is a nonzero value rather than a trivial zero. Total LINEAR
+        // momentum is conserved exactly at every restitution, because nothing but
+        // the equal-and-opposite contact impulse acts (no gravity, no ground). A
+        // skipped or one-sided resolve would break it, and the "it collided"
+        // check rules out a resolve that quietly did nothing.
+        for (const Real restitution : {0.0, 0.5, 1.0})
+        {
+            Rigid3DSettings st;
+            st.restitution = restitution; // friction defaults to 0
+            const std::vector<RigidBody3D> start{
+                cube(2.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}),
+                cube(1.0, Vec3{0.9, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0})};
+            const Vec3 p0 = total_linear_momentum3d(start); // (1, 0, 0)
+            Rigid3DWorld world{SimulationSettings{0.002}, start, st};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                total_linear_momentum3d(world.bodies()), p0, 1e-10));
+            // The heavier body was slowed by the hit, so a real impulse fired.
+            MALLOY_CHECK_TRUE(world.bodies()[0].velocity.x < 1.0 - 1e-6);
+        }
+
+        // Frictionless restitution 1 conserves TOTAL kinetic energy (translation
+        // plus the spin the corner contact imparts); restitution below 1 strictly
+        // removes some. Kept short so the torque-free integrator's slow energy
+        // drift stays far under the tolerance.
+        {
+            Rigid3DSettings elastic_st;
+            elastic_st.restitution = 1.0;
+            Rigid3DSettings lossy_st;
+            lossy_st.restitution = 0.4;
+            const std::vector<RigidBody3D> start{
+                cube(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.5, 0.0, 0.0}),
+                cube(1.0, Vec3{0.9, 0.0, 0.0}, Vec3{-1.5, 0.0, 0.0})};
+            const Real k0 = total_kinetic_energy3d(start);
+            Rigid3DWorld elastic{SimulationSettings{0.002}, start, elastic_st};
+            Rigid3DWorld lossy{SimulationSettings{0.002}, start, lossy_st};
+            for (int i = 0; i < 30; ++i)
+            {
+                MALLOY_CHECK_TRUE(elastic.step().ok());
+                MALLOY_CHECK_TRUE(lossy.step().ok());
+            }
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(elastic.bodies()), k0, 1e-6);
+            MALLOY_CHECK_TRUE(total_kinetic_energy3d(lossy.bodies()) < k0 - 0.1);
+        }
+
+        // An edge-edge approach also resolves through the same core: a is
+        // axis-aligned, b is tilted 45 degrees about (1,1,0) and driven back down
+        // that diagonal into a. Total momentum is still conserved exactly, and
+        // both bodies are pushed apart, so the edge branch of the contact point
+        // is exercised in the solver and not just in the geometry test.
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5;
+            const Vec3 diag = normalize(Vec3{1.0, 1.0, 0.0});
+            const std::vector<RigidBody3D> start{
+                cube(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{0.0, 0.0, 0.0}),
+                cube(1.0, diag * 1.25, diag * -1.0,
+                     from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.78539816339744830961))};
+            const Vec3 p0 = total_linear_momentum3d(start);
+            Rigid3DWorld world{SimulationSettings{0.002}, start, st};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                total_linear_momentum3d(world.bodies()), p0, 1e-10));
+            // b was moving toward a along -diag; after the bounce it no longer is.
+            MALLOY_CHECK_TRUE(malloy::math::dot(world.bodies()[1].velocity, diag) > -1.0 + 1e-6);
+        }
+
+        // A box against a SPHERE is deferred (rule 12): the mix needs its own
+        // closest-feature test, so an overlapping box and sphere still pass
+        // through each other. This guards that scope boundary and will change
+        // when box/sphere lands.
+        {
+            Rigid3DSettings st;
+            st.restitution = 1.0;
+            RigidBody3D box = cube(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0});
+            RigidBody3D ball;
+            ball.mass = 1.0;
+            ball.inertia = Vec3{0.4, 0.4, 0.4};
+            ball.radius = 0.5;                    // a sphere, not a box
+            ball.position = Vec3{0.6, 0.0, 0.0};  // overlapping the box
+            ball.velocity = Vec3{-1.0, 0.0, 0.0};
+            Rigid3DWorld world{SimulationSettings{0.002}, {box, ball}, st};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            MALLOY_CHECK_NEAR(world.bodies()[0].velocity.x, 1.0, 1e-12);
+            MALLOY_CHECK_NEAR(world.bodies()[1].velocity.x, -1.0, 1e-12);
+        }
+
+        // Two boxes clear of each other never touch: no impulse, no change over a
+        // long run (a guard against a false-positive overlap).
+        {
+            Rigid3DSettings st;
+            st.restitution = 1.0;
+            Rigid3DWorld world{SimulationSettings{0.002},
+                               {cube(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{}),
+                                cube(1.0, Vec3{3.0, 0.0, 0.0}, Vec3{})},
+                               st};
+            for (int i = 0; i < 100; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_NEAR(malloy::math::length(world.bodies()[0].velocity), 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(malloy::math::length(world.bodies()[1].velocity), 0.0, 1e-12);
+        }
+    }
+
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

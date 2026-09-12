@@ -242,15 +242,36 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
     resolve_pair(sphere, ground, hit->normal, hit->penetration, settings);
 }
 
-// A sphere against another sphere (M24): both participants are real. The normal
-// points from a toward b, so each arm is the radius along it toward the
-// contact, a's forward and b's back.
+// Body against body: sphere against sphere (M24) or, since M33, box against box.
+// Either way both participants are real and the normal points from a toward b.
 void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
                        const Rigid3DSettings& settings)
 {
-    // Body against body is spheres only so far. A box collides with ground
-    // planes (above) but not yet with another body, which needs a
-    // separating-axis test and an edge-edge case; a box body is skipped here.
+    // Two boxes resolve through the separating-axis contact (M33), reduced to a
+    // SINGLE contact point rather than a manifold: enough for a correct bounce,
+    // exchanging momentum and spinning about the true lever arm, but not for a
+    // stable stack, which needs the full manifold and an iterative solver a
+    // later milestone owns (the same boundary the ground box drew).
+    if (body_is_box(a) && body_is_box(b))
+    {
+        const collide::Box3 shape_a{a.position, a.half_extents, a.orientation};
+        const collide::Box3 shape_b{b.position, b.half_extents, b.orientation};
+        const std::optional<collide::Contact3> hit =
+            collide::contact(shape_a, shape_b);
+        if (!hit)
+        {
+            return;
+        }
+        // The arm is the contact point relative to each centre of mass, so an
+        // off-centre hit generates torque exactly as the ground box does.
+        const Participant pa{&a, hit->point - a.position};
+        const Participant pb{&b, hit->point - b.position};
+        resolve_pair(pa, pb, hit->normal, hit->penetration, settings);
+        return;
+    }
+    // A box against a sphere is still deferred: it needs its own closest-feature
+    // test rather than the two SAT and sphere paths, so a box/sphere mix is
+    // skipped here just as box/box was before M33.
     if (body_is_box(a) || body_is_box(b))
     {
         return;
@@ -265,6 +286,8 @@ void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
     {
         return;
     }
+    // The normal points from a toward b, so each arm is the radius along it
+    // toward the contact, a's forward and b's back.
     const Participant pa{&a, hit->normal * a.radius};
     const Participant pb{&b, hit->normal * -b.radius};
     resolve_pair(pa, pb, hit->normal, hit->penetration, settings);

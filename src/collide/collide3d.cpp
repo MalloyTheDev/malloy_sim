@@ -1,6 +1,9 @@
 #include <malloy/collide/contact3d.hpp>
-#include <malloy/collide/shapes3d.hpp>
 
+#include <algorithm>
+#include <cmath>
+
+#include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/math.hpp>
 
 namespace malloy::collide
@@ -201,6 +204,259 @@ std::vector<Contact3> contacts(const Box3& box, const Plane3& plane)
         // same convention the sphere pairs use.
         hit.point = corner + plane.normal * (depth / math::Real{2});
         result.push_back(hit);
+    }
+    return result;
+}
+
+namespace
+{
+// An oriented box reduced to the working form the SAT wants: three orthonormal
+// world-frame axes `u`, the matching half-extents `e`, and the centre `c`. A
+// Box3's orientation columns ARE its world axes (`to_mat3` is built so its
+// columns are the rotated basis vectors), so this is just a repackaging.
+struct Obb
+{
+    math::Vec3 u[3];
+    math::Real e[3];
+    math::Vec3 c;
+};
+
+Obb make_obb(const Box3& box)
+{
+    const math::Mat3 r = math::to_mat3(box.orientation);
+    return Obb{{r.col0, r.col1, r.col2},
+               {box.half_extents.x, box.half_extents.y, box.half_extents.z},
+               box.center};
+}
+
+// Half-width of a box's shadow cast onto direction `axis`: each half-extent
+// times how much its own axis leans along `axis`. `axis` is unit for every axis
+// tested (the face normals are orthonormal and the edge axes are normalised
+// before use), so this radius and the centre gap are both true distances and
+// directly comparable.
+math::Real projected_radius(const Obb& o, const math::Vec3& axis)
+{
+    return o.e[0] * std::abs(math::dot(o.u[0], axis)) +
+           o.e[1] * std::abs(math::dot(o.u[1], axis)) +
+           o.e[2] * std::abs(math::dot(o.u[2], axis));
+}
+
+// The corner of the box farthest along direction `d`: step from the centre by
+// each half-extent, toward `d` on every axis. Used to place a face contact on
+// the deepest vertex of the opposing box.
+math::Vec3 support(const Obb& o, const math::Vec3& d)
+{
+    math::Vec3 p = o.c;
+    for (int k = 0; k < 3; ++k)
+    {
+        const math::Real s =
+            math::dot(o.u[k], d) >= math::Real{0} ? math::Real{1} : math::Real{-1};
+        p = p + o.u[k] * (s * o.e[k]);
+    }
+    return p;
+}
+
+// Centre of the box edge that runs along local axis `along` and sits farthest
+// in direction `dir`: pushed to the extreme corner on the OTHER two axes but
+// left centred along the edge itself. One of these per box gives the two line
+// segments whose closest approach is the edge-edge contact point.
+math::Vec3 edge_center(const Obb& o, int along, const math::Vec3& dir)
+{
+    math::Vec3 p = o.c;
+    for (int k = 0; k < 3; ++k)
+    {
+        if (k == along)
+        {
+            continue;
+        }
+        const math::Real s =
+            math::dot(o.u[k], dir) >= math::Real{0} ? math::Real{1} : math::Real{-1};
+        p = p + o.u[k] * (s * o.e[k]);
+    }
+    return p;
+}
+
+// Midpoint of the shortest segment between two finite line segments, each given
+// as a centre, a unit direction and a half-length (Ericson, Real-Time Collision
+// Detection section 5.1.9, in centre+half-length form). Callers reach this only
+// for edge axes that passed the near-parallel guard below, so the denominator
+// 1 - cos^2 is safely positive and there is no divide by zero. The clamp is
+// applied once rather than iterated: away from the edge ends the unconstrained
+// solution is already interior and this is exact, and a contact that lands near
+// an end only shifts the torque lever arm slightly, which a single bounce
+// tolerates (the normal and penetration, which set the impulse, stay exact).
+math::Vec3 closest_segment_midpoint(const math::Vec3& p1, const math::Vec3& d1,
+                                    math::Real h1, const math::Vec3& p2,
+                                    const math::Vec3& d2, math::Real h2)
+{
+    const math::Vec3 r = p1 - p2;
+    const math::Real b = math::dot(d1, d2);
+    const math::Real c = math::dot(d1, r);
+    const math::Real f = math::dot(d2, r);
+    const math::Real denom = math::Real{1} - b * b;
+    math::Real s = (b * f - c) / denom;
+    math::Real u = (f - b * c) / denom;
+    s = std::clamp(s, -h1, h1);
+    u = std::clamp(u, -h2, h2);
+    const math::Vec3 c1 = p1 + d1 * s;
+    const math::Vec3 c2 = p2 + d2 * u;
+    return (c1 + c2) * math::Real{0.5};
+}
+
+// Edge cross products shorter than this (squared) come from near-parallel edges:
+// the axis is numerically meaningless and whatever it would report is already
+// covered by the six face axes, so it is skipped. Deliberately looser than the
+// other squared tolerances here, because it guards the squared sine between two
+// unit edge directions, not a distance.
+constexpr math::Real kParallelEpsSq = 1e-8;
+
+enum AxisKind
+{
+    FaceA,
+    FaceB,
+    Edge
+};
+
+// The separating axis of least overlap: the direction, how much the boxes
+// overlap along it (the penetration once they are known to touch), which family
+// it came from, and for an edge axis which local edge of each box produced it.
+struct MinAxis
+{
+    math::Vec3 axis;
+    math::Real overlap;
+    AxisKind kind;
+    int i;
+    int j;
+};
+
+// The one SAT core behind BOTH `overlaps` and `contact`, so the two can never
+// disagree. Tests all fifteen candidate axes (three face normals per box and
+// the nine pairwise edge cross products); returns false the instant one
+// separates the boxes (an overlap below zero), otherwise fills `out` with the
+// axis of least overlap. Two coincident centres are not special-cased: every
+// gap is zero, no axis separates, and the least-overlap axis is simply the one
+// of least combined projected radius, a fixed and repeatable choice.
+bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out)
+{
+    const Obb box_a = make_obb(a);
+    const Obb box_b = make_obb(b);
+    const math::Vec3 t = b.center - a.center;
+
+    bool have = false;
+    auto test = [&](const math::Vec3& axis, AxisKind kind, int i, int j) -> bool
+    {
+        const math::Real gap = std::abs(math::dot(t, axis));
+        const math::Real overlap =
+            projected_radius(box_a, axis) + projected_radius(box_b, axis) - gap;
+        if (overlap < math::Real{0})
+        {
+            return false; // a separating axis exists: the boxes are apart
+        }
+        if (!have || overlap < out.overlap)
+        {
+            out = MinAxis{axis, overlap, kind, i, j};
+            have = true;
+        }
+        return true;
+    };
+
+    for (int k = 0; k < 3; ++k)
+    {
+        if (!test(box_a.u[k], FaceA, k, -1))
+        {
+            return false;
+        }
+    }
+    for (int k = 0; k < 3; ++k)
+    {
+        if (!test(box_b.u[k], FaceB, -1, k))
+        {
+            return false;
+        }
+    }
+    for (int i = 0; i < 3; ++i)
+    {
+        for (int j = 0; j < 3; ++j)
+        {
+            const math::Vec3 raw = math::cross(box_a.u[i], box_b.u[j]);
+            const math::Real len_sq = math::length_squared(raw);
+            if (len_sq <= kParallelEpsSq)
+            {
+                continue; // near-parallel edges: the axis is degenerate, skip it
+            }
+            if (!test(raw / std::sqrt(len_sq), Edge, i, j))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+} // namespace
+
+bool overlaps(const Box3& a, const Box3& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return false;
+    }
+    MinAxis axis;
+    return box_box_min_axis(a, b, axis);
+}
+
+std::optional<Contact3> contact(const Box3& a, const Box3& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return std::nullopt;
+    }
+    MinAxis m;
+    if (!box_box_min_axis(a, b, m))
+    {
+        return std::nullopt;
+    }
+
+    const Obb box_a = make_obb(a);
+    const Obb box_b = make_obb(b);
+    const math::Vec3 t = b.center - a.center;
+
+    // The axis is only a line; orient it from `a` toward `b`, like every 3D pair.
+    // When the centres coincide the gap is zero, `dot(n, t)` is zero, and the
+    // sign is left as computed: a fixed, repeatable choice, the box analogue of
+    // the sphere pair's +x fallback.
+    math::Vec3 n = m.axis;
+    if (math::dot(n, t) < math::Real{0})
+    {
+        n = -n;
+    }
+    // A bare touch can round to a hair-negative overlap; never report a negative
+    // penetration (docs/04), matching the sphere and box/plane pairs.
+    const math::Real depth = std::max(math::Real{0}, m.overlap);
+
+    Contact3 result;
+    result.normal = n;
+    result.penetration = depth;
+    if (m.kind == Edge)
+    {
+        // The contact rides where the two edges cross: `a`'s edge pushed toward
+        // `b` (along +n), `b`'s edge pushed toward `a` (along -n).
+        const math::Vec3 p1 = edge_center(box_a, m.i, n);
+        const math::Vec3 p2 = edge_center(box_b, m.j, -n);
+        result.point = closest_segment_midpoint(p1, box_a.u[m.i], box_a.e[m.i], p2,
+                                                 box_b.u[m.j], box_b.e[m.j]);
+    }
+    else if (m.kind == FaceA)
+    {
+        // A face of `a` separates: the contact is `b`'s deepest vertex into `a`
+        // (its support along -n), nudged half the penetration back to the midway
+        // point the other pairs report.
+        result.point = support(box_b, -n) + n * (depth / math::Real{2});
+    }
+    else
+    {
+        // A face of `b` separates: `a`'s deepest vertex into `b` (support along
+        // +n), nudged half the penetration back.
+        result.point = support(box_a, n) - n * (depth / math::Real{2});
     }
     return result;
 }

@@ -827,6 +827,73 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M33] - 2026-09-12  (box against box)
+
+### Added
+
+- `collide::overlaps(Box3, Box3)` and `collide::contact(Box3, Box3)`: the
+  separating-axis test (SAT) for two oriented boxes. Fifteen candidate axes are
+  tested (the three face normals of each box and the nine pairwise edge cross
+  products); the axis of least overlap is the contact normal and its overlap is
+  the penetration. One shared predicate, `box_box_min_axis`, drives both the
+  bool query and the contact, so they cannot disagree.
+- Box-against-box contact response in `rigid::Rigid3DWorld`: two box bodies
+  resolve through the SAME impulse core the spheres and the ground use
+  (ADR 0008), with the SAT contact standing in for the sphere one.
+- The `box_collision` template: two oriented boxes colliding head-on in free
+  space and conserving total momentum through the bounce. Twenty-two templates
+  now, across ten domains.
+
+### The first box-against-box collision
+
+Until now a box could rest and tumble on a ground plane (M30) but passed
+straight through another box; the only movable-pair collision in 3D was sphere
+against sphere (M24). A plane needs no axis search, because it supplies its own
+normal; two oriented boxes do not, which is what the SAT provides. The contact
+point is chosen from the winning axis: a face axis places it on the deepest
+vertex of the opposing box, an edge-edge axis at the midpoint of the closest
+approach of the two edges (Ericson, Real-Time Collision Detection, sections
+4.4.1 and 5.1.9).
+
+It is bounded on purpose. The pair reduces to a SINGLE contact point, not the
+full manifold, so it is enough for a correct bounce but not for a resting stack:
+that needs an iterative or manifold solver, which rule 12 keeps deferred (the
+same boundary M30 drew for the box on the ground, and M17 for the 2D stack).
+The single point sits on a face corner rather than the face centre, a documented
+approximation, so even a head-on hit imparts a little spin; what stays exact is
+total linear momentum (the impulse is equal and opposite) and, at frictionless
+restitution 1, total kinetic energy. A box against a sphere is still deferred:
+that mix needs its own closest-feature test and is skipped, as box against box
+was before this milestone.
+
+### Invariants
+
+The geometry tests pin the normal and penetration on all three families of
+winning axis (a face of each box and an edge-edge cross), against ground truth
+computed independently over all fifteen axes; the edge case uses a normal that
+is not a face normal of either box, so a faces-only test could not produce it.
+`overlaps` and `contact` are asserted to agree on every case. The dynamics tests
+hold total linear momentum exactly across a head-on collision at three
+restitutions, conserve total kinetic energy at frictionless restitution 1 and
+strictly lose it below 1, exercise the edge-edge contact through the solver, and
+confirm the deferred box/sphere mix and a non-touching pair both leave the
+bodies untouched.
+
+### Mutation testing
+
+Seven mutations, all caught: dropping a term from the projected radius,
+inverting the separating-axis guard, selecting the axis of greatest overlap
+instead of least, disabling the a-to-b normal sign flip, taking the face contact
+on the wrong side, adding the centre gap instead of subtracting it, and making
+the box-box branch never find a contact (a regression to the pre-M33 fly-through,
+caught by both the dynamics tests and the `box_collision` template's pinned
+post-collision energy). One mutant is documented rather than caught: removing the
+near-parallel edge guard (`kParallelEpsSq`) survives, because an exactly-parallel
+edge cross is the zero vector and normalising it yields NaN, which every `<`
+comparison in the axis search rejects, so the degenerate axis is filtered out on
+its own. The guard is a defensive measure for adversarial near-parallel inputs
+the suite does not construct, not a correctness fork on well-conditioned ones.
+
 ## [M32] - 2026-09-12  (colliding particles in three dimensions)
 
 ### Added

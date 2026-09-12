@@ -26,9 +26,10 @@ becomes a vector and a charge spirals along it; and M30 gives a rigid body a box
 collider, so an oriented box rests and tumbles on the ground, the first
 non-sphere 3D collision; M31 takes spring networks into three dimensions, so a
 structure can deform in space; and M32 takes colliding particles into three
-dimensions, the last of the five domains to gain a 3D form. All five domains now
-run in space as well as the plane; what is left of the 3D arc is box-against-box
-contact geometry, and then rendering. 3D is the destination rather than a
+dimensions, the last of the five domains to gain a 3D form; and M33 collides two
+oriented boxes by the separating-axis test, the first non-sphere 3D body-vs-body
+contact. All five domains now run in space as well as the plane, and boxes
+collide with boxes; what is left of the 3D arc is rendering. 3D is the destination rather than a
 possibility left open, and each remaining piece is its own milestone: see
 `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
@@ -43,8 +44,8 @@ properties computed from 3D geometry, box mass properties with compound
 assembly, mass properties of an arbitrary triangle mesh, a constant applied
 force on a 3D body, charged particles in three dimensions with helical
 motion, an oriented box resting and tumbling on a ground plane, spring
-networks in three dimensions, and colliding particles in three dimensions
-(milestones M1-M32).
+networks in three dimensions, colliding particles in three dimensions, and
+box-against-box collision (milestones M1-M33).
 
 ## Locked baseline
 
@@ -110,7 +111,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 21 templates ship across 10 domains, and
+and runnable with the shipped binary. 22 templates ship across 10 domains, and
 every one is parsed, validated and stepped by the test suite. Both numbers are
 checked against the directory by the scenario tests, so neither can go stale.
 
@@ -304,18 +305,19 @@ Intended, not yet built, and never added speculatively
   force (the translational half of a wrench), M29 charged particles in three
   dimensions (the vector Lorentz force, helical motion), M30 an oriented box
   resting and tumbling on a ground plane, M31 spring networks in three
-  dimensions, and M32 colliding particles in three dimensions (all five domains
-  now have a 3D form); box-against-box contact geometry is the remaining piece
-  of the 3D arc, its own milestone
+  dimensions, M32 colliding particles in three dimensions (all five domains
+  now have a 3D form), and M33 box against box by the separating-axis test;
+  rendering is the remaining piece of the 3D arc, its own milestone
   (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is
   ASCII text only, and terminal-first holds until then)
 - friction for PARTICLE contacts. M17 added it to `malloy_rigid`; particle
   contacts are still normal-only, so particles slide forever
-- box-against-box contacts and SAT (M30 added an oriented box against a PLANE,
-  by testing its corners; box against another box needs a separating-axis test
-  and an edge-edge case, and body against body is otherwise disc or sphere only)
+- the full box-box contact MANIFOLD and an iterative stacking solver (M33 added
+  box-against-box by the separating-axis test, edge-edge case included, but
+  reduced it to a single contact point: a bounce, not a stack); a box against a
+  SPHERE, and box-against-box in 2D, are also not built yet
 - persistent forces and force/torque accumulators (gravity is a setting applied
   as an acceleration, not a registered force producer)
 - vehicles, fluids, thermodynamics, electromagnetism
