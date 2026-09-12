@@ -24,7 +24,7 @@ Before doing anything, read:
 
 Current status:
 
-M1-M30 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
+M1-M31 are complete. Gravity in two and three dimensions, colliding particles (with ballistics as uniform
 gravity in that domain), 2D rigid bodies with contact response and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
 both torque-free and under a constant applied torque, a sphere bouncing on a 3D
@@ -33,10 +33,11 @@ computed from 3D geometry (for spheres, boxes and arbitrary triangle meshes,
 assembled into compound bodies with combine), a constant applied force to go
 with the torque (the two halves of a wrench), an oriented box that rests and
 tumbles on a ground plane (M30, the first non-sphere 3D collision), spring
-networks, and charged particles in electric and magnetic fields in two and
+networks in two and (M31) three dimensions, and charged particles in electric
+and magnetic fields in two and
 (M29) three dimensions, where the field is a vector and a charge spirals along
 it, are the five finished domains, and the scenario format dispatches
-between them with a type key across eight scenario types. The classical mechanics track is complete
+between them with a type key across nine scenario types. The classical mechanics track is complete
 (docs/07_POST_M5_ROADMAP.md).
 
 Do not start any further milestone unless I explicitly ask, and then work only

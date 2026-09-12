@@ -827,6 +827,48 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M31] - 2026-09-11  (spring networks in three dimensions)
+
+### Added
+
+- `springs::SpringBody3D` and `springs::SpringWorld3D`, the 3D siblings of the
+  M13 spring domain, with a Vec3 overload of `accumulate_spring_forces` and the
+  diagnostics `total_momentum3d`, `total_kinetic_energy3d` and
+  `total_elastic_energy3d`.
+- A `springs3d` scenario type (`spring_body3` for a body; the existing `spring`
+  key is reused) and the `spring_tetrahedron` template. Twenty templates now,
+  across nine domains.
+
+### The dimension is not a domain
+
+`Spring` and `SpringNetwork` carry only body ids and the scalar rest length,
+stiffness and damping, none of which has a dimension, so they are shared with
+the 2D world UNCHANGED: M31 duplicates only the body and the force. Hooke's law
+and the damper are the same in space as in the plane (the force acts along the
+spring's axis, a Vec3 now), so the kernel, the symplectic integrator and the
+per-spring stability bound are a direct Vec2-to-Vec3 lift. What it buys is
+structures that deform in three dimensions: a chain, a cloth, a lattice.
+
+### Invariants
+
+Total momentum is conserved exactly, at any stiffness and any initial motion,
+because every spring's endpoint forces are equal and opposite. Undamped, kinetic
+plus elastic energy is conserved up to the symplectic drift; damping removes it
+on purpose, which is testable. And a network confined to the z = 0 plane matches
+the 2D `SpringWorld` step for step (including the damping term and the
+divide-by-mass), which ties the new integrator to the proven one. The shipped
+`spring_tetrahedron` template releases four masses on six stretched springs from
+rest: it breathes in and out, its momentum stays exactly zero, and its energy
+holds near the value the initial stretch stores.
+
+### Mutation testing
+
+Twelve mutations, all caught: the force's equal-and-opposite split, its
+stiffness, extension, axis and damping terms, the divide-by-mass in the
+integrator, the body validation (mass and squarable state), the momentum,
+kinetic and elastic diagnostics, and the scenario loader routing a spring to the
+wrong network.
+
 ## [M30] - 2026-09-11  (an oriented box on a ground plane)
 
 ### Added

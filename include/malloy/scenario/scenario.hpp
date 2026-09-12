@@ -39,6 +39,7 @@ enum class ScenarioType
     NBody3D,
     Rigid3D,
     Charges3D,
+    Springs3D,
 };
 
 // A complete, runnable scenario for one domain.
@@ -85,6 +86,10 @@ struct Scenario
     // type == Springs
     std::vector<springs::SpringBody2D> spring_bodies;
     springs::SpringNetwork spring_network;
+
+    // type == Springs3D
+    std::vector<springs::SpringBody3D> spring_bodies3d;
+    springs::SpringNetwork spring_network3d;
 };
 
 // The outcome of parsing. On failure `error` holds a human-readable message
@@ -107,8 +112,8 @@ struct ScenarioParseResult
 //
 // Common to every domain:
 //
-//   type <nbody|particles|rigid|springs|charges|nbody3d|rigid3d|charges3d>
-//                           which domain           (default nbody)
+//   type <nbody|particles|rigid|springs|charges|nbody3d|rigid3d|charges3d|
+//         springs3d>        which domain           (default nbody)
 //   dt <value>              fixed timestep          (default 0.001)
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
@@ -285,6 +290,16 @@ struct ScenarioParseResult
 //     a and b are indices into the spring_body list, in the order they appear.
 //     Springs are evaluated in the order they are declared, which is part of
 //     the observable behaviour (ADR 0008).
+//
+// type springs3d:
+//
+//   Spring networks in three dimensions. The `spring` key is dimension-agnostic
+//   and is reused unchanged (a, b, rest_length, stiffness, damping); only the
+//   body line gains a third component, so 3D structures (a chain, a cloth, a
+//   lattice) are built the same way as 2D ones.
+//
+//   spring_body3 <mass> <px> <py> <pz> <vx> <vy> <vz>
+//   spring <a> <b> <rest_length> <stiffness> <damping>
 //
 // A key belonging to another domain is a parse error, so a typo in `type`
 // surfaces immediately rather than silently running the wrong simulation.

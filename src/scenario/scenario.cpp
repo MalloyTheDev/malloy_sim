@@ -69,7 +69,8 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number,
                                   "type requires nbody, particles, rigid, springs, "
-                                  "charges, nbody3d, rigid3d or charges3d");
+                                  "charges, nbody3d, rigid3d, charges3d or "
+                                  "springs3d");
             }
             if (value == "nbody")
             {
@@ -102,6 +103,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             else if (value == "charges3d")
             {
                 scenario.type = ScenarioType::Charges3D;
+            }
+            else if (value == "springs3d")
+            {
+                scenario.type = ScenarioType::Springs3D;
             }
             else
             {
@@ -729,11 +734,36 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.velocity = math::Vec2{vx, vy};
             scenario.spring_bodies.push_back(body);
         }
+        else if (key == "spring_body3")
+        {
+            if (scenario.type != ScenarioType::Springs3D)
+            {
+                return make_error(line_number, "spring_body3 belongs to type springs3d");
+            }
+            saw_domain_key = true;
+            springs::SpringBody3D body;
+            math::Real px{};
+            math::Real py{};
+            math::Real pz{};
+            math::Real vx{};
+            math::Real vy{};
+            math::Real vz{};
+            if (!(tokens >> body.mass >> px >> py >> pz >> vx >> vy >> vz))
+            {
+                return make_error(line_number,
+                                  "spring_body3 requires: mass px py pz vx vy vz");
+            }
+            body.position = math::Vec3{px, py, pz};
+            body.velocity = math::Vec3{vx, vy, vz};
+            scenario.spring_bodies3d.push_back(body);
+        }
         else if (key == "spring")
         {
-            if (scenario.type != ScenarioType::Springs)
+            if (scenario.type != ScenarioType::Springs &&
+                scenario.type != ScenarioType::Springs3D)
             {
-                return make_error(line_number, "spring belongs to type springs");
+                return make_error(line_number,
+                                  "spring belongs to type springs or springs3d");
             }
             saw_domain_key = true;
             springs::Spring spring;
@@ -743,7 +773,16 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 return make_error(
                     line_number, "spring requires: a b rest_length stiffness damping");
             }
-            scenario.spring_network.add(spring);
+            // The Spring type is dimension-agnostic, so it goes to whichever
+            // network the scenario's dimension selected.
+            if (scenario.type == ScenarioType::Springs3D)
+            {
+                scenario.spring_network3d.add(spring);
+            }
+            else
+            {
+                scenario.spring_network.add(spring);
+            }
         }
         else
         {

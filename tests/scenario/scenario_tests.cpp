@@ -761,6 +761,32 @@ int main()
                     return 1;
                 }
             }
+            else if (r.scenario.type == malloy::scenario::ScenarioType::Springs3D)
+            {
+                MALLOY_CHECK_TRUE(r.scenario.spring_bodies3d.size() >= 2);
+                MALLOY_CHECK_TRUE(r.scenario.spring_network3d.size() >= 1);
+                malloy::springs::SpringWorld3D world{r.scenario.simulation,
+                                                     r.scenario.spring_network3d,
+                                                     r.scenario.spring_bodies3d};
+                MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
+                const auto value_of = [&](const std::string& q) -> std::optional<Real> {
+                    const auto& b = world.bodies();
+                    const Real kinetic = malloy::springs::total_kinetic_energy3d(b);
+                    const Real elastic =
+                        malloy::springs::total_elastic_energy3d(world.network(), b);
+                    if (q == "energy") return kinetic + elastic;
+                    if (q == "kinetic") return kinetic;
+                    if (q == "elastic") return elastic;
+                    if (q == "momentum_x") return malloy::springs::total_momentum3d(b).x;
+                    if (q == "momentum_y") return malloy::springs::total_momentum3d(b).y;
+                    if (q == "momentum_z") return malloy::springs::total_momentum3d(b).z;
+                    return std::nullopt;
+                };
+                if (!run_checked(world, name, r.scenario.steps, checks, value_of))
+                {
+                    return 1;
+                }
+            }
             else if (r.scenario.type == malloy::scenario::ScenarioType::Charges3D)
             {
                 MALLOY_CHECK_TRUE(r.scenario.charge_list3d.size() >= 1);

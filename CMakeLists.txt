@@ -173,9 +173,11 @@ target_link_libraries(malloy_rigid
         malloy::project_warnings
 )
 
-# malloy_springs (M13): spring networks and deterministic force accumulation.
+# malloy_springs (M13): spring networks and deterministic force accumulation,
+# in two dimensions and (M31) three.
 add_library(malloy_springs STATIC
     src/springs/springs.cpp
+    src/springs/springs3d.cpp
 )
 add_library(malloy::springs ALIAS malloy_springs)
 target_include_directories(malloy_springs PUBLIC include)

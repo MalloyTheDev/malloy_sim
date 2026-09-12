@@ -15,14 +15,20 @@ using malloy::math::Real;
 using malloy::math::Vec2;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
+using malloy::math::Vec3;
 using malloy::springs::accumulate_spring_forces;
 using malloy::springs::Spring;
 using malloy::springs::SpringBody2D;
+using malloy::springs::SpringBody3D;
 using malloy::springs::SpringNetwork;
 using malloy::springs::SpringWorld;
+using malloy::springs::SpringWorld3D;
 using malloy::springs::total_elastic_energy;
+using malloy::springs::total_elastic_energy3d;
 using malloy::springs::total_kinetic_energy;
+using malloy::springs::total_kinetic_energy3d;
 using malloy::springs::total_momentum;
+using malloy::springs::total_momentum3d;
 
 namespace
 {
@@ -624,6 +630,144 @@ int main()
         MALLOY_CHECK_TRUE(body_at(Vec2{1.0, 2.0}, Vec2{}, 1.0).is_valid());
         MALLOY_CHECK_FALSE(body_at(Vec2{too_big, 0.0}, Vec2{}, 1.0).is_valid());
         MALLOY_CHECK_FALSE(body_at(Vec2{}, Vec2{0.0, too_big}, 1.0).is_valid());
+    }
+
+    // --- M31: spring networks in three dimensions. Spring and SpringNetwork
+    //     are reused unchanged (they carry only scalars); only the body and the
+    //     force gain a third component. The domain conserves momentum exactly
+    //     and, undamped, energy up to the symplectic drift, the same as in 2D.
+    //     A z = 0 run must match the 2D world step for step. ---
+    {
+        using malloy::math::approx_equal;
+        const auto body3_at = [](Vec3 position, Vec3 velocity, Real mass) {
+            SpringBody3D b;
+            b.position = position;
+            b.velocity = velocity;
+            b.mass = mass;
+            return b;
+        };
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Real too_big3 = 1.4e154;
+
+        // --- Validation. ---
+        {
+            MALLOY_CHECK_TRUE(body3_at(Vec3{1.0, 2.0, 3.0}, Vec3{}, 1.0).is_valid());
+            MALLOY_CHECK_FALSE(body3_at(Vec3{}, Vec3{}, 0.0).is_valid());   // mass 0
+            MALLOY_CHECK_FALSE(body3_at(Vec3{}, Vec3{}, nan3).is_valid());
+            MALLOY_CHECK_FALSE(body3_at(Vec3{0.0, 0.0, too_big3}, Vec3{}, 1.0).is_valid());
+            MALLOY_CHECK_FALSE(body3_at(Vec3{}, Vec3{inf3, 0.0, 0.0}, 1.0).is_valid());
+        }
+
+        // --- The force kernel in 3D: a spring along z, stretched, pulls its
+        //     endpoints together, equal and opposite. The third component is
+        //     what 2D could not carry. ---
+        {
+            const std::vector<SpringBody3D> bodies = {
+                body3_at(Vec3{0.0, 0.0, 0.0}, Vec3{}, 1.0),
+                body3_at(Vec3{0.0, 0.0, 3.0}, Vec3{}, 1.0)};
+            SpringNetwork network;
+            network.add(make_spring(0, 1, 1.0, 2.0, 0.0)); // rest 1, k 2, length 3
+            std::vector<Vec3> forces(2);
+            accumulate_spring_forces(network, bodies, forces);
+            // extension 2, force magnitude k*ext = 4 along the axis (+z on 0).
+            MALLOY_CHECK_TRUE(approx_equal(forces[0], Vec3{0.0, 0.0, 4.0}, 1e-12));
+            MALLOY_CHECK_TRUE(approx_equal(forces[1], Vec3{0.0, 0.0, -4.0}, 1e-12));
+        }
+
+        // --- Total momentum is conserved exactly, whatever the initial motion:
+        //     every spring's endpoint forces are equal and opposite. Three
+        //     unequal masses, arbitrary velocities, two springs. ---
+        {
+            std::vector<SpringBody3D> bodies = {
+                body3_at(Vec3{0.0, 0.0, 0.0}, Vec3{0.5, 0.0, 0.0}, 1.0),
+                body3_at(Vec3{1.5, 0.0, 0.0}, Vec3{0.0, 0.5, 0.0}, 2.0),
+                body3_at(Vec3{1.5, 1.5, 0.5}, Vec3{0.0, 0.0, 0.5}, 3.0)};
+            SpringNetwork network;
+            network.add(make_spring(0, 1, 1.0, 1.0, 0.0));
+            network.add(make_spring(1, 2, 1.0, 1.0, 0.1));
+            const Vec3 p0 = total_momentum3d(bodies);
+            // KE pins the 0.5 and the mass factor: 0.5 (1+2+3) * 0.25 = 0.75.
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(bodies), 0.75, 1e-12);
+            SpringWorld3D world{SimulationSettings{0.01}, network, bodies};
+            for (int i = 0; i < 1000; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(approx_equal(total_momentum3d(world.bodies()), p0, 1e-12));
+        }
+
+        // --- It reduces to the 2D domain: the same network in the z = 0 plane
+        //     traces the same xy motion as SpringWorld and never leaves the
+        //     plane. Includes damping, so that term is checked too. ---
+        {
+            const Real dt = 0.01;
+            SpringNetwork net2;
+            net2.add(make_spring(0, 1, 1.0, 3.0, 0.1));
+            net2.add(make_spring(1, 2, 1.0, 3.0, 0.1));
+            net2.add(make_spring(0, 2, 1.0, 3.0, 0.1));
+            SpringNetwork net3 = net2; // Spring is dimension-agnostic
+            // A non-unit mass on the middle body, so the divide-by-mass in the
+            // integrator is exercised (a match with 2D would hide it otherwise).
+            SpringWorld w2{SimulationSettings{dt}, net2,
+                           {body_at(Vec2{0.0, 0.0}, Vec2{0.0, 0.2}, 1.0),
+                            body_at(Vec2{1.5, 0.0}, Vec2{-0.1, 0.0}, 2.0),
+                            body_at(Vec2{0.75, 1.0}, Vec2{0.0, 0.0}, 1.0)}};
+            SpringWorld3D w3{SimulationSettings{dt}, net3,
+                             {body3_at(Vec3{0.0, 0.0, 0.0}, Vec3{0.0, 0.2, 0.0}, 1.0),
+                              body3_at(Vec3{1.5, 0.0, 0.0}, Vec3{-0.1, 0.0, 0.0}, 2.0),
+                              body3_at(Vec3{0.75, 1.0, 0.0}, Vec3{0.0, 0.0, 0.0}, 1.0)}};
+            for (int i = 0; i < 500; ++i)
+            {
+                MALLOY_CHECK_TRUE(w2.step().ok());
+                MALLOY_CHECK_TRUE(w3.step().ok());
+                for (std::size_t k = 0; k < 3; ++k)
+                {
+                    const auto& a = w2.bodies()[k];
+                    const auto& c = w3.bodies()[k];
+                    MALLOY_CHECK_TRUE(approx_equal(c.position, Vec3{a.position.x, a.position.y, 0.0}, 1e-10));
+                    MALLOY_CHECK_TRUE(approx_equal(c.velocity, Vec3{a.velocity.x, a.velocity.y, 0.0}, 1e-10));
+                }
+            }
+        }
+
+        // --- Undamped, energy (kinetic plus elastic) is conserved up to the
+        //     symplectic drift; with damping it strictly falls. Two masses on a
+        //     spring along a 3D diagonal, stretched and released. ---
+        {
+            SpringNetwork network;
+            network.add(make_spring(0, 1, 1.0, 4.0, 0.0)); // undamped
+            const std::vector<SpringBody3D> start = {
+                body3_at(Vec3{0.0, 0.0, 0.0}, Vec3{}, 1.0),
+                body3_at(Vec3{1.0, 1.0, 1.0}, Vec3{}, 1.0)}; // length sqrt(3) > rest 1
+            SpringWorld3D undamped{SimulationSettings{0.005}, network, start};
+            const Real e0 = total_kinetic_energy3d(undamped.bodies()) +
+                            total_elastic_energy3d(undamped.network(), undamped.bodies());
+            // Released from rest, so all elastic: 0.5 k (sqrt(3) - 1)^2 with
+            // k = 4, pinning the 0.5, the stiffness and the extension.
+            const Real root3 = std::sqrt(3.0);
+            MALLOY_CHECK_NEAR(e0, 2.0 * (root3 - 1.0) * (root3 - 1.0), 1e-12);
+            Real worst = 0.0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(undamped.step().ok());
+                const Real e = total_kinetic_energy3d(undamped.bodies()) +
+                               total_elastic_energy3d(undamped.network(), undamped.bodies());
+                worst = std::fmax(worst, std::abs(e - e0));
+            }
+            MALLOY_CHECK_TRUE(worst < 1e-2); // bounded symplectic drift
+
+            SpringNetwork damped_network;
+            damped_network.add(make_spring(0, 1, 1.0, 4.0, 0.5)); // damping > 0
+            SpringWorld3D damped{SimulationSettings{0.005}, damped_network, start};
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(damped.step().ok());
+            }
+            const Real e_end = total_kinetic_energy3d(damped.bodies()) +
+                               total_elastic_energy3d(damped.network(), damped.bodies());
+            MALLOY_CHECK_TRUE(e_end < e0 - 0.1); // damping removed energy
+        }
     }
 
     std::cout << "malloy_springs_tests passed\n";

@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M30). These boundaries are in force
+> All modules below are implemented (M2-M31). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -76,7 +76,7 @@ Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: rotation in thr
 
 ## `malloy_springs`
 
-Responsible for `Spring`, `SpringNetwork`, `SpringBody2D`, the pure `accumulate_spring_forces` kernel, and `SpringWorld`, which composes that kernel with the minimal translational integration needed to make the domain runnable.
+Responsible for `Spring`, `SpringNetwork`, `SpringBody2D`, the pure `accumulate_spring_forces` kernel, and `SpringWorld`, which composes that kernel with the minimal translational integration needed to make the domain runnable. Since M31 it also has the 3D siblings `SpringBody3D` and `SpringWorld3D` (and a `Vec3` overload of the kernel); `Spring` and `SpringNetwork` are dimension-agnostic (ids and scalars) and are shared unchanged, since the dimension is not a domain (ADR 0009).
 
 Not responsible for rigid-body attachment points or torque, collision, gravity, or a generic engine-wide force-provider API. `accumulate_spring_forces` neither integrates nor mutates a body, so a later force producer can reuse the pipeline (ADR 0008).
 

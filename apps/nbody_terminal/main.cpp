@@ -43,8 +43,10 @@ using malloy::rigid::RigidBody2D;
 using malloy::rigid::RigidSettings;
 using malloy::rigid::RigidWorld;
 using malloy::springs::SpringBody2D;
+using malloy::springs::SpringBody3D;
 using malloy::springs::SpringNetwork;
 using malloy::springs::SpringWorld;
+using malloy::springs::SpringWorld3D;
 using malloy::nbody::total_energy;
 using malloy::particles::total_energy;
 using malloy::particles::total_momentum;
@@ -67,6 +69,8 @@ constexpr auto& charge_total_energy3d = malloy::charges::total_energy3d;
 constexpr auto& spring_momentum = malloy::springs::total_momentum;
 constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
 constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
+constexpr auto& spring_kinetic_energy3d = malloy::springs::total_kinetic_energy3d;
+constexpr auto& spring_elastic_energy3d = malloy::springs::total_elastic_energy3d;
 } // namespace
 using malloy::scenario::ScenarioParseResult;
 using malloy::sim_core::SimulationSettings;
@@ -496,6 +500,56 @@ int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork 
     return drive(title, world, report, steps, output_every);
 }
 
+// The orthographic flattening for 3D spring bodies: plot (x, y), drop z, the
+// same honest limit as the other 3D runners until rendering has its milestone.
+std::vector<Vec2> projected(const std::vector<malloy::springs::SpringBody3D>& bodies)
+{
+    std::vector<Vec2> points;
+    points.reserve(bodies.size());
+    for (const auto& body : bodies)
+    {
+        points.push_back(Vec2{body.position.x, body.position.y});
+    }
+    return points;
+}
+
+// Runs one 3D spring scenario. A ninth concrete runner and a ninth branch of
+// the dispatch switch: ADR 0006 once more, still no base class.
+int run_springs3d(const char* title, const SimulationSettings& sim,
+                  SpringNetwork network, std::vector<SpringBody3D> bodies, int steps,
+                  int output_every)
+{
+    SpringWorld3D world{sim, std::move(network), std::move(bodies)};
+
+    std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
+              << "  springs=" << world.network().size() << "  dt=" << sim.dt
+              << "  steps=" << steps << "  (3D)" << '\n';
+
+    if (world.validate() != StepStatus::Ok)
+    {
+        std::cerr << title << ": invalid configuration\n";
+        return 1;
+    }
+
+    Viewport view = fit_viewport(projected(world.bodies()));
+
+    const auto report = [&world, &view](std::int64_t step_index) {
+        const auto& now = world.bodies();
+        const auto kinetic = spring_kinetic_energy3d(now);
+        const auto elastic = spring_elastic_energy3d(world.network(), now);
+        std::cout << "step " << std::setw(6) << step_index;
+        std::cout << std::scientific;
+        std::cout << "   KE " << std::setw(15) << kinetic << "   PE " << std::setw(15)
+                  << elastic << "   E " << std::setw(15) << kinetic + elastic
+                  << "   |p| " << std::setw(15)
+                  << malloy::math::length(malloy::springs::total_momentum3d(now)) << '\n';
+        std::cout << std::fixed;
+        print_view(view, projected(now));
+    };
+
+    return drive(title, world, report, steps, output_every);
+}
+
 // Runs one scenario to completion, printing system diagnostics every
 // output_every steps. Returns 0 on success, 1 on validation/step failure.
 int run_scenario(const char* title, const SimulationSettings& sim,
@@ -612,6 +666,9 @@ int main(int argc, char** argv)
         case ScenarioType::Charges3D:
             return run_charges3d(argv[1], s.simulation, s.charge3d_settings,
                                  s.charge_list3d, s.steps, s.output_every);
+        case ScenarioType::Springs3D:
+            return run_springs3d(argv[1], s.simulation, s.spring_network3d,
+                                 s.spring_bodies3d, s.steps, s.output_every);
         }
         return 1;
     }

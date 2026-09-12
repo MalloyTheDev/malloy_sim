@@ -24,9 +24,10 @@ applied force, the translational half of a wrench to go with M21's torque; and
 M29 takes charged particles into three dimensions, where the magnetic field
 becomes a vector and a charge spirals along it; and M30 gives a rigid body a box
 collider, so an oriented box rests and tumbles on the ground, the first
-non-sphere 3D collision. The rest is still 2D and is the larger share of the
-project: box-against-box contact geometry, and 3D versions of the two remaining
-domains (particles and springs). 3D is the destination rather than a possibility left
+non-sphere 3D collision; and M31 takes spring networks into three dimensions,
+so a structure can deform in space. The rest is still 2D: box-against-box
+contact geometry, and the 3D version of the one remaining 2D-only domain
+(particles). 3D is the destination rather than a possibility left
 open, and each remaining piece is its own milestone: see
 `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
@@ -40,8 +41,8 @@ that makes a sliding sphere roll, sphere-against-sphere collisions, mass
 properties computed from 3D geometry, box mass properties with compound
 assembly, mass properties of an arbitrary triangle mesh, a constant applied
 force on a 3D body, charged particles in three dimensions with helical
-motion, and an oriented box resting and tumbling on a ground plane
-(milestones M1-M30).
+motion, an oriented box resting and tumbling on a ground plane, and spring
+networks in three dimensions (milestones M1-M31).
 
 ## Locked baseline
 
@@ -68,7 +69,7 @@ response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
 **M23: 3D friction**, **M24: 3D sphere pairs**, **M25: 3D mass properties**,
 **M26: box mass properties**, **M27: mesh mass properties**,
 **M28: applied force**, **M29: 3D charged particles**,
-**M30: box on a plane**). The project builds clean under
+**M30: box on a plane**, **M31: 3D springs**). The project builds clean under
 MSVC (`/W4 /permissive-`), and all 14 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
@@ -106,7 +107,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 19 templates ship across 8 domains, and
+and runnable with the shipped binary. 20 templates ship across 9 domains, and
 every one is parsed, validated and stepped by the test suite. Both numbers are
 checked against the directory by the scenario tests, so neither can go stale.
 
@@ -276,6 +277,7 @@ built-in scenarios shown above.
 | M28 | a constant applied force on a 3D body: the other half of a wrench | ✅ Done |
 | M29 | charged particles in 3D: the vector Lorentz force, helical motion | ✅ Done |
 | M30 | an oriented box resting and tumbling on a ground plane | ✅ Done |
+| M31 | spring networks in three dimensions: deformable structures | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -296,10 +298,10 @@ Intended, not yet built, and never added speculatively
   bodies assembled from primitives), M27 mass properties of an arbitrary
   triangle mesh (signed-tetrahedron volume integrals), M28 a constant applied
   force (the translational half of a wrench), M29 charged particles in three
-  dimensions (the vector Lorentz force, helical motion), and M30 an oriented box
-  resting and tumbling on a ground plane; box-against-box contact geometry, and
-  3D versions of the two remaining domains (particles and springs) are each
-  their own milestone
+  dimensions (the vector Lorentz force, helical motion), M30 an oriented box
+  resting and tumbling on a ground plane, and M31 spring networks in three
+  dimensions; box-against-box contact geometry, and the 3D version of the one
+  remaining 2D-only domain (particles) are each their own milestone
   (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
 - **quantum**, further out still
 - graphical rendering, and the library that would carry it (the M8 debug view is

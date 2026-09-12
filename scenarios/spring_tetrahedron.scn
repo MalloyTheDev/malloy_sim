@@ -1,0 +1,75 @@
+# MalloySim scenario: a spring tetrahedron breathing in three dimensions (M31).
+#
+# This is what M31 adds: spring networks off the plane. The `spring` key is the
+# same one the 2D domain uses (springs carry only a rest length, stiffness and
+# damping, which have no dimension); only the body gains a third component. So a
+# 3D structure is built exactly like a 2D one.
+#
+# Four equal masses sit at the corners of a regular tetrahedron, connected by
+# all six edges as identical springs. The tetrahedron is larger than the
+# springs' rest length, so every spring is stretched, and the whole thing is
+# released from rest. It contracts, overshoots, expands, and breathes in and
+# out along every edge at once, a motion with no 2D form.
+#
+# Two facts to watch. The total momentum stays exactly zero: every spring pushes
+# its two endpoints by equal and opposite forces, so a network cannot change the
+# momentum of the whole, at any stiffness. And with no damping the energy
+# (kinetic plus elastic) is conserved up to the integrator's small symplectic
+# drift, trading back and forth between the springs and the motion.
+
+type springs3d
+
+dt 0.01
+steps 2000
+output_every 250
+
+# spring_body3 <mass> <px py pz> <vx vy vz>
+# The four vertices of a regular tetrahedron (edge length 2*sqrt(2) ~ 2.828),
+# all at rest.
+spring_body3 1.0   1.0  1.0  1.0    0.0 0.0 0.0
+spring_body3 1.0   1.0 -1.0 -1.0    0.0 0.0 0.0
+spring_body3 1.0  -1.0  1.0 -1.0    0.0 0.0 0.0
+spring_body3 1.0  -1.0 -1.0  1.0    0.0 0.0 0.0
+
+# spring <a> <b> <rest_length> <stiffness> <damping>
+# All six edges, rest length 2 (shorter than the 2.828 they sit at, so every
+# spring is stretched), stiffness 1, undamped.
+spring 0 1  2.0 1.0 0.0
+spring 0 2  2.0 1.0 0.0
+spring 0 3  2.0 1.0 0.0
+spring 1 2  2.0 1.0 0.0
+spring 1 3  2.0 1.0 0.0
+spring 2 3  2.0 1.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   KE  0.00000000e+00   PE  2.05887450e+00   E  2.05887450e+00
+#
+# The invariants:
+#
+# 1. Total momentum is exactly zero, on every axis, at every step. The structure
+#    starts at rest and every spring force is matched by an equal and opposite
+#    one, so the centre of mass never moves.
+#
+# 2. Energy starts purely elastic: released from rest, so no kinetic part. The
+#    elastic store is six springs each stretched by 2*sqrt(2) - 2, giving
+#    6 * 0.5 * (2*sqrt(2) - 2)^2 = 36 - 24*sqrt(2) ~ 2.05887450.
+#
+# 3. Undamped, the total energy is conserved up to the symplectic drift: it
+#    trades between springs and motion and oscillates within about 0.02 of the
+#    starting value, so it is still close after 2000 steps.
+#
+# On the ASCII view (an orthographic projection down z): four points moving in
+# and out together as the tetrahedron breathes.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    momentum_x  0.00000000e+00   tol 1e-12
+# check step 0    momentum_y  0.00000000e+00   tol 1e-12
+# check step 0    momentum_z  0.00000000e+00   tol 1e-12
+# check step 0    kinetic     0.00000000e+00   tol 1e-12
+# check step 0    energy      2.05887450e+00   tol 1e-6
+# check step 2000 momentum_x  0.00000000e+00   tol 1e-12
+# check step 2000 momentum_y  0.00000000e+00   tol 1e-12
+# check step 2000 momentum_z  0.00000000e+00   tol 1e-12
+# check step 2000 energy      2.05887450e+00   tol 3e-2
