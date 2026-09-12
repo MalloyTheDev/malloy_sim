@@ -62,7 +62,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M34 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M35 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -75,8 +75,8 @@ properties (inertia from geometry), box mass properties with compound
 assembly, mesh mass properties for arbitrary shapes, a constant applied
 force on a 3D body, charged particles in three dimensions, an oriented box
 resting and tumbling on a ground plane, spring networks in three dimensions,
-colliding particles in three dimensions, box-against-box collision, and
-box-against-sphere collision.
+colliding particles in three dimensions, box-against-box collision,
+box-against-sphere collision, and Coulomb friction for particle contacts.
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -99,11 +99,12 @@ helical motion) and M30 (an oriented box resting and tumbling on a ground
 plane, the first non-sphere 3D collision), M31 (spring networks in three
 dimensions: deformable structures), M32 (colliding particles in three
 dimensions, the last domain to gain a 3D form) and M33 (box against box, by the
-separating-axis test, the first non-sphere 3D body-vs-body collision) and M34
+separating-axis test, the first non-sphere 3D body-vs-body collision), M34
 (box against a sphere, the last movable pair in 3D, by the box's nearest point
-to the sphere centre) are all done. See `docs/07_POST_M5_ROADMAP.md`.
+to the sphere centre) and M35 (Coulomb friction for particle contacts, in two
+and three dimensions) are all done. See `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M35 or later) unless explicitly asked, and
+Do not start any further milestone (M36 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -122,7 +123,7 @@ M5: terminal N-body demo               [done]
 1. Do not jump ahead; work one milestone at a time.
 2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
 3. Do not add ECS (wait for real access-pattern pressure).
-4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. M30 added `collide::Box3` against a plane (an oriented box's penetrating corners, resolved as one centroid contact), so a box can rest and tumble on the ground, and M33 added box-against-box in 3D by the separating-axis test (`collide::overlaps`/`contact(Box3, Box3)`), reduced to a single contact point (a bounce, not a stack). M34 added box-against-sphere in 3D (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), so every 3D movable pair now collides; 2D body against body is still disc against disc. Particle contacts remain normal-only.
+4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. M30 added `collide::Box3` against a plane (an oriented box's penetrating corners, resolved as one centroid contact), so a box can rest and tumble on the ground, and M33 added box-against-box in 3D by the separating-axis test (`collide::overlaps`/`contact(Box3, Box3)`), reduced to a single contact point (a bounce, not a stack). M34 added box-against-sphere in 3D (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), so every 3D movable pair now collides; 2D body against body is still disc against disc. M35 gave particle contacts Coulomb friction (a tangential impulse clamped to the normal one, in 2D and 3D, for particle/particle and particle/wall), so they are no longer normal-only; a particle has no orientation, so it imparts no spin.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force. Gravity is a setting applied as an acceleration, not a force. M21 added a constant applied TORQUE and M28 a constant applied FORCE, each a single constant SETTING applied as forcing (F/m for the force, Euler forcing for the torque), NOT a force/torque ACCUMULATOR: do not add an accumulator that sums many force producers, or persistent per-body forces, to `malloy_rigid` until their dedicated milestone.
 6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core), M25 (`math::Mat3` and 3D mass properties: a compound body's inertia TENSOR, computed from geometry by the parallel-axis theorem and diagonalized to principal moments), M26 (`SolidBox` mass properties and `combine`, so a compound body is assembled from primitives of any kind, plus `math::to_mat3`), M27 (`SolidMesh` mass properties: the inertia of any closed triangle mesh by signed-tetrahedron volume integrals, plus `math::trace`), M28 (a constant applied FORCE, the translational half of a wrench, as the acceleration F/m, plus `total_force_potential3d`), M29 (charged particles in three dimensions: the full vector Lorentz force and helical motion) and M30 (`collide::Box3` against a plane, so an oriented box rests and tumbles on the ground; the box collider is `RigidBody3D::half_extents`). M31 promoted springs to 3D (`SpringWorld3D` beside `SpringWorld`, reusing the dimension-agnostic `Spring`/`SpringNetwork`), M32 promoted colliding particles to 3D (`ParticleWorld3D`, confined to a `collide::Aabb3`), the last domain to gain a 3D form, and M33 added box-against-box collision by the separating-axis test (`collide::contact(Box3, Box3)`, resolved through the shared impulse core as one contact point: a bounce, not a stack), and M34 added box-against-sphere collision (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), the last movable pair in 3D. Mass properties now cover an arbitrary shape, a body can be both pushed (M28 force) and turned (M21 torque), and every 3D movable pair now collides; the full box-box contact manifold and an iterative stacking solver, box-against-box in 2D, and rendering are NOT started and each needs its own milestone. The 3D contacts are impulses, gravity is an acceleration, and the force and torque are constant settings applied as forcing (the M10/M15/M17/M21 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` still stores three principal moments rather than a 3x3 matrix, deliberately: M25 to M27 diagonalize the tensor at construction, so the body never has to carry one. Do not add any of it speculatively; the 2D types stay supported.
 7. Do not add quantum until its dedicated milestone.

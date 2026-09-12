@@ -1,5 +1,7 @@
 #include <malloy/particles/particles.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <utility>
@@ -13,10 +15,27 @@ namespace malloy::particles
 {
 namespace
 {
-// Resolve one particle/particle contact in 3D: separate the overlap, then apply
-// an equal and opposite impulse along the contact normal. The 3D copy of the 2D
-// resolver, using the sphere geometry M22/M24 added.
-void resolve_pair(Particle3D& a, Particle3D& b, math::Real restitution)
+// Reduce a two-component tangential velocity toward zero by at most `max_delta`,
+// the Coulomb cap for a wall contact (a wall's tangent plane has two axes in 3D).
+// `max_delta` is friction times the normal impulse per unit mass, so friction 0
+// leaves the tangent untouched.
+void damp_tangential(math::Real& t1, math::Real& t2, math::Real max_delta)
+{
+    const math::Real speed = std::sqrt(t1 * t1 + t2 * t2);
+    if (speed > math::Real{0})
+    {
+        const math::Real scale = (speed - std::min(speed, max_delta)) / speed;
+        t1 *= scale;
+        t2 *= scale;
+    }
+}
+
+// Resolve one particle/particle contact in 3D: separate the overlap, apply an
+// equal and opposite impulse along the contact normal, then a friction impulse
+// along the tangent clamped to the Coulomb cone. The 3D copy of the 2D resolver,
+// using the sphere geometry M22/M24 added.
+void resolve_pair(Particle3D& a, Particle3D& b, math::Real restitution,
+                  math::Real friction)
 {
     const std::optional<collide::Contact3> hit =
         collide::contact(collide::Sphere{a.position, a.radius},
@@ -53,19 +72,53 @@ void resolve_pair(Particle3D& a, Particle3D& b, math::Real restitution)
     const math::Real impulse = -(math::Real{1} + restitution) * closing / inverse_sum;
     a.velocity -= hit->normal * (impulse * inverse_a);
     b.velocity += hit->normal * (impulse * inverse_b);
+
+    // Coulomb friction: a tangential impulse from the velocity that REMAINS after
+    // the normal impulse, clamped to `friction` times the normal impulse. A
+    // particle has no orientation, so this only damps the tangential slide
+    // between the two and imparts no spin.
+    if (!(friction > math::Real{0}))
+    {
+        return;
+    }
+    const math::Vec3 remaining = b.velocity - a.velocity;
+    const math::Vec3 sideways = remaining - hit->normal * math::dot(remaining, hit->normal);
+    const math::Real sliding = math::length(sideways);
+    if (!(sliding > math::Real{0}))
+    {
+        return; // not sliding; invent no tangent (the no-fallback rule)
+    }
+    const math::Vec3 tangent = sideways / sliding;
+    math::Real tangent_impulse = sliding / inverse_sum;
+    const math::Real limit = friction * impulse; // `impulse` is the normal magnitude, > 0 here
+    if (tangent_impulse > limit)
+    {
+        tangent_impulse = limit; // Coulomb's cone
+    }
+    // a is dragged forward along the slide and b back, the opposite of the normal
+    // pair's signs, so the tangential relative velocity shrinks.
+    a.velocity += tangent * (tangent_impulse * inverse_a);
+    b.velocity -= tangent * (tangent_impulse * inverse_b);
 }
 
 // Keep one particle inside the box. Walls are immovable, so this is a clamp plus
-// a damped reflection rather than an exchange of momentum. Per axis, the 3D copy
-// of the 2D resolver with a third axis added.
-void resolve_walls(Particle3D& p, const collide::Aabb3& bounds, math::Real restitution)
+// a damped reflection rather than an exchange of momentum. On a real bounce the
+// two tangential axes of the wall are also damped, clamped Coulomb-style to
+// `friction` times the normal impulse per unit mass, which is `(1 + restitution)`
+// times the incoming normal speed. Friction 0 is exactly the old reflect. Per
+// axis, the 3D copy of the 2D resolver with a third axis added.
+void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
+                   math::Real restitution, math::Real friction)
 {
     if (p.position.x - p.radius < bounds.min.x)
     {
         p.position.x = bounds.min.x + p.radius;
         if (p.velocity.x < math::Real{0})
         {
+            const math::Real normal_speed = -p.velocity.x;
             p.velocity.x = -p.velocity.x * restitution;
+            damp_tangential(p.velocity.y, p.velocity.z,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
     else if (p.position.x + p.radius > bounds.max.x)
@@ -73,7 +126,10 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds, math::Real resti
         p.position.x = bounds.max.x - p.radius;
         if (p.velocity.x > math::Real{0})
         {
+            const math::Real normal_speed = p.velocity.x;
             p.velocity.x = -p.velocity.x * restitution;
+            damp_tangential(p.velocity.y, p.velocity.z,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
 
@@ -82,7 +138,10 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds, math::Real resti
         p.position.y = bounds.min.y + p.radius;
         if (p.velocity.y < math::Real{0})
         {
+            const math::Real normal_speed = -p.velocity.y;
             p.velocity.y = -p.velocity.y * restitution;
+            damp_tangential(p.velocity.x, p.velocity.z,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
     else if (p.position.y + p.radius > bounds.max.y)
@@ -90,7 +149,10 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds, math::Real resti
         p.position.y = bounds.max.y - p.radius;
         if (p.velocity.y > math::Real{0})
         {
+            const math::Real normal_speed = p.velocity.y;
             p.velocity.y = -p.velocity.y * restitution;
+            damp_tangential(p.velocity.x, p.velocity.z,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
 
@@ -99,7 +161,10 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds, math::Real resti
         p.position.z = bounds.min.z + p.radius;
         if (p.velocity.z < math::Real{0})
         {
+            const math::Real normal_speed = -p.velocity.z;
             p.velocity.z = -p.velocity.z * restitution;
+            damp_tangential(p.velocity.x, p.velocity.y,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
     else if (p.position.z + p.radius > bounds.max.z)
@@ -107,7 +172,10 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds, math::Real resti
         p.position.z = bounds.max.z - p.radius;
         if (p.velocity.z > math::Real{0})
         {
+            const math::Real normal_speed = p.velocity.z;
             p.velocity.z = -p.velocity.z * restitution;
+            damp_tangential(p.velocity.x, p.velocity.y,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
 }
@@ -123,7 +191,8 @@ bool Particle3D::is_valid() const
 bool ParticleSettings3D::is_valid() const
 {
     return restitution >= math::Real{0} && restitution <= math::Real{1} &&
-           math::is_finite(restitution) && math::is_finite(gravity) &&
+           math::is_finite(restitution) && friction >= math::Real{0} &&
+           math::is_finite(friction) && math::is_finite(gravity) &&
            bounds.is_valid();
 }
 
@@ -182,6 +251,7 @@ sim_core::StepResult ParticleWorld3D::step()
 
     const math::Real dt = simulation_settings_.dt;
     const math::Real restitution = particle_settings_.restitution;
+    const math::Real friction = particle_settings_.friction;
     const std::size_t count = particles_.size();
 
     // (1) gravity, then (2) move by the UPDATED velocity: semi-implicit Euler.
@@ -201,14 +271,14 @@ sim_core::StepResult ParticleWorld3D::step()
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
-            resolve_pair(particles_[i], particles_[j], restitution);
+            resolve_pair(particles_[i], particles_[j], restitution, friction);
         }
     }
 
     // (4) keep everything inside the box.
     for (std::size_t i = 0; i < count; ++i)
     {
-        resolve_walls(particles_[i], particle_settings_.bounds, restitution);
+        resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction);
     }
 
     for (const Particle3D& p : particles_)

@@ -5,7 +5,7 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M34 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M35 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all ten scenario types. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and all five of
@@ -73,7 +73,7 @@ completion.
 
 ## What's next
 
-M1-M34 are done. The classical mechanics track is complete, including the
+M1-M35 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
 halfplane ground of M16 and the Coulomb friction of M17, and M18 added
@@ -86,8 +86,9 @@ computes them for an arbitrary triangle mesh, M28 adds a constant applied
 force to go with M21's torque, M29 takes charged particles into three
 dimensions, M30 lands an oriented box on a ground plane, M31 takes spring
 networks into three dimensions, M32 takes colliding particles into three
-dimensions, M33 collides two oriented boxes by the separating-axis test, and
-M34 collides a box with a sphere.
+dimensions, M33 collides two oriented boxes by the separating-axis test,
+M34 collides a box with a sphere, and M35 gives particle contacts Coulomb
+friction.
 Five finished domains sit behind multi-domain dispatch, across ten
 scenario types.
 Work stays gated one milestone at a time; see

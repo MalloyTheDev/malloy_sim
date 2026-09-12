@@ -24,8 +24,18 @@ struct ParticleSettings3D
     // setting rather than per-body state (ADR 0006).
     math::Vec3 gravity{};
 
-    // Valid when restitution is in [0, 1] and finite, bounds is a valid box,
-    // and gravity is finite.
+    // Coulomb friction for every contact, particle/particle and particle/wall:
+    // a tangential impulse clamped to `friction` times the normal impulse, which
+    // damps sliding rather than reversing it. A particle carries no orientation,
+    // so this imparts no spin. Defaults to zero, and it is the LAST field so a
+    // `{restitution, bounds}` or `{restitution, bounds, gravity}` brace still
+    // compiles and a scenario written before it existed behaves bit-for-bit as
+    // it did. Like restitution it is consumed on the spot, not a persistent
+    // force (the 3D sibling of ParticleSettings).
+    math::Real friction{0.0};
+
+    // Valid when restitution is in [0, 1] and finite, friction is non-negative
+    // and finite, bounds is a valid box, and gravity is finite.
     bool is_valid() const;
 };
 } // namespace malloy::particles

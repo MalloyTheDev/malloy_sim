@@ -1266,11 +1266,21 @@ int main()
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
     {
-        // friction belongs to the rigid domain and to no other.
+        // Since M35 friction belongs to the particle domains too, in both
+        // dimensions, writing the field the declared domain reads.
         std::istringstream in("type particles\nfriction 0.5\n");
-        MALLOY_CHECK_FALSE(parse_scenario(in).ok);
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.particle_settings.friction, 0.5, 1e-12);
     }
     {
+        std::istringstream in("type particles3d\nfriction 0.25\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.particle3d_settings.friction, 0.25, 1e-12);
+    }
+    {
+        // ...but not springs, which has no friction.
         std::istringstream in("type springs\nfriction 0.5\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }

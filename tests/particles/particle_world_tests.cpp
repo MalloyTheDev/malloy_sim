@@ -858,6 +858,191 @@ int main()
         }
     }
 
+    // --- M35: Coulomb friction for particle contacts, in 2D and 3D. A
+    //     tangential impulse clamped to `friction` times the normal impulse damps
+    //     the slide; a particle has no orientation, so it imparts no spin. It
+    //     applies to both particle/particle contacts and wall bounces. Friction
+    //     defaults to zero, which is the old normal-only behaviour, so every
+    //     earlier test in this file still passes unchanged. ---
+    {
+        using malloy::math::approx_equal;
+        const auto particle3 = [](Vec3 position, Vec3 velocity, Real mass, Real radius) {
+            Particle3D q;
+            q.position = position;
+            q.velocity = velocity;
+            q.mass = mass;
+            q.radius = radius;
+            return q;
+        };
+        const Real inf3 = std::numeric_limits<Real>::infinity();
+        const Real nan3 = std::numeric_limits<Real>::quiet_NaN();
+        const Real dt = 1e-5; // tiny, so the pre-contact move barely tilts the normal
+
+        // Validation: a negative or non-finite friction is invalid, both
+        // dimensions.
+        {
+            ParticleSettings s{1.0, big_box()};
+            MALLOY_CHECK_TRUE(s.is_valid()); // friction 0 by default
+            s.friction = 0.5;
+            MALLOY_CHECK_TRUE(s.is_valid());
+            s.friction = -0.1;
+            MALLOY_CHECK_FALSE(s.is_valid());
+            s.friction = nan3;
+            MALLOY_CHECK_FALSE(s.is_valid());
+            s.friction = inf3;
+            MALLOY_CHECK_FALSE(s.is_valid());
+
+            ParticleSettings3D t;
+            t.friction = -1.0;
+            MALLOY_CHECK_FALSE(t.is_valid());
+            t.friction = 0.3;
+            MALLOY_CHECK_TRUE(t.is_valid());
+        }
+
+        // 2D particle/particle: two equal masses meet with the normal along x and
+        // a tangential (y) relative velocity of -2. The normal impulse is 2 and
+        // the impulse that would fully stop the slide is 1.
+        {
+            const std::vector<Particle2D> pp = {
+                Particle2D{Vec2{-0.4, 0.0}, Vec2{1.0, 1.0}, 1.0, 0.5},
+                Particle2D{Vec2{0.4, 0.0}, Vec2{-1.0, -1.0}, 1.0, 0.5}};
+
+            // Frictionless: the tangential relative velocity is untouched.
+            ParticleWorld none{SimulationSettings{dt}, ParticleSettings{1.0, big_box()}, pp};
+            MALLOY_CHECK_TRUE(none.step().ok());
+            MALLOY_CHECK_NEAR(none.particles()[1].velocity.y - none.particles()[0].velocity.y,
+                              -2.0, 1e-3);
+            MALLOY_CHECK_VEC2_NEAR(total_momentum(none.particles()), Vec2(0.0, 0.0), 1e-12);
+
+            // Strong friction (the cone does not bind) drives the tangential
+            // relative velocity to zero, and never reverses it. Momentum, being
+            // internal, is still conserved.
+            ParticleSettings strong{1.0, big_box()};
+            strong.friction = 10.0;
+            ParticleWorld stuck{SimulationSettings{dt}, strong, pp};
+            MALLOY_CHECK_TRUE(stuck.step().ok());
+            MALLOY_CHECK_NEAR(stuck.particles()[1].velocity.y - stuck.particles()[0].velocity.y,
+                              0.0, 1e-3);
+            MALLOY_CHECK_VEC2_NEAR(total_momentum(stuck.particles()), Vec2(0.0, 0.0), 1e-12);
+
+            // Weak friction binds at the cone: friction 0.1 caps the tangential
+            // impulse at 0.1 * 2 = 0.2, so the relative velocity falls from -2 to
+            // -1.6, not to zero.
+            ParticleSettings weak{1.0, big_box()};
+            weak.friction = 0.1;
+            ParticleWorld capped{SimulationSettings{dt}, weak, pp};
+            MALLOY_CHECK_TRUE(capped.step().ok());
+            MALLOY_CHECK_NEAR(capped.particles()[1].velocity.y - capped.particles()[0].velocity.y,
+                              -1.6, 1e-3);
+        }
+
+        // 2D wall friction: a particle sliding into the floor keeps its normal
+        // bounce but sheds tangential speed, clamped to the cone.
+        {
+            const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+            const std::vector<Particle2D> one = {
+                Particle2D{Vec2{0.0, -0.95}, Vec2{2.0, -1.0}, 1.0, 0.1}};
+
+            ParticleWorld none{SimulationSettings{dt}, ParticleSettings{1.0, box}, one};
+            MALLOY_CHECK_TRUE(none.step().ok());
+            MALLOY_CHECK_NEAR(none.particles()[0].velocity.x, 2.0, 1e-3); // tangent untouched
+            MALLOY_CHECK_NEAR(none.particles()[0].velocity.y, 1.0, 1e-3); // reflected, e = 1
+
+            // Strong friction: cap is friction*(1+e)*|v_n| = 10*2*1 = 20, far
+            // above the tangential speed 2, so the slide is fully removed and NOT
+            // reversed (the cap is a floor at zero, not a subtraction). The normal
+            // is untouched.
+            ParticleSettings strong{1.0, box};
+            strong.friction = 10.0;
+            ParticleWorld stuck{SimulationSettings{dt}, strong, one};
+            MALLOY_CHECK_TRUE(stuck.step().ok());
+            MALLOY_CHECK_NEAR(stuck.particles()[0].velocity.x, 0.0, 1e-3);
+            MALLOY_CHECK_NEAR(stuck.particles()[0].velocity.y, 1.0, 1e-3);
+
+            // Weak friction: cap is 0.25*2*1 = 0.5, so 2 falls to 1.5.
+            ParticleSettings weak{1.0, box};
+            weak.friction = 0.25;
+            ParticleWorld capped{SimulationSettings{dt}, weak, one};
+            MALLOY_CHECK_TRUE(capped.step().ok());
+            MALLOY_CHECK_NEAR(capped.particles()[0].velocity.x, 1.5, 1e-3);
+            MALLOY_CHECK_NEAR(capped.particles()[0].velocity.y, 1.0, 1e-3);
+        }
+
+        // 3D particle/particle: the same as the 2D pair, in space. Friction
+        // removes the tangential relative velocity and conserves momentum.
+        {
+            const Aabb3 room{Vec3{-100.0, -100.0, -100.0}, Vec3{100.0, 100.0, 100.0}};
+            const std::vector<Particle3D> pp = {
+                particle3(Vec3{-0.4, 0.0, 0.0}, Vec3{1.0, 1.0, 0.0}, 1.0, 0.5),
+                particle3(Vec3{0.4, 0.0, 0.0}, Vec3{-1.0, -1.0, 0.0}, 1.0, 0.5)};
+
+            ParticleSettings3D none;
+            none.restitution = 1.0;
+            none.bounds = room;
+            ParticleWorld3D free_w{SimulationSettings{dt}, none, pp};
+            MALLOY_CHECK_TRUE(free_w.step().ok());
+            MALLOY_CHECK_NEAR(free_w.particles()[1].velocity.y - free_w.particles()[0].velocity.y,
+                              -2.0, 1e-3);
+
+            ParticleSettings3D strong;
+            strong.restitution = 1.0;
+            strong.bounds = room;
+            strong.friction = 10.0;
+            ParticleWorld3D stuck{SimulationSettings{dt}, strong, pp};
+            MALLOY_CHECK_TRUE(stuck.step().ok());
+            MALLOY_CHECK_NEAR(stuck.particles()[1].velocity.y - stuck.particles()[0].velocity.y,
+                              0.0, 1e-3);
+            MALLOY_CHECK_TRUE(
+                approx_equal(total_momentum3d(stuck.particles()), Vec3{0.0, 0.0, 0.0}, 1e-12));
+        }
+
+        // 3D wall friction: a particle sliding into the floor (y-min) loses both
+        // in-plane tangential axes (x and z) together, clamped to the cone. With
+        // tangential speed sqrt(5) and cap 2, the pair is scaled toward zero.
+        {
+            const Aabb3 box{Vec3{-1.0, -1.0, -1.0}, Vec3{1.0, 1.0, 1.0}};
+            const std::vector<Particle3D> one = {
+                particle3(Vec3{0.0, -0.95, 0.0}, Vec3{2.0, -1.0, 1.0}, 1.0, 0.1)};
+
+            ParticleSettings3D none;
+            none.restitution = 1.0;
+            none.bounds = box;
+            ParticleWorld3D free_w{SimulationSettings{dt}, none, one};
+            MALLOY_CHECK_TRUE(free_w.step().ok());
+            MALLOY_CHECK_NEAR(free_w.particles()[0].velocity.x, 2.0, 1e-3);
+            MALLOY_CHECK_NEAR(free_w.particles()[0].velocity.z, 1.0, 1e-3);
+            MALLOY_CHECK_NEAR(free_w.particles()[0].velocity.y, 1.0, 1e-3); // reflected
+
+            // Strong friction: cap 10*2*1 = 20 exceeds the tangential speed
+            // sqrt(5), so BOTH in-plane axes are driven to zero together, not
+            // past it. This pins the two-axis clamp as a floor at zero.
+            ParticleSettings3D strong;
+            strong.restitution = 1.0;
+            strong.bounds = box;
+            strong.friction = 10.0;
+            ParticleWorld3D stuck{SimulationSettings{dt}, strong, one};
+            MALLOY_CHECK_TRUE(stuck.step().ok());
+            MALLOY_CHECK_NEAR(stuck.particles()[0].velocity.x, 0.0, 1e-3);
+            MALLOY_CHECK_NEAR(stuck.particles()[0].velocity.z, 0.0, 1e-3);
+            MALLOY_CHECK_NEAR(stuck.particles()[0].velocity.y, 1.0, 1e-3);
+
+            // Weak friction binds at the cone: cap 0.5*2*1 = 1 is below sqrt(5),
+            // so the (x, z) tangent is scaled toward zero by (sqrt5 - 1)/sqrt5,
+            // keeping its direction.
+            ParticleSettings3D weak;
+            weak.restitution = 1.0;
+            weak.bounds = box;
+            weak.friction = 0.5;
+            ParticleWorld3D capped{SimulationSettings{dt}, weak, one};
+            MALLOY_CHECK_TRUE(capped.step().ok());
+            const Real s5 = std::sqrt(5.0);
+            const Real scale = (s5 - 1.0) / s5; // cap 1 removed from a length-sqrt5 tangent
+            MALLOY_CHECK_NEAR(capped.particles()[0].velocity.x, 2.0 * scale, 1e-3);
+            MALLOY_CHECK_NEAR(capped.particles()[0].velocity.z, 1.0 * scale, 1e-3);
+            MALLOY_CHECK_NEAR(capped.particles()[0].velocity.y, 1.0, 1e-3);
+        }
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }

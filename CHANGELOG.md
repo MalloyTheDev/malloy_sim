@@ -827,6 +827,61 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M35] - 2026-09-12  (Coulomb friction for particles)
+
+### Added
+
+- A `friction` setting on `ParticleSettings` and `ParticleSettings3D`: Coulomb
+  friction for every particle contact, both particle/particle and
+  particle/wall. It is a tangential impulse clamped to `friction` times the
+  normal impulse, the same clamp the rigid domain has used since M17, and it is
+  consumed on the spot rather than stored, so no body type changes and no force
+  accumulator is added (rule 5). It defaults to zero, and is the last field of
+  each settings struct, so every scenario and test written before it existed
+  behaves bit-for-bit as it did.
+- A `friction` key for the `particles` and `particles3d` scenario types (it
+  already existed for `rigid` and `rigid3d`).
+- The `sliding_friction` template: a particle sliding across the floor under
+  gravity, brought to rest by friction. Twenty-four templates now, across ten
+  domains.
+
+### The one gap the particle domain still had
+
+Until now a particle contact only ever acted along the normal, so a particle
+slid along a wall or across a pile of others forever: nothing removed its
+tangential speed. Friction fills that. A particle carries no orientation, so
+unlike the rigid domain (where the same tangential impulse has a lever arm and
+spins a body up) this only damps the slide and imparts no spin. On a
+particle/particle contact it is the tangential sibling of the normal impulse,
+equal and opposite so momentum is still conserved; on a wall it damps the two
+tangential axes of the immovable surface, clamped to `friction` times the normal
+impulse the reflection implies, `(1 + restitution)` times the incoming normal
+speed. The clamp is a floor at zero: friction removes the slide, it never
+reverses it.
+
+### Invariants
+
+A particle/particle contact with friction still conserves total momentum
+(friction is internal and equal-and-opposite), and strong friction drives the
+tangential relative velocity to zero while a weak coefficient caps the tangential
+impulse at the Coulomb cone and only reduces it. A wall contact keeps its normal
+bounce untouched while the tangential speed is damped, fully removed when the
+cone is slack and scaled toward zero (never past it) when the cone binds; in 3D
+the two tangential axes are damped together. The shipped `sliding_friction`
+template turns dry friction into a constant deceleration `friction * |gravity|`:
+a particle pushed at 2 with friction 0.5 under gravity 10 loses horizontal
+momentum linearly and stops in exactly 0.4 s, and its horizontal momentum, pinned
+at the start and after it halts, is 2 then 0.
+
+### Mutation testing
+
+Six mutations, all caught: removing the particle/particle Coulomb clamp, flipping
+the friction impulse's sign in 2D and in 3D, dropping the `min` in the wall damp
+(2D and 3D) so a slack cone would overshoot and reverse the slide, and dropping
+the friction bound from settings validation. Catching the two wall-damp mutants
+needed a case whose cone exceeds the tangential speed, since below that threshold
+the `min` and its removal agree; those cases were added.
+
 ## [M34] - 2026-09-12  (box against a sphere)
 
 ### Added

@@ -591,11 +591,14 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else if (key == "friction")
         {
-            if (scenario.type != ScenarioType::Rigid &&
+            if (scenario.type != ScenarioType::Particles &&
+                scenario.type != ScenarioType::Particles3D &&
+                scenario.type != ScenarioType::Rigid &&
                 scenario.type != ScenarioType::Rigid3D)
             {
                 return make_error(line_number,
-                                  "friction belongs to type rigid or rigid3d");
+                                  "friction belongs to type particles, "
+                                  "particles3d, rigid or rigid3d");
             }
             saw_domain_key = true;
             math::Real value{};
@@ -603,9 +606,18 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 return make_error(line_number, "friction requires a value");
             }
+            // Write only the field the declared domain actually reads.
             if (scenario.type == ScenarioType::Rigid3D)
             {
                 scenario.rigid3d_settings.friction = value;
+            }
+            else if (scenario.type == ScenarioType::Particles)
+            {
+                scenario.particle_settings.friction = value;
+            }
+            else if (scenario.type == ScenarioType::Particles3D)
+            {
+                scenario.particle3d_settings.friction = value;
             }
             else
             {

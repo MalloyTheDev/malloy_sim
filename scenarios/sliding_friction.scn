@@ -1,0 +1,67 @@
+# MalloySim scenario: friction brings sliding particles to rest (M35).
+#
+# Before M35 a particle contact only ever acted along the normal, so a particle
+# sliding across the floor slid forever: nothing removed its tangential speed.
+# M35 adds Coulomb friction to particle contacts, a tangential impulse clamped
+# to `friction` times the normal impulse. A particle carries no orientation, so
+# this imparts no spin (unlike the rigid domain); it simply damps the slide.
+#
+# Two particles of DIFFERENT mass rest on the floor under gravity and are given
+# the same sideways push. With restitution 0 they stay on the floor, and every
+# step the floor contact removes `friction` times the normal impulse from the
+# tangential velocity. The normal impulse per step balances one step of gravity,
+# so the tangential velocity loss per step is `friction * |gravity| * dt`,
+# independent of mass: both particles decelerate at exactly 0.5 * 10 = 5 and
+# come to rest together. This is dry (Coulomb) sliding friction: constant
+# deceleration, independent of speed and of mass, stopping in finite time.
+#
+# Starting at vx = 2 and decelerating at 5, they stop at t = 2 / 5 = 0.4 s, which
+# at dt = 0.001 is step 400, and then stay put. Each travels vx^2 / (2 * 5) = 0.4
+# in x, keeping their 2.0 spacing, so they never touch and never reach a wall.
+
+type particles
+
+dt 0.001
+steps 1000
+output_every 100
+
+restitution 0.0
+friction 0.5
+gravity 0.0 -10.0
+bounds -5.0 -5.0 5.0 5.0
+
+# particle <mass> <radius> <px> <py> <vx> <vy>
+#
+# Two particles of mass 1 and mass 2, both resting on the floor (radius 0.2, so
+# their centres sit at y = -4.8), each pushed to the right at 2. Different mass,
+# identical motion: friction's deceleration does not depend on mass.
+particle 1.0  0.2  -4.0  -4.8   2.0   0.0
+particle 2.0  0.2  -2.0  -4.8   2.0   0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   momentum_x 6.00000000e+00   kinetic 6.00000000e+00
+#   step   1000   momentum_x 0.00000000e+00   kinetic 0.00000000e+00
+#
+# The invariants:
+#
+# 1. Horizontal momentum decays to exactly zero. Friction, not the wall's normal
+#    bounce, is what removes it: the floor is horizontal, so its normal impulse
+#    is vertical and only the tangential friction impulse can slow the slide.
+#    This is the headline: without friction momentum_x would stay 6 forever. It
+#    starts at 1 * 2 + 2 * 2 = 6.
+#
+# 2. Kinetic energy falls to zero as they stop. It starts at
+#    0.5 * 1 * 2^2 + 0.5 * 2 * 2^2 = 2 + 4 = 6 and ends at rest. (The `energy`
+#    quantity would also carry the gravitational potential, which is constant
+#    here since neither particle changes height, so `kinetic` is the telling one.)
+#
+# On the ASCII view: two points near the bottom that creep right a short way,
+# keeping their spacing, and halt together.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    momentum_x  6.00000000e+00   tol 1e-12
+# check step 0    kinetic     6.00000000e+00   tol 1e-12
+# check step 1000 momentum_x  0.00000000e+00   tol 1e-12
+# check step 1000 kinetic     0.00000000e+00   tol 1e-12

@@ -1,5 +1,7 @@
 #include <malloy/particles/particles.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <utility>
@@ -13,9 +15,23 @@ namespace malloy::particles
 {
 namespace
 {
-// Resolve one particle/particle contact: separate the overlap, then apply an
-// equal and opposite impulse along the contact normal.
-void resolve_pair(Particle2D& a, Particle2D& b, math::Real restitution)
+// Reduce one tangential velocity component toward zero by at most `max_delta`,
+// the Coulomb cap for a wall contact. `max_delta` is friction times the normal
+// impulse per unit mass, so friction 0 leaves the component untouched.
+void damp_tangential(math::Real& component, math::Real max_delta)
+{
+    const math::Real speed = std::abs(component);
+    if (speed > math::Real{0})
+    {
+        component -= (component / speed) * std::min(speed, max_delta);
+    }
+}
+
+// Resolve one particle/particle contact: separate the overlap, apply an equal
+// and opposite impulse along the contact normal, then a friction impulse along
+// the tangent, clamped to the Coulomb cone.
+void resolve_pair(Particle2D& a, Particle2D& b, math::Real restitution,
+                  math::Real friction)
 {
     const std::optional<collide::Contact> hit =
         collide::contact(collide::Circle{a.position, a.radius},
@@ -54,18 +70,53 @@ void resolve_pair(Particle2D& a, Particle2D& b, math::Real restitution)
     const math::Real impulse = -(math::Real{1} + restitution) * closing / inverse_sum;
     a.velocity -= hit->normal * (impulse * inverse_a);
     b.velocity += hit->normal * (impulse * inverse_b);
+
+    // Coulomb friction: a tangential impulse from the velocity that REMAINS
+    // after the normal impulse, clamped to `friction` times the normal impulse.
+    // A particle has no orientation, so this only damps the tangential slide
+    // between the two, imparting no spin (no lever arm, unlike the rigid domain).
+    if (!(friction > math::Real{0}))
+    {
+        return;
+    }
+    const math::Vec2 remaining = b.velocity - a.velocity;
+    const math::Vec2 sideways = remaining - hit->normal * math::dot(remaining, hit->normal);
+    const math::Real sliding = math::length(sideways);
+    if (!(sliding > math::Real{0}))
+    {
+        return; // not sliding; invent no tangent (the no-fallback rule)
+    }
+    const math::Vec2 tangent = sideways / sliding;
+    math::Real tangent_impulse = sliding / inverse_sum;
+    const math::Real limit = friction * impulse; // `impulse` is the normal magnitude, > 0 here
+    if (tangent_impulse > limit)
+    {
+        tangent_impulse = limit; // Coulomb's cone
+    }
+    // Friction opposes the slide, which runs from a toward b along `tangent`, so
+    // a is dragged forward along it and b back, the opposite of the normal pair.
+    a.velocity += tangent * (tangent_impulse * inverse_a);
+    b.velocity -= tangent * (tangent_impulse * inverse_b);
 }
 
 // Keep one particle inside the box. Walls are immovable, so this is a clamp
-// plus a damped reflection rather than an exchange of momentum.
-void resolve_walls(Particle2D& p, const collide::Aabb& bounds, math::Real restitution)
+// plus a damped reflection rather than an exchange of momentum. On a real bounce
+// the tangential velocity is also damped, clamped Coulomb-style to `friction`
+// times the normal impulse per unit mass, which is `(1 + restitution)` times the
+// incoming normal speed. Friction 0 leaves the tangent untouched, so the motion
+// is exactly the old reflect.
+void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
+                   math::Real restitution, math::Real friction)
 {
     if (p.position.x - p.radius < bounds.min.x)
     {
         p.position.x = bounds.min.x + p.radius;
         if (p.velocity.x < math::Real{0})
         {
+            const math::Real normal_speed = -p.velocity.x;
             p.velocity.x = -p.velocity.x * restitution;
+            damp_tangential(p.velocity.y,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
     else if (p.position.x + p.radius > bounds.max.x)
@@ -73,7 +124,10 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds, math::Real restit
         p.position.x = bounds.max.x - p.radius;
         if (p.velocity.x > math::Real{0})
         {
+            const math::Real normal_speed = p.velocity.x;
             p.velocity.x = -p.velocity.x * restitution;
+            damp_tangential(p.velocity.y,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
 
@@ -82,7 +136,10 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds, math::Real restit
         p.position.y = bounds.min.y + p.radius;
         if (p.velocity.y < math::Real{0})
         {
+            const math::Real normal_speed = -p.velocity.y;
             p.velocity.y = -p.velocity.y * restitution;
+            damp_tangential(p.velocity.x,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
     else if (p.position.y + p.radius > bounds.max.y)
@@ -90,7 +147,10 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds, math::Real restit
         p.position.y = bounds.max.y - p.radius;
         if (p.velocity.y > math::Real{0})
         {
+            const math::Real normal_speed = p.velocity.y;
             p.velocity.y = -p.velocity.y * restitution;
+            damp_tangential(p.velocity.x,
+                            friction * (math::Real{1} + restitution) * normal_speed);
         }
     }
 }
@@ -106,7 +166,8 @@ bool Particle2D::is_valid() const
 bool ParticleSettings::is_valid() const
 {
     return restitution >= math::Real{0} && restitution <= math::Real{1} &&
-           math::is_finite(restitution) && math::is_finite(gravity) &&
+           math::is_finite(restitution) && friction >= math::Real{0} &&
+           math::is_finite(friction) && math::is_finite(gravity) &&
            bounds.is_valid();
 }
 
@@ -164,6 +225,7 @@ sim_core::StepResult ParticleWorld::step()
 
     const math::Real dt = simulation_settings_.dt;
     const math::Real restitution = particle_settings_.restitution;
+    const math::Real friction = particle_settings_.friction;
     const std::size_t count = particles_.size();
 
     // (1) gravity first, then (2) move by the UPDATED velocity. Velocities
@@ -185,14 +247,14 @@ sim_core::StepResult ParticleWorld::step()
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
-            resolve_pair(particles_[i], particles_[j], restitution);
+            resolve_pair(particles_[i], particles_[j], restitution, friction);
         }
     }
 
     // (3) then keep everything inside the box.
     for (std::size_t i = 0; i < count; ++i)
     {
-        resolve_walls(particles_[i], particle_settings_.bounds, restitution);
+        resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction);
     }
 
     // (4) a step that produced non-finite state must not report success.

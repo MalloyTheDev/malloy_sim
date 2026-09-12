@@ -25,8 +25,20 @@ struct ParticleSettings
     // world, not of a particle, so no body type changes (ADR 0006).
     math::Vec2 gravity{};
 
-    // Valid when restitution is in [0, 1] and finite, bounds is a valid box,
-    // and gravity is finite.
+    // Coulomb friction for every contact, both particle/particle and
+    // particle/wall: a tangential impulse clamped to `friction` times the normal
+    // impulse, which damps sliding rather than reversing it. A particle carries
+    // no orientation, so this imparts no spin (unlike the rigid domain, where the
+    // same clamp has a lever arm). Defaults to zero, and it is the LAST field so
+    // that a `{restitution, bounds}` or `{restitution, bounds, gravity}` brace
+    // still compiles and a scenario written before this existed behaves
+    // bit-for-bit as it did: with no friction a contact only ever touched the
+    // normal direction. It is a contact impulse consumed on the spot, not a
+    // persistent force, so no body type changes and no accumulator is added.
+    math::Real friction{0.0};
+
+    // Valid when restitution is in [0, 1] and finite, friction is non-negative
+    // and finite, bounds is a valid box, and gravity is finite.
     bool is_valid() const;
 };
 } // namespace malloy::particles

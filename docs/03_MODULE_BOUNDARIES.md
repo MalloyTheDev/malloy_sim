@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M34). These boundaries are in force
+> All modules below are implemented (M2-M35). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -54,7 +54,7 @@ Not responsible for density, mass, inertia, bodies, velocity, contact response, 
 
 ## `malloy_particles`
 
-Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction plus an impulse along the contact normal), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form.
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form.
 
 Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, gravity, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 
@@ -66,7 +66,7 @@ Also responsible for rigid contact response since M14: disc against disc contact
 
 Since M16 a world also owns immovable ground planes, carried in `RigidSettings`. They are `collide::Halfplane` values, so the geometry stays in `malloy_collide` and `malloy_rigid` only resolves against it.
 
-Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to the friction coefficient times the normal impulse. It is a contact impulse rather than a persistent force, so it needs no force accumulator and rule 5 is untouched. `malloy_particles` has no friction.
+Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to the friction coefficient times the normal impulse. It is a contact impulse rather than a persistent force, so it needs no force accumulator and rule 5 is untouched. `malloy_particles` gained the same clamp in M35, on its particle and wall contacts, with no lever arm since a particle has no orientation.
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 

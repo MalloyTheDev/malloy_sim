@@ -24,9 +24,9 @@ Before doing anything, read:
 
 Current status:
 
-M1-M34 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
+M1-M35 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
 dimensions (with ballistics as uniform
-gravity in that domain), 2D rigid bodies with contact response and their own
+gravity in that domain, and Coulomb friction on their contacts since M35), 2D rigid bodies with contact response and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
 both torque-free and under a constant applied torque, a sphere bouncing on a 3D
 ground plane, rolling with friction, and colliding with another sphere, mass properties
