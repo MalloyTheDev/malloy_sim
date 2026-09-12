@@ -4996,25 +4996,8 @@ int main()
             MALLOY_CHECK_TRUE(malloy::math::dot(world.bodies()[1].velocity, diag) > -1.0 + 1e-6);
         }
 
-        // A box against a SPHERE is deferred (rule 12): the mix needs its own
-        // closest-feature test, so an overlapping box and sphere still pass
-        // through each other. This guards that scope boundary and will change
-        // when box/sphere lands.
-        {
-            Rigid3DSettings st;
-            st.restitution = 1.0;
-            RigidBody3D box = cube(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0});
-            RigidBody3D ball;
-            ball.mass = 1.0;
-            ball.inertia = Vec3{0.4, 0.4, 0.4};
-            ball.radius = 0.5;                    // a sphere, not a box
-            ball.position = Vec3{0.6, 0.0, 0.0};  // overlapping the box
-            ball.velocity = Vec3{-1.0, 0.0, 0.0};
-            Rigid3DWorld world{SimulationSettings{0.002}, {box, ball}, st};
-            MALLOY_CHECK_TRUE(world.step().ok());
-            MALLOY_CHECK_NEAR(world.bodies()[0].velocity.x, 1.0, 1e-12);
-            MALLOY_CHECK_NEAR(world.bodies()[1].velocity.x, -1.0, 1e-12);
-        }
+        // (A box against a SPHERE was deferred at M33; M34 resolves it, and the
+        // M34 block below covers that mix.)
 
         // Two boxes clear of each other never touch: no impulse, no change over a
         // long run (a guard against a false-positive overlap).
@@ -5024,6 +5007,134 @@ int main()
             Rigid3DWorld world{SimulationSettings{0.002},
                                {cube(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{}),
                                 cube(1.0, Vec3{3.0, 0.0, 0.0}, Vec3{})},
+                               st};
+            for (int i = 0; i < 100; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_NEAR(malloy::math::length(world.bodies()[0].velocity), 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(malloy::math::length(world.bodies()[1].velocity), 0.0, 1e-12);
+        }
+    }
+
+    // --- M34: box against sphere, the last movable pair in 3D, resolved through
+    //     the same impulse core. A head-on hit along the line of centres lands
+    //     the contact on that line, so unlike the box-box corner it imparts no
+    //     spin: total linear momentum stays exact and, at frictionless
+    //     restitution 1, so does total kinetic energy. The mix works in either
+    //     argument order (the rigid branch flips the normal to run a to b). ---
+    {
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::SolidBox;
+        using malloy::rigid::total_kinetic_energy3d;
+        using malloy::rigid::total_linear_momentum3d;
+
+        const Vec3 half{0.5, 0.5, 0.5};
+        const auto box_body = [&](Real mass, const Vec3& pos, const Vec3& vel) {
+            const Real density = mass / (8.0 * half.x * half.y * half.z);
+            RigidBody3D b =
+                rigid_body_from(mass_properties_3d(SolidBox{Vec3{}, half, Quat{}, density}));
+            b.half_extents = half;
+            b.position = pos;
+            b.velocity = vel;
+            return b;
+        };
+        const auto sphere_body = [&](Real mass, Real radius, const Vec3& pos,
+                                     const Vec3& vel) {
+            RigidBody3D b;
+            b.mass = mass;
+            const Real i = 0.4 * mass * radius * radius; // solid sphere
+            b.inertia = Vec3{i, i, i};
+            b.radius = radius;
+            b.position = pos;
+            b.velocity = vel;
+            return b;
+        };
+
+        // Head-on: a box (mass 2, moving +x) into a sphere (mass 1, moving -x),
+        // overlapping 0.1 along x. Total momentum is +1 and stays there at every
+        // restitution; the box is slowed, so a real impulse fired.
+        for (const Real restitution : {0.0, 0.5, 1.0})
+        {
+            Rigid3DSettings st;
+            st.restitution = restitution;
+            const std::vector<RigidBody3D> start{
+                box_body(2.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}),
+                sphere_body(1.0, 0.5, Vec3{0.9, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0})};
+            const Vec3 p0 = total_linear_momentum3d(start); // (1, 0, 0)
+            Rigid3DWorld world{SimulationSettings{0.002}, start, st};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                total_linear_momentum3d(world.bodies()), p0, 1e-10));
+            MALLOY_CHECK_TRUE(world.bodies()[0].velocity.x < 1.0 - 1e-6);
+        }
+
+        // A head-on hit runs through both centres, so no spin is imparted:
+        // frictionless restitution 1 conserves total kinetic energy exactly, and
+        // restitution below 1 strictly loses some.
+        {
+            Rigid3DSettings elastic_st;
+            elastic_st.restitution = 1.0;
+            Rigid3DSettings lossy_st;
+            lossy_st.restitution = 0.4;
+            const std::vector<RigidBody3D> start{
+                box_body(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.5, 0.0, 0.0}),
+                sphere_body(1.0, 0.5, Vec3{0.9, 0.0, 0.0}, Vec3{-1.5, 0.0, 0.0})};
+            const Real k0 = total_kinetic_energy3d(start);
+            Rigid3DWorld elastic{SimulationSettings{0.002}, start, elastic_st};
+            Rigid3DWorld lossy{SimulationSettings{0.002}, start, lossy_st};
+            for (int i = 0; i < 30; ++i)
+            {
+                MALLOY_CHECK_TRUE(elastic.step().ok());
+                MALLOY_CHECK_TRUE(lossy.step().ok());
+            }
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(elastic.bodies()), k0, 1e-9);
+            MALLOY_CHECK_TRUE(total_kinetic_energy3d(lossy.bodies()) < k0 - 0.1);
+        }
+
+        // The mix resolves in either argument order: here the SPHERE is body a
+        // and the box is body b, which exercises the normal flip in the rigid
+        // branch. The head-on outcome is exact: sphere mass 2 at +1 into box
+        // mass 1 at -1 with restitution 0.5 leaves the sphere at rest and the box
+        // at +1. Pinning those (not merely "it slowed") is what catches a normal
+        // that was not flipped to run a toward b, which would tunnel the bodies
+        // through and settle them at the wrong velocities.
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5;
+            const std::vector<RigidBody3D> start{
+                sphere_body(2.0, 0.5, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}),
+                box_body(1.0, Vec3{0.9, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0})};
+            const Vec3 p0 = total_linear_momentum3d(start);
+            Rigid3DWorld world{SimulationSettings{0.002}, start, st};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+            }
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                total_linear_momentum3d(world.bodies()), p0, 1e-10));
+            MALLOY_CHECK_TRUE(
+                malloy::math::approx_equal(world.bodies()[0].velocity, Vec3{0.0, 0.0, 0.0}, 1e-9));
+            MALLOY_CHECK_TRUE(
+                malloy::math::approx_equal(world.bodies()[1].velocity, Vec3{1.0, 0.0, 0.0}, 1e-9));
+        }
+
+        // A box and a sphere clear of each other never touch: no change.
+        {
+            Rigid3DSettings st;
+            st.restitution = 1.0;
+            Rigid3DWorld world{SimulationSettings{0.002},
+                               {box_body(1.0, Vec3{0.0, 0.0, 0.0}, Vec3{}),
+                                sphere_body(1.0, 0.5, Vec3{3.0, 0.0, 0.0}, Vec3{})},
                                st};
             for (int i = 0; i < 100; ++i)
             {

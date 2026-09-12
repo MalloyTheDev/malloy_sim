@@ -919,6 +919,165 @@ int main()
         }
     }
 
+    // --- M34: Box3 against Sphere, the last movable pair in 3D. No SAT: the
+    //     nearest point of the box to the sphere centre (the centre clamped into
+    //     the box frame) decides everything. The normal runs from that point to
+    //     the centre; a centre inside the box is the degenerate case and pushes
+    //     out the least-penetrated face. `overlaps` and `contact` agree on every
+    //     case, and the reversed order negates the normal. ---
+    {
+        using malloy::collide::Box3;
+        using malloy::collide::contact;
+        using malloy::collide::overlaps;
+        using malloy::collide::Sphere;
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+
+        const Vec3 half{0.5, 0.5, 0.5};
+        const Quat none{};
+        const Box3 cube{Vec3{0.0, 0.0, 0.0}, half, none}; // axis-aligned unit cube
+
+        // Clear of the box: no overlap, no contact.
+        {
+            const Sphere s{Vec3{2.0, 0.0, 0.0}, 0.5};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_FALSE(c.has_value());
+        }
+
+        // Face contact: a sphere on the +x side, its centre 1.0 out, radius 0.6.
+        // The nearest point is the face centre (0.5, 0, 0), so the normal is +x
+        // (box toward sphere), penetration 0.1, and the point sits midway in the
+        // overlap along x (box face 0.5, sphere surface 0.4).
+        {
+            const Sphere s{Vec3{1.0, 0.0, 0.0}, 0.6};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.1, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->point, Vec3{0.45, 0.0, 0.0}, eps));
+
+            // Reversed order negates the normal (sphere toward box) but keeps the
+            // penetration and point.
+            const auto r = contact(s, cube);
+            MALLOY_CHECK_TRUE(overlaps(s, cube) == r.has_value());
+            MALLOY_CHECK_TRUE(r.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(r->normal, Vec3{-1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(r->penetration, 0.1, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(r->point, Vec3{0.45, 0.0, 0.0}, eps));
+        }
+
+        // Exact touch: distance equals the radius, so a contact exists with zero
+        // penetration; a hair further apart separates them (touching counts, the
+        // boundary is inclusive).
+        {
+            // Centre 1.0 out, radius 0.5: the face at x = 0.5 and the sphere
+            // surface meet exactly, and 1.0, 0.5 and 0.25 are all exact in
+            // double, so this really is a zero-penetration touch.
+            const Sphere s{Vec3{1.0, 0.0, 0.0}, 0.5};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_NEAR(c->penetration, 0.0, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            const Sphere apart{Vec3{1.0 + 1e-6, 0.0, 0.0}, 0.5};
+            const auto c2 = contact(cube, apart);
+            MALLOY_CHECK_TRUE(overlaps(cube, apart) == c2.has_value());
+            MALLOY_CHECK_FALSE(c2.has_value());
+        }
+
+        // Corner contact: the nearest point is the +++ corner (0.5, 0.5, 0.5), so
+        // the normal is normalize(1,1,1) and the penetration is radius minus the
+        // corner distance sqrt(0.75).
+        {
+            const Sphere s{Vec3{1.0, 1.0, 1.0}, 1.0};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, normalize(Vec3{1.0, 1.0, 1.0}), 1e-9));
+            MALLOY_CHECK_NEAR(c->penetration, 1.0 - std::sqrt(0.75), 1e-9);
+        }
+
+        // Edge contact: nearest point on the +x+y edge (0.5, 0.5, 0), normal
+        // normalize(1,1,0), penetration radius minus sqrt(0.5).
+        {
+            const Sphere s{Vec3{1.0, 1.0, 0.0}, 0.8};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, normalize(Vec3{1.0, 1.0, 0.0}), 1e-9));
+            MALLOY_CHECK_NEAR(c->penetration, 0.8 - std::sqrt(0.5), 1e-9);
+        }
+
+        // Sphere centre INSIDE the box: the degenerate case. Centre at
+        // (0.2, 0, 0), radius 0.3, is 0.3 from the +x face (the nearest), so it
+        // pushes out +x with penetration radius + 0.3 = 0.6.
+        {
+            const Sphere s{Vec3{0.2, 0.0, 0.0}, 0.3};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.6, eps);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+        }
+
+        // The mirror inside case: centre at (-0.2, 0, 0) is nearest the -x face,
+        // so the push is -x, which pins the SIGN of the deep-contact normal (a
+        // fixed +x would pass the case above but fail here).
+        {
+            const Sphere s{Vec3{-0.2, 0.0, 0.0}, 0.3};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(overlaps(cube, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{-1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.6, eps);
+        }
+
+        // Sphere centre exactly at the box centre: every face is equidistant, so
+        // the tie breaks to axis 0 with a +x normal (a fixed, repeatable choice),
+        // penetration radius + half-extent, no divide by zero.
+        {
+            const Sphere s{Vec3{0.0, 0.0, 0.0}, 0.3};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.8, eps);
+            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+        }
+
+        // A tilted box: rotated 45 degrees about z with the sphere placed along
+        // the box's OWN x-axis, so the contact is a clean face and the normal is
+        // that axis, normalize(1,1,0). This would break if the clamp used world
+        // axes instead of the box frame.
+        {
+            const Quat rot = from_axis_angle(Vec3{0.0, 0.0, 1.0}, 0.78539816339744830961);
+            const Vec3 bx = normalize(Vec3{1.0, 1.0, 0.0}); // box local x in world
+            const Box3 tilted{Vec3{0.0, 0.0, 0.0}, half, rot};
+            const Sphere s{bx * 1.0, 0.7};
+            const auto c = contact(tilted, s);
+            MALLOY_CHECK_TRUE(overlaps(tilted, s) == c.has_value());
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, bx, 1e-9));
+            MALLOY_CHECK_NEAR(c->penetration, 0.2, 1e-9);
+        }
+
+        // Invalid shapes never overlap or contact, in either order.
+        {
+            const Box3 bad_box{Vec3{}, Vec3{-1.0, 0.5, 0.5}, none};
+            const Sphere bad_sphere{Vec3{}, -1.0};
+            const Sphere ok_sphere{Vec3{}, 0.5};
+            MALLOY_CHECK_FALSE(overlaps(bad_box, ok_sphere));
+            MALLOY_CHECK_FALSE(contact(bad_box, ok_sphere).has_value());
+            MALLOY_CHECK_FALSE(overlaps(cube, bad_sphere));
+            MALLOY_CHECK_FALSE(contact(cube, bad_sphere).has_value());
+            MALLOY_CHECK_FALSE(contact(bad_sphere, cube).has_value());
+        }
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

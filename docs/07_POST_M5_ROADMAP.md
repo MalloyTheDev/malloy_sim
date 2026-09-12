@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M33 are complete, so this is the live roadmap for what comes next.
+M1-M34 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -47,6 +47,7 @@ M30 - an oriented box on a ground plane     [done]
 M31 - spring networks in three dimensions   [done]
 M32 - colliding particles in three dimensions [done]
 M33 - box against box (SAT)                 [done]
+M34 - box against a sphere                  [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -176,6 +177,7 @@ mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume int
 a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator]
 an oriented box against a plane        [done, M30: penetrating corners, one centroid contact]
 box against box (SAT, edge-edge)       [done, M33: one contact point, a bounce; the manifold and iterative solver a stack needs are still deferred]
+box against a sphere                    [done, M34: the box's nearest point to the sphere centre, the last movable pair in 3D]
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 rendering              (terminal-first holds until then, ADR 0002)
 ```

@@ -827,6 +827,62 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M34] - 2026-09-12  (box against a sphere)
+
+### Added
+
+- `collide::overlaps(Box3, Sphere)` and `collide::contact(Box3, Sphere)`, plus
+  the `Sphere`-first orderings, which negate the normal so both keep the
+  a-toward-b convention. No separating axis is needed: the nearest point of the
+  box to the sphere's centre is found by clamping that centre into the box's
+  local frame, and the pair overlaps when it lies within `radius`.
+- Box-against-sphere contact response in `rigid::Rigid3DWorld`: the mixed pair
+  resolves through the SAME impulse core (ADR 0008) the sphere and box pairs use,
+  with the branch flipping the contact normal when the box is body b.
+- The `box_sphere_collision` template: a box and a sphere colliding head-on in
+  free space and conserving momentum through the bounce. Twenty-three templates
+  now, across ten domains.
+
+### The last movable pair in 3D
+
+M24 collided two spheres and M33 two boxes; a box against a sphere was the one
+mix left, and this fills it, so any two 3D primitives now collide. It is the
+simplest of the three geometrically: a plane needs no search because it carries
+its own normal, two boxes need the fifteen-axis SAT, but a box and a sphere need
+only the box's nearest point to the sphere centre (Ericson, Real-Time Collision
+Detection, section 5.1.5). The normal runs from that point to the centre and the
+penetration is `radius` minus their distance. The one degenerate case is a
+sphere centre inside the box, where that direction vanishes: it falls back to
+the least-penetrated face axis (its outward direction, ties broken by axis
+order), the deterministic analogue of the sphere pair's fixed normal. Deciding
+inside from outside is done by whether the centre lies within every slab, not by
+a distance-to-zero test, so a grazing contact is never mistaken for the
+degenerate one.
+
+### Invariants
+
+The geometry tests pin the normal, penetration and contact point on a box face,
+edge and corner, on the exact touch, on a tilted box (placed along the box's own
+axis, which would fail if the clamp used world axes), and on a sphere centre both
+inside the box and at its exact centre; `overlaps` and `contact` agree on every
+case, and the reversed order negates the normal. The dynamics tests hold total
+linear momentum across a head-on collision at three restitutions, conserve total
+kinetic energy at frictionless restitution 1 (the head-on contact makes no
+torque, so no spin is imparted) and lose it below 1, and resolve the mix in both
+argument orders with the exact post-collision velocities pinned.
+
+### Mutation testing
+
+Nine mutations, all caught: dropping the clamp that finds the nearest point,
+inverting the overlap predicate, inverting the contact distance guard, flipping
+the outside normal direction, pushing out the deepest face instead of the
+shallowest, forcing the inside push sign positive, giving the outside
+penetration the wrong sign, dropping the normal negation in the reversed order,
+and dropping the box-is-b normal flip in the rigid branch (caught only after the
+reversed-order dynamics test was tightened to pin the exact post-collision
+velocities rather than merely that the body slowed, since a body that tunnels
+through on a flipped normal still slows eventually).
+
 ## [M33] - 2026-09-12  (box against box)
 
 ### Added

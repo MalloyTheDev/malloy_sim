@@ -83,4 +83,24 @@ std::vector<Contact3> contacts(const Box3& box, const Plane3& plane);
 // fixed +x. Returns no value when they do not overlap or either box is invalid;
 // never throws (docs/04).
 std::optional<Contact3> contact(const Box3& a, const Box3& b);
+
+// An oriented box against a sphere (M34), the last movable pair in 3D. No SAT is
+// needed: the nearest point of the box to the sphere's centre is found by
+// clamping that centre into the box's local frame, and the two overlap when it
+// lies within `radius` of the centre. Touching counts. The order is symmetric:
+// `contact(Box3, Sphere)` gives a normal from the box toward the sphere, and
+// `contact(Sphere, Box3)` the negation, so both keep the a-toward-b convention.
+//
+// The normal is the direction from that nearest point to the sphere's centre,
+// and the penetration is `radius` minus their distance. The one degenerate case
+// is a sphere centre inside the box, where that direction vanishes: it falls
+// back to the least-penetrated face axis (its outward direction, ties broken by
+// axis order), the deterministic analogue of the sphere pair's fixed normal.
+// The contact point is midway between the box surface and the sphere surface
+// along the normal. Returns no value when they do not overlap or either shape is
+// invalid; never throws (docs/04).
+bool overlaps(const Box3& box, const Sphere& sphere);
+bool overlaps(const Sphere& sphere, const Box3& box);
+std::optional<Contact3> contact(const Box3& box, const Sphere& sphere);
+std::optional<Contact3> contact(const Sphere& sphere, const Box3& box);
 } // namespace malloy::collide

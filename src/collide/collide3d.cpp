@@ -460,4 +460,135 @@ std::optional<Contact3> contact(const Box3& a, const Box3& b)
     }
     return result;
 }
+
+namespace
+{
+// The point of an oriented box nearest to `p`: clamp `p`, expressed in the box's
+// local frame, into the half-extents on each axis, then map back to world. The
+// building block of the box/sphere test (Ericson, Real-Time Collision Detection
+// section 5.1.5).
+math::Vec3 closest_point_on_obb(const Obb& o, const math::Vec3& p)
+{
+    const math::Vec3 d = p - o.c;
+    math::Vec3 q = o.c;
+    for (int k = 0; k < 3; ++k)
+    {
+        q = q + o.u[k] * std::clamp(math::dot(d, o.u[k]), -o.e[k], o.e[k]);
+    }
+    return q;
+}
+} // namespace
+
+bool overlaps(const Box3& box, const Sphere& sphere)
+{
+    if (!box.is_valid() || !sphere.is_valid())
+    {
+        return false;
+    }
+    const math::Vec3 nearest = closest_point_on_obb(make_obb(box), sphere.center);
+    const math::Vec3 delta = sphere.center - nearest;
+    const math::Real distance_squared = math::dot(delta, delta);
+    if (!math::is_finite(distance_squared))
+    {
+        return false; // so far away the squared distance overflowed
+    }
+    // Touching counts, matching every other query.
+    return distance_squared <= sphere.radius * sphere.radius;
+}
+
+bool overlaps(const Sphere& sphere, const Box3& box)
+{
+    return overlaps(box, sphere); // the query is symmetric
+}
+
+std::optional<Contact3> contact(const Box3& box, const Sphere& sphere)
+{
+    if (!box.is_valid() || !sphere.is_valid())
+    {
+        return std::nullopt;
+    }
+    const Obb o = make_obb(box);
+    const math::Vec3 d = sphere.center - o.c;
+
+    // Signed distance along each box axis, and whether the centre lies within
+    // the slab on every one of them: that, not the numeric distance, is what
+    // separates "centre outside the box" from "centre inside", and it stays
+    // exact where a distance-to-zero test would blur a grazing contact into the
+    // degenerate one.
+    math::Real projection[3];
+    bool inside = true;
+    for (int k = 0; k < 3; ++k)
+    {
+        projection[k] = math::dot(d, o.u[k]);
+        if (std::abs(projection[k]) > o.e[k])
+        {
+            inside = false;
+        }
+    }
+
+    math::Vec3 normal;
+    math::Real penetration;
+    math::Vec3 box_surface;
+    if (!inside)
+    {
+        // The usual case: the nearest point is on the box surface, and the push
+        // direction runs from it to the sphere's centre.
+        const math::Vec3 nearest = closest_point_on_obb(o, sphere.center);
+        const math::Vec3 delta = sphere.center - nearest;
+        const math::Real distance_squared = math::dot(delta, delta);
+        if (!math::is_finite(distance_squared) ||
+            distance_squared > sphere.radius * sphere.radius)
+        {
+            return std::nullopt; // clear of the box, or too far to be finite
+        }
+        const math::Real distance = std::sqrt(distance_squared);
+        normal = delta / distance; // from the box toward the sphere
+        penetration = sphere.radius - distance;
+        box_surface = nearest;
+    }
+    else
+    {
+        // The sphere's centre is inside the box (or exactly on a face): every
+        // direction to the surface is valid, so push out through the LEAST
+        // penetrated face, ties broken by axis order (0 then 1 then 2), the
+        // deterministic analogue of the sphere pair's fixed normal.
+        int axis = 0;
+        math::Real shallowest = o.e[0] - std::abs(projection[0]);
+        for (int k = 1; k < 3; ++k)
+        {
+            const math::Real depth_k = o.e[k] - std::abs(projection[k]);
+            if (depth_k < shallowest)
+            {
+                shallowest = depth_k;
+                axis = k;
+            }
+        }
+        const math::Real sign =
+            projection[axis] >= math::Real{0} ? math::Real{1} : math::Real{-1};
+        normal = o.u[axis] * sign;                 // outward through that face
+        penetration = sphere.radius + shallowest;  // its depth plus the radius
+        box_surface = sphere.center; // the centre is its own nearest point
+    }
+
+    Contact3 result;
+    result.normal = normal;
+    result.penetration = penetration;
+    // Midway between the two surfaces along the normal: the box's at
+    // `box_surface`, the sphere's `radius` back along the normal from its centre.
+    result.point =
+        (box_surface + (sphere.center - normal * sphere.radius)) * math::Real{0.5};
+    return result;
+}
+
+std::optional<Contact3> contact(const Sphere& sphere, const Box3& box)
+{
+    // The same contact with the roles swapped, so the normal points from the
+    // sphere toward the box instead of from the box toward the sphere.
+    std::optional<Contact3> hit = contact(box, sphere);
+    if (hit)
+    {
+        hit->normal = -hit->normal;
+    }
+    return hit;
+}
 } // namespace malloy::collide

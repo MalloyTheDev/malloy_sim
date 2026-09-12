@@ -242,8 +242,9 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
     resolve_pair(sphere, ground, hit->normal, hit->penetration, settings);
 }
 
-// Body against body: sphere against sphere (M24) or, since M33, box against box.
-// Either way both participants are real and the normal points from a toward b.
+// Body against body: sphere against sphere (M24), box against box (M33), or box
+// against sphere (M34). Every pair runs the shared impulse core with the normal
+// pointing from a toward b; only the contact that feeds it differs.
 void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
                        const Rigid3DSettings& settings)
 {
@@ -269,16 +270,37 @@ void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
         resolve_pair(pa, pb, hit->normal, hit->penetration, settings);
         return;
     }
-    // A box against a sphere is still deferred: it needs its own closest-feature
-    // test rather than the two SAT and sphere paths, so a box/sphere mix is
-    // skipped here just as box/box was before M33.
-    if (body_is_box(a) || body_is_box(b))
+    // A box against a sphere (M34): exactly one body is a box. Find which, and
+    // resolve through the closest-point contact rather than the SAT or the
+    // sphere path. The box uses its half_extents; the sphere needs a real
+    // radius.
+    if (body_is_box(a) != body_is_box(b))
     {
+        const RigidBody3D& box_body = body_is_box(a) ? a : b;
+        const RigidBody3D& sphere_body = body_is_box(a) ? b : a;
+        if (!(sphere_body.radius > math::Real{0}))
+        {
+            return; // the non-box body has no sphere shape
+        }
+        const collide::Box3 box_shape{box_body.position, box_body.half_extents,
+                                      box_body.orientation};
+        const std::optional<collide::Contact3> hit = collide::contact(
+            box_shape, collide::Sphere{sphere_body.position, sphere_body.radius});
+        if (!hit)
+        {
+            return;
+        }
+        // The contact normal points from the box toward the sphere; flip it when
+        // the box is body b, so the normal always runs from a toward b.
+        const math::Vec3 normal = body_is_box(a) ? hit->normal : -hit->normal;
+        const Participant pa{&a, hit->point - a.position};
+        const Participant pb{&b, hit->point - b.position};
+        resolve_pair(pa, pb, normal, hit->penetration, settings);
         return;
     }
     if (!(a.radius > math::Real{0}) || !(b.radius > math::Real{0}))
     {
-        return; // either without a shape does not collide
+        return; // two non-box bodies without a sphere shape do not collide
     }
     const std::optional<collide::Contact3> hit = collide::contact(
         collide::Sphere{a.position, a.radius}, collide::Sphere{b.position, b.radius});
