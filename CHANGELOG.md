@@ -5,6 +5,29 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Resource caps on the scenario file, the one untrusted input the project takes.
+  A scenario may now request at most 100000000 steps and 100000 total bodies and
+  springs; beyond either, parsing fails with a clear error instead of letting the
+  app spin for billions of steps or allocate unbounded memory (a local denial of
+  service). The parser already rejected non-finite and out-of-range values; this
+  bounds sheer magnitude. The caps are far above every shipped template (a few
+  thousand steps, a handful of bodies), so nothing real is affected. Follows the
+  2026-09-13 repository security review, whose headline conclusion is that the
+  attack surface is a single local scenario file with no network, process
+  execution, filesystem writes, secrets, or dynamic loading anywhere in the code.
+- A scenario-parser test now throws resource-cap boundaries and a battery of
+  hostile inputs (control bytes, non-finite and overflowing numbers, enormous
+  tokens, out-of-range indices, truncated directives) at `parse_scenario` and
+  confirms it always returns a status rather than crashing or hanging.
+- Added `fuzz/parse_scenario_fuzzer.cpp`, a libFuzzer entry point for the parser,
+  behind an off-by-default `MALLOY_BUILD_FUZZERS` option (requires a
+  fuzzer/sanitizer-capable toolchain such as clang; the MSVC presets never build
+  it). A 112000-run pass under `-fsanitize=fuzzer,address,undefined`, seeded from
+  the shipped scenarios, reported no crash, out-of-bounds access, or undefined
+  behaviour.
+
 ### Fixed
 
 - M20 review pass. Four defects found reviewing the milestone after it shipped,

@@ -34,6 +34,17 @@ bool at_end_of_directive(std::istringstream& tokens)
     tokens >> std::ws;
     return tokens.eof();
 }
+
+// Upper bounds on the WORK and SIZE a scenario may request. A scenario file is
+// the one untrusted input this project takes, and while the parser already
+// rejects non-finite and out-of-range values, it did not bound sheer magnitude:
+// a single `steps 2000000000` line makes the app spin for billions of steps, and
+// an enormous body list allocates memory in proportion. These caps close that
+// (a local denial of service, per the 2026-09-13 security review) without
+// affecting any real scenario: the shipped templates use at most a few thousand
+// steps and a handful of bodies, orders of magnitude below these limits.
+constexpr int max_steps = 100000000;         // 1e8 steps
+constexpr std::size_t max_entities = 100000; // total bodies plus springs
 } // namespace
 
 ScenarioParseResult parse_scenario(std::istream& input)
@@ -205,6 +216,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             if (scenario.steps < 0)
             {
                 return make_error(line_number, "steps must be >= 0");
+            }
+            if (scenario.steps > max_steps)
+            {
+                return make_error(line_number, "steps exceeds the maximum (100000000)");
             }
         }
         else if (key == "output_every")
@@ -906,6 +921,23 @@ ScenarioParseResult parse_scenario(std::istream& input)
     if (input.bad())
     {
         return make_error(line_number, "read error");
+    }
+
+    // Defence-in-depth cap on total scenario size (see max_entities above): a
+    // hostile or fat-fingered file cannot make the app allocate or step over an
+    // unbounded number of bodies and springs. Only one domain's lists are ever
+    // populated, but summing them all keeps this a single centralised check.
+    const std::size_t total_entities =
+        scenario.bodies.size() + scenario.bodies3d.size() +
+        scenario.particle_list.size() + scenario.particle_list3d.size() +
+        scenario.rigid_bodies.size() + scenario.rigid_bodies3d.size() +
+        scenario.charge_list.size() + scenario.charge_list3d.size() +
+        scenario.spring_bodies.size() + scenario.spring_bodies3d.size() +
+        scenario.spring_network.springs().size() +
+        scenario.spring_network3d.springs().size();
+    if (total_entities > max_entities)
+    {
+        return make_error(line_number, "scenario exceeds the maximum entity count (100000)");
     }
 
     return ScenarioParseResult{true, "", std::move(scenario)};

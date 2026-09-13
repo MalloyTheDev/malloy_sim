@@ -1758,6 +1758,89 @@ int main()
         MALLOY_CHECK_FALSE(r.scenario.nbody_settings.is_valid());
     }
 
+    // --- Security hardening (2026-09-13 review): resource caps on the one
+    //     untrusted input (a scenario file) and parser robustness against hostile
+    //     content. The parser already rejected non-finite and out-of-range
+    //     values; these bound sheer MAGNITUDE (work and size) and confirm no
+    //     malformed input crashes, hangs, or reads out of bounds. ---
+    {
+        // The step cap: exactly at the limit parses, one over is rejected, and a
+        // value past INT_MAX is refused by the extractor rather than wrapped.
+        {
+            std::istringstream at("type nbody\nsteps 100000000\n");
+            MALLOY_CHECK_TRUE(parse_scenario(at).ok);
+            std::istringstream over("type nbody\nsteps 100000001\n");
+            MALLOY_CHECK_FALSE(parse_scenario(over).ok);
+            std::istringstream past_int("type nbody\nsteps 99999999999\n");
+            MALLOY_CHECK_FALSE(parse_scenario(past_int).ok);
+        }
+
+        // The entity cap: exactly at the limit parses, one over is rejected. Built
+        // as bare particle lines, which the parser only has to count.
+        {
+            std::ostringstream at;
+            at << "type particles\n";
+            for (int i = 0; i < 100000; ++i)
+            {
+                at << "particle 1 0.01 0 0 0 0\n";
+            }
+            std::istringstream at_in(at.str());
+            MALLOY_CHECK_TRUE(parse_scenario(at_in).ok);
+
+            std::ostringstream over;
+            over << "type particles\n";
+            for (int i = 0; i < 100001; ++i)
+            {
+                over << "particle 1 0.01 0 0 0 0\n";
+            }
+            std::istringstream over_in(over.str());
+            MALLOY_CHECK_FALSE(parse_scenario(over_in).ok);
+        }
+
+        // A few inputs that must be rejected outright.
+        {
+            std::istringstream missing("steps\n");
+            MALLOY_CHECK_FALSE(parse_scenario(missing).ok);
+            std::istringstream unknown_type("type wobble\n");
+            MALLOY_CHECK_FALSE(parse_scenario(unknown_type).ok);
+            std::istringstream truncated("type nbody\nbody 1 1\n");
+            MALLOY_CHECK_FALSE(parse_scenario(truncated).ok);
+        }
+
+        // Robustness battery: each hostile input must RETURN a status rather than
+        // crash, hang, or read out of bounds. Reaching the end of the loop is the
+        // assertion; a crash or infinite loop here would fail the test. Some of
+        // these parse to a structurally valid scenario carrying values a world
+        // would later reject, so their ok flag is deliberately not asserted.
+        {
+            const std::vector<std::string> hostile = {
+                "",                                                // empty
+                "\n\n\n",                                          // blank lines
+                "   \t  ",                                         // whitespace only
+                "# just a comment\n",                              // comment only
+                "\x1a\x01 control bytes on a line",                // control chars
+                "type nbody\nbody 1 nan inf 0 0 0 0\n",            // non-finite tokens
+                "type nbody\ndt 1e400\nsteps 1\nbody 1 1 0 0 0 0\n", // overflow to inf
+                "type springs\nspring 999999999999 0 1 1 0\n",     // out-of-range index
+                "type nbody\ndt -1\nsteps 1\n",                    // non-positive dt
+                "type nbody\n" + std::string(200000, '9') + "\n",  // one enormous token
+                std::string(100000, 'x') + "\n",                   // enormous unknown key
+                "type\ntype\ntype\n",                              // repeated bare key
+                "TYPE NBODY\n",                                    // wrong case
+                "type nbody\nbody 1 1 0 0 0 0 extra\n",            // trailing token
+            };
+            std::size_t returned = 0;
+            for (const std::string& s : hostile)
+            {
+                std::istringstream in(s);
+                const ScenarioParseResult r = parse_scenario(in);
+                (void)r; // survival, not the verdict, is what this asserts
+                ++returned;
+            }
+            MALLOY_CHECK_TRUE(returned == hostile.size());
+        }
+    }
+
     std::cout << "malloy_scenario_tests passed\n";
     return 0;
 }

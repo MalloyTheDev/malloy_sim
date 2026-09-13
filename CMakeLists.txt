@@ -14,6 +14,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(MALLOY_BUILD_APPS "Build MalloySim applications" ON)
 option(MALLOY_BUILD_TESTS "Build MalloySim tests" ON)
+# Off by default: the fuzzers need a fuzzer/sanitizer-capable toolchain (clang),
+# not the default MSVC presets. See fuzz/parse_scenario_fuzzer.cpp.
+option(MALLOY_BUILD_FUZZERS "Build MalloySim fuzz targets (requires clang)" OFF)
 
 add_library(malloy_project_options INTERFACE)
 add_library(malloy::project_options ALIAS malloy_project_options)
@@ -505,4 +508,19 @@ if(MALLOY_BUILD_TESTS)
         PRIVATE
             MALLOY_TEST_EXECUTABLE_COUNT=${malloy_test_count}
     )
+endif()
+
+# ----------------------------------------------------------------------------
+# Fuzzers (off by default; not registered as tests, so the count above is
+# unchanged). Require a fuzzer- and sanitizer-capable toolchain such as clang;
+# the default MSVC presets never build these. Coverage-guided robustness for
+# the scenario parser, the one untrusted input (docs/09, security review).
+# ----------------------------------------------------------------------------
+if(MALLOY_BUILD_FUZZERS)
+    add_executable(malloy_parse_scenario_fuzzer fuzz/parse_scenario_fuzzer.cpp)
+    target_link_libraries(malloy_parse_scenario_fuzzer PRIVATE malloy::scenario)
+    target_compile_options(malloy_parse_scenario_fuzzer
+        PRIVATE -g -O1 -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined)
+    target_link_options(malloy_parse_scenario_fuzzer
+        PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
