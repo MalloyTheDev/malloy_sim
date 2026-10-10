@@ -115,7 +115,11 @@ sim_core::StepStatus SpringWorld3D::validate() const
         //     limit, dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2 with
         //     omega^2 = k/mu and gamma = c/(2 mu). A NECESSARY condition for the
         //     network, not a sufficient one (see the 2D world's derivation).
-        const math::Real reduced = (a.mass * b.mass) / (a.mass + b.mass);
+        // As 1 / (1/ma + 1/mb): the product ma * mb overflowed for masses
+        // near 1e160 and underflowed near 1e-170, so valid bodies were
+        // reported invalid (issue #36). The reciprocals stay in range.
+        const math::Real reduced =
+            math::Real{1} / (math::Real{1} / a.mass + math::Real{1} / b.mass);
         if (!(reduced > math::Real{0}) || !math::is_finite(reduced))
         {
             return sim_core::StepStatus::InvalidState;

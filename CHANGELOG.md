@@ -50,6 +50,25 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #35: a 3D sphere-against-sphere contact applied its friction impulse
+  at two different points. Each arm was its body's radius along the normal,
+  which reach two points the depth of the overlap apart, so the equal and
+  opposite tangential impulses formed a couple and changed the total angular
+  momentum (by 0.0255 at a depth of 0.1). Both arms now reach the one contact
+  point, midway between the surfaces, as the 2D pair and every box pair already
+  did; a new test holds angular momentum through the impulse to rounding at
+  every depth, and the glancing-collision spins are re-pinned from a real run.
+  No shipped template has two spheres with friction.
+- Issue #36: the springs stability check rejected valid worlds at extreme
+  masses. The reduced mass, computed as (ma mb)/(ma + mb), overflowed near
+  1e160 and underflowed near 1e-170. It is now 1/(1/ma + 1/mb), in 2D and 3D,
+  tested at 1e160, 1e-170 and 1e300.
+- Issue #34: an open triangle mesh passed validation, and its mass depended on
+  where it sat (an open-top unit cube weighed 0.67, 0.83 or 1.67 depending on
+  its height). The signed volume of an open mesh usually stays positive, so the
+  volume check could not catch it. A mesh must now be closed and consistently
+  wound, checked exactly on indices: every directed edge appears once and so
+  does its reverse, and no triangle repeats a vertex.
 - Issue #24: an empty `charges` or `charges3d` scenario crashed the app. The
   charge runners print the first particle's speed, read through `front()` of
   an empty list: undefined behaviour, a null dereference in Release, and the

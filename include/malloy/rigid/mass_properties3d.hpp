@@ -120,10 +120,13 @@ math::Vec3 box_inertia(const math::Vec3& half_extents, math::Real mass);
 // mesh reproduces `SolidBox` exactly.
 //
 // Returns a zero-mass result for a malformed mesh (fewer than four vertices or
-// triangles, a triangle index out of range, a non-finite vertex, a
-// non-positive or non-finite density) or one whose enclosed volume is not
-// positive and finite, which is what an inside-out winding or a degenerate or
-// non-closed mesh produces. This mirrors the sphere and box convention.
+// triangles, a triangle index out of range, a triangle that repeats a vertex, a
+// non-finite vertex, a non-positive or non-finite density), for one that is not
+// CLOSED and consistently wound (every edge must be traversed exactly once in
+// each direction, by indices, so the mesh must share its vertices; issue #34),
+// or for one whose enclosed volume is not positive and finite, which is what an
+// inside-out winding or a degenerate mesh produces. This mirrors the sphere and
+// box convention.
 MassProperties3D mass_properties_3d(const SolidMesh& mesh);
 
 // Merge two mass-property sets into one body, the way a compound is assembled

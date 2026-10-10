@@ -632,6 +632,34 @@ int main()
         MALLOY_CHECK_FALSE(body_at(Vec2{}, Vec2{0.0, too_big}, 1.0).is_valid());
     }
 
+    // --- Issue #36: the stability check's reduced mass stays representable for
+    //     every valid mass. Computed as (ma mb)/(ma + mb), the product overflowed
+    //     to infinity near 1e160 and underflowed to zero near 1e-170, so two
+    //     perfectly valid bodies were reported InvalidState. A soft spring keeps
+    //     the timestep well inside the limit at both extremes (the limit only
+    //     tightens as the mass falls, and 1e-170 with k = 1e-200 is still far
+    //     inside dt = 0.01). In 2D and 3D. ---
+    {
+        for (const Real mass : {1e160, 1e-170, 1e300})
+        {
+            const Real stiffness = mass < 1.0 ? 1e-200 : 1.0;
+            SpringNetwork n;
+            n.add(make_spring(0, 1, 1.0, stiffness, 0.0));
+            const SpringWorld w{SimulationSettings{0.01}, n,
+                                {body_at(Vec2{0.0, 0.0}, Vec2{}, mass),
+                                 body_at(Vec2{1.0, 0.0}, Vec2{}, mass)}};
+            MALLOY_CHECK_TRUE(w.validate() == StepStatus::Ok);
+
+            SpringBody3D a;
+            a.mass = mass;
+            SpringBody3D b;
+            b.mass = mass;
+            b.position = Vec3{0.0, 0.0, 1.0};
+            const SpringWorld3D w3{SimulationSettings{0.01}, n, {a, b}};
+            MALLOY_CHECK_TRUE(w3.validate() == StepStatus::Ok);
+        }
+    }
+
     // --- M31: spring networks in three dimensions. Spring and SpringNetwork
     //     are reused unchanged (they carry only scalars); only the body and the
     //     force gain a third component. The domain conserves momentum exactly

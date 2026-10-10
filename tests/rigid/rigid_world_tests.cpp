@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <utility>
 #include <vector>
 
 using malloy::collide::Aabb;
@@ -4033,10 +4034,11 @@ int main()
         }
 
         // --- A glancing collision between UNEQUAL spheres with friction spins
-        //     both, and the induced spins pin the contact arms. Each body's arm
-        //     is its radius along the normal toward the contact: a's forward,
-        //     b's back. Getting b's sign wrong flips its spin; using the wrong
-        //     radius for a changes its spin. The two values below are from a
+        //     both, and the induced spins pin the contact arms. Both arms reach
+        //     the one contact point, midway between the surfaces (issue #35: they
+        //     used to be each radius along the normal, two different points when
+        //     the spheres overlap). Getting b's sign wrong flips its spin; a
+        //     wrong arm for a changes its spin. The two values below are from a
         //     real run and fix both. Unequal radii on purpose. ---
         {
             Rigid3DSettings st;
@@ -4054,9 +4056,42 @@ int main()
             }
             // The collision is in the xy plane, so both spin about z. Signs and
             // magnitudes are a real-run pin of the two-body arm machinery.
-            MALLOY_CHECK_NEAR(world.bodies()[0].angular_velocity.z, 0.60376549, 1e-6);
-            MALLOY_CHECK_NEAR(world.bodies()[1].angular_velocity.z, 0.35938422, 1e-6);
+            MALLOY_CHECK_NEAR(world.bodies()[0].angular_velocity.z, 0.60457214, 1e-6);
+            MALLOY_CHECK_NEAR(world.bodies()[1].angular_velocity.z, 0.37275515, 1e-6);
             MALLOY_CHECK_TRUE(world.bodies()[1].angular_velocity.z > 0.1); // definite sign
+        }
+
+        // --- Issue #35: the contact impulse conserves total angular momentum,
+        //     however deep the overlap. Equal and opposite impulses at ONE point
+        //     form no couple; at two points (each radius along the normal) they
+        //     did, and friction's tangential part changed L by about the depth
+        //     times the impulse: 0.0255 at depth 0.1. One step at a tiny dt, so
+        //     the motion is negligible, with L taken at the ORIGINAL positions
+        //     so the positional correction (a documented, separate artefact) is
+        //     left out and only the impulse is measured. ---
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5;
+            st.friction = 0.5;
+            for (const Real depth : {0.0, 0.1, 0.2})
+            {
+                RigidBody3D a;
+                a.mass = 1.0; a.radius = 0.6; a.inertia = Vec3{0.2, 0.3, 0.25};
+                a.velocity = Vec3{3.0, 0.0, 0.0};
+                RigidBody3D b;
+                b.mass = 2.0; b.radius = 1.0; b.inertia = Vec3{0.5, 0.6, 0.7};
+                b.position = malloy::math::normalize(Vec3{1.0, 0.4, 0.0}) * (1.6 - depth);
+                Rigid3DWorld world{SimulationSettings{1e-12}, {a, b}, st};
+                const Vec3 before = malloy::rigid::total_angular_momentum3d(world.bodies());
+                MALLOY_CHECK_TRUE(world.step().ok());
+                std::vector<RigidBody3D> after = world.bodies();
+                after[0].position = a.position;
+                after[1].position = b.position;
+                const Vec3 change = malloy::rigid::total_angular_momentum3d(after) - before;
+                MALLOY_CHECK_NEAR(malloy::math::length(change), 0.0, 1e-9);
+                // and the friction really acted: a picks up spin
+                MALLOY_CHECK_TRUE(malloy::math::length(after[0].angular_velocity) > 0.5);
+            }
         }
     }
 
@@ -4738,6 +4773,39 @@ int main()
                 v.z = 0.0;
             }
             MALLOY_CHECK_NEAR(mass_properties_3d(flat).mass, 0.0, 0.0);
+
+            // Issue #34: a mesh must be CLOSED. Without its top face (the last
+            // two triangles) a unit cube used to weigh 0.67 at the origin, 0.83
+            // half a unit down and 1.67 three units down: the signed volume
+            // stayed positive, so nothing refused it. Now it is refused
+            // wherever it sits, while the closed cube weighs 8 everywhere.
+            for (const Real z : {0.0, -0.5, -3.0})
+            {
+                const SolidMesh closed =
+                    box_mesh(Vec3{0.0, 0.0, z}, Vec3{1.0, 1.0, 1.0}, Quat{}, 1.0);
+                MALLOY_CHECK_NEAR(mass_properties_3d(closed).mass, 8.0, 1e-12);
+                SolidMesh open = closed;
+                open.triangles.resize(open.triangles.size() - 2);
+                MALLOY_CHECK_NEAR(mass_properties_3d(open).mass, 0.0, 0.0);
+            }
+            // Wound inconsistently: one face flipped traverses an edge the same
+            // way as its neighbour does.
+            SolidMesh flipped = good;
+            std::swap(flipped.triangles[0].v1, flipped.triangles[0].v2);
+            MALLOY_CHECK_NEAR(mass_properties_3d(flipped).mass, 0.0, 0.0);
+            // A face listed twice, and a triangle that repeats a vertex.
+            SolidMesh doubled = good;
+            doubled.triangles.push_back(doubled.triangles[0]);
+            MALLOY_CHECK_NEAR(mass_properties_3d(doubled).mass, 0.0, 0.0);
+            SolidMesh repeated = good;
+            repeated.triangles[0].v1 = repeated.triangles[0].v0;
+            MALLOY_CHECK_NEAR(mass_properties_3d(repeated).mass, 0.0, 0.0);
+            // A sliver between two corners no edge joins (0 and 7, opposite
+            // corners of the cube) pairs its own edges, 0->7 with 7->0, so only
+            // the repeated-vertex rule refuses it.
+            SolidMesh sliver = good;
+            sliver.triangles.push_back(MeshTriangle{0, 7, 0});
+            MALLOY_CHECK_NEAR(mass_properties_3d(sliver).mass, 0.0, 0.0);
         }
 
         // --- The whole chain through M20's dynamics. A box mesh has three

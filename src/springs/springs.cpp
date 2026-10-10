@@ -176,7 +176,11 @@ sim_core::StepStatus SpringWorld::validate() const
         // a spring that is unstable alone is unstable in company. The converse
         // does not hold: a network of individually safe springs can still be
         // too stiff as a whole.
-        const math::Real reduced = (a.mass * b.mass) / (a.mass + b.mass);
+        // As 1 / (1/ma + 1/mb): the product ma * mb overflowed for masses
+        // near 1e160 and underflowed near 1e-170, so valid bodies were
+        // reported invalid (issue #36). The reciprocals stay in range.
+        const math::Real reduced =
+            math::Real{1} / (math::Real{1} / a.mass + math::Real{1} / b.mass);
         if (!(reduced > math::Real{0}) || !math::is_finite(reduced))
         {
             return sim_core::StepStatus::InvalidState;

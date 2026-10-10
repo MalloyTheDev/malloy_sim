@@ -321,10 +321,14 @@ void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
     {
         return;
     }
-    // The normal points from a toward b, so each arm is the radius along it
-    // toward the contact, a's forward and b's back.
-    const Participant pa{&a, hit->normal * a.radius};
-    const Participant pb{&b, hit->normal * -b.radius};
+    // Both arms reach the ONE contact point, midway between the surfaces, so
+    // the equal and opposite impulses act at the same place and conserve
+    // angular momentum exactly, as the 2D pair and the box pairs do. Arms of
+    // each radius along the normal reached two different points whenever the
+    // spheres overlapped, and friction's tangential impulse then formed a
+    // couple, changing the total angular momentum (issue #35).
+    const Participant pa{&a, hit->point - a.position};
+    const Participant pb{&b, hit->point - b.position};
     resolve_pair(pa, pb, hit->normal, hit->penetration, settings);
 }
 } // namespace

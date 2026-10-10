@@ -1,5 +1,8 @@
 #include <malloy/rigid/mass_properties3d.hpp>
 
+#include <algorithm>
+#include <cstddef>
+#include <utility>
 #include <vector>
 
 #include <malloy/math/math.hpp>
@@ -51,6 +54,45 @@ bool mesh_is_valid(const SolidMesh& mesh)
             triangle.v2 >= mesh.vertices.size())
         {
             return false;
+        }
+        if (triangle.v0 == triangle.v1 || triangle.v1 == triangle.v2 ||
+            triangle.v2 == triangle.v0)
+        {
+            return false; // a triangle that repeats a vertex is no face at all
+        }
+    }
+
+    // Closed and consistently wound (issue #34). The signed-tetrahedron sums are
+    // the volume integrals only for a CLOSED surface: with a face missing, the
+    // tetrahedra from the origin no longer cancel outside the solid, so the
+    // "mass" depends on where the mesh sits (an open-top unit cube weighed 0.67
+    // at the origin and 1.67 three units below it), and the volume usually
+    // stays positive, so the volume check alone did not catch it. A closed,
+    // consistently wound mesh traverses every edge exactly once in each
+    // direction: each directed edge (u, v) appears once, and so does (v, u).
+    // This is exact, on indices, so the mesh must share its vertices (two
+    // vertices at the same place with different indices are not joined).
+    std::vector<std::pair<std::size_t, std::size_t>> edges;
+    edges.reserve(mesh.triangles.size() * 3);
+    for (const MeshTriangle& triangle : mesh.triangles)
+    {
+        edges.emplace_back(triangle.v0, triangle.v1);
+        edges.emplace_back(triangle.v1, triangle.v2);
+        edges.emplace_back(triangle.v2, triangle.v0);
+    }
+    std::sort(edges.begin(), edges.end());
+    for (std::size_t i = 1; i < edges.size(); ++i)
+    {
+        if (edges[i] == edges[i - 1])
+        {
+            return false; // traversed twice the same way: a flipped or extra face
+        }
+    }
+    for (const auto& [u, v] : edges)
+    {
+        if (!std::binary_search(edges.begin(), edges.end(), std::make_pair(v, u)))
+        {
+            return false; // a border edge: the mesh is open there
         }
     }
     return true;
