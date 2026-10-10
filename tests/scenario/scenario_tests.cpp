@@ -1990,7 +1990,9 @@ int main()
         // The step cap: exactly at the limit parses, one over is rejected, and a
         // value past INT_MAX is refused by the extractor rather than wrapped.
         {
-            std::istringstream at("type nbody\nsteps 100000000\n");
+            // output_every 10000 keeps the run well inside the 1e5-report cap
+            // (issue #25).
+            std::istringstream at("type nbody\nsteps 100000000\noutput_every 10000\n");
             MALLOY_CHECK_TRUE(parse_scenario(at).ok);
             std::istringstream over("type nbody\nsteps 100000001\n");
             MALLOY_CHECK_FALSE(parse_scenario(over).ok);
@@ -1999,10 +2001,12 @@ int main()
         }
 
         // The entity cap: exactly at the limit parses, one over is rejected. Built
-        // as bare particle lines, which the parser only has to count.
+        // as bare particle lines, which the parser only has to count. `steps 0`
+        // keeps the WORK at zero, so this tests the entity cap alone (100000
+        // particles for the default 1000 steps is far over the work budget).
         {
             std::ostringstream at;
-            at << "type particles\n";
+            at << "type particles\nsteps 0\n";
             for (int i = 0; i < 100000; ++i)
             {
                 at << "particle 1 0.01 0 0 0 0\n";
@@ -2010,14 +2014,138 @@ int main()
             std::istringstream at_in(at.str());
             MALLOY_CHECK_TRUE(parse_scenario(at_in).ok);
 
+            // Issue #29: the cap is checked as each line is read, so the error
+            // names the line that crossed it (line 100003, after the type and
+            // steps lines), not the last line of the file, and nothing past it
+            // is allocated.
             std::ostringstream over;
-            over << "type particles\n";
-            for (int i = 0; i < 100001; ++i)
+            over << "type particles\nsteps 0\n";
+            for (int i = 0; i < 100010; ++i)
             {
                 over << "particle 1 0.01 0 0 0 0\n";
             }
             std::istringstream over_in(over.str());
-            MALLOY_CHECK_FALSE(parse_scenario(over_in).ok);
+            const ScenarioParseResult r = parse_scenario(over_in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("line 100003:") != std::string::npos);
+        }
+
+        // Issue #29: a lattice that, with the listed particles, crosses the cap
+        // is reported against the lattice's line.
+        {
+            std::istringstream in("type particles\nsteps 0\nlattice 100 1000 1 0 1\n"
+                                  "particle 1 0.01 0 0 0 0\nbounds -1000 -1000 1000 1000\n");
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("line 3:") != std::string::npos);
+        }
+
+        // Issue #26: ground planes have their own cap, checked per line.
+        {
+            std::ostringstream at;
+            at << "type rigid\nsteps 1\n";
+            for (int i = 0; i < 1000; ++i)
+            {
+                at << "ground 0 1 -100\n";
+            }
+            at << "rigid_static 0.5 0 0 0\n";
+            std::istringstream at_in(at.str());
+            MALLOY_CHECK_TRUE(parse_scenario(at_in).ok);
+
+            std::ostringstream over;
+            over << "type rigid3d\nsteps 1\n";
+            for (int i = 0; i < 1001; ++i)
+            {
+                over << "plane3 0 0 1 -100\n";
+            }
+            std::istringstream over_in(over.str());
+            const ScenarioParseResult r = parse_scenario(over_in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("line 1003:") != std::string::npos);
+            MALLOY_CHECK_TRUE(r.error.find("plane") != std::string::npos);
+        }
+
+        // Issue #25: the WORK budget, steps times pair tests per step, at most
+        // 1e11. 1000 bodies make 499500 pairs plus 1000 bodies, 500500 per step:
+        // 199800 steps is 9.99999e10, inside; 199801 is just over.
+        {
+            std::ostringstream bodies;
+            for (int i = 0; i < 1000; ++i)
+            {
+                bodies << "body 1 " << i << " 0 0 0\n";
+            }
+            std::istringstream inside("type nbody\noutput_every 0\nsteps 199800\n" + bodies.str());
+            MALLOY_CHECK_TRUE(parse_scenario(inside).ok);
+            std::istringstream over("type nbody\noutput_every 0\nsteps 199801\n" + bodies.str());
+            const ScenarioParseResult r = parse_scenario(over);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("work budget") != std::string::npos);
+
+            // The 41-byte file the issue reported: 99856 particles for the
+            // default 1000 steps is about 5e12 pair tests.
+            std::istringstream tiny("type particles\nlattice 316 316 1 0.001 1\n");
+            MALLOY_CHECK_FALSE(parse_scenario(tiny).ok);
+
+            // A ground plane costs a test per body per step in the rigid
+            // domains: 1000 planes and 100 static bodies for 1e6 steps is 1e11
+            // plus the pairs, over.
+            std::ostringstream planes;
+            planes << "type rigid\noutput_every 0\nsteps 1000000\n";
+            for (int i = 0; i < 1000; ++i)
+            {
+                planes << "ground 0 1 -100\n";
+            }
+            for (int i = 0; i < 100; ++i)
+            {
+                planes << "rigid_static 0.1 " << i << " 0 0\n";
+            }
+            std::istringstream planes_in(planes.str());
+            MALLOY_CHECK_FALSE(parse_scenario(planes_in).ok);
+
+            // Springs are linear: a body and a spring per step. A chain of 1000
+            // bodies and 999 springs for 1e6 steps is 2e9, inside; counted as
+            // pairs it would be 5e11, far over.
+            std::ostringstream chain;
+            chain << "type springs\noutput_every 0\nsteps 1000000\n";
+            for (int i = 0; i < 1000; ++i)
+            {
+                chain << "spring_body 1 " << i << " 0 0 0\n";
+            }
+            for (int i = 0; i < 999; ++i)
+            {
+                chain << "spring " << i << ' ' << i + 1 << " 1 1 0\n";
+            }
+            std::istringstream springs(chain.str());
+            MALLOY_CHECK_TRUE(parse_scenario(springs).ok);
+        }
+
+        // Issue #25: at most 1e5 reports, which bounds the output volume.
+        {
+            std::istringstream at("type nbody\nsteps 999990\noutput_every 10\nbody 1 0 0 0 0\n");
+            MALLOY_CHECK_TRUE(parse_scenario(at).ok); // 99999 + the step-0 report
+            std::istringstream over("type nbody\nsteps 1000000\noutput_every 10\nbody 1 0 0 0 0\n");
+            const ScenarioParseResult r = parse_scenario(over);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("reports") != std::string::npos);
+            std::istringstream none("type nbody\nsteps 100000000\noutput_every 0\nbody 1 0 0 0 0\n");
+            MALLOY_CHECK_TRUE(parse_scenario(none).ok); // only the step-0 report
+        }
+
+        // Issue #29: no line is read past 4096 characters, so one enormous line
+        // cannot allocate without limit. A comment counts: it is still read.
+        {
+            std::istringstream at("type nbody\n#" + std::string(4095, 'c') +
+                                  "\nbody 1 0 0 0 0\n");
+            MALLOY_CHECK_TRUE(parse_scenario(at).ok);
+            std::istringstream over("type nbody\n#" + std::string(4096, 'c') +
+                                    "\nbody 1 0 0 0 0\n");
+            const ScenarioParseResult r = parse_scenario(over);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("line 2:") != std::string::npos);
+            MALLOY_CHECK_TRUE(r.error.find("4096") != std::string::npos);
+            // The last line needs no newline, and a file of one line reads.
+            std::istringstream last("type nbody\nbody 1 0 0 0 0");
+            MALLOY_CHECK_TRUE(parse_scenario(last).ok);
         }
 
         // A few inputs that must be rejected outright.

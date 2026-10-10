@@ -48,6 +48,75 @@ bool at_end_of_directive(std::istringstream& tokens)
 constexpr int max_steps = 100000000;         // 1e8 steps
 constexpr std::size_t max_entities = 100000; // total bodies plus springs
 
+// The caps above bound steps and entities SEPARATELY, but a step of the
+// pairwise domains costs O(N^2), so together they still allowed about 1e8 x 5e9
+// pair tests: a 41-byte `lattice` file ran for hours (issue #25). This bounds
+// their product, the work a run will do, counted in pair tests (plus a body
+// against each ground plane, and a body or spring per step in the linear
+// springs domain). At the roughly 7 ns a pair test costs in Release, 1e11 is
+// about a quarter of an hour; the largest shipped template uses 3e7.
+constexpr double max_work = 1e11;
+
+// How many diagnostic reports a run may print. Output volume is bounded only by
+// this, and a report with its ASCII frame is about 2 KB, so 1e5 reports is about
+// 200 MB (issue #25). Raise `output_every` to report less often.
+constexpr long long max_reports = 100000;
+
+// Ground planes (`ground`, `plane3`) are iterated by every body every step, and
+// were counted by no cap at all (issue #26). A container needs a handful.
+constexpr std::size_t max_planes = 1000;
+
+// The longest line read. Lines were read whole before any check, so one
+// enormous line could allocate without limit (issue #29); the longest shipped
+// template line is about 100 characters.
+constexpr std::size_t max_line_length = 4096;
+
+enum class LineRead
+{
+    Ok,
+    End,
+    TooLong
+};
+
+// Read one line, without its newline, stopping at max_line_length characters
+// so that no line costs more memory than that. End means nothing was left to
+// read; a last line without a newline still reads as Ok.
+LineRead read_line(std::istream& input, std::string& line)
+{
+    line.clear();
+    bool any = false;
+    char c{};
+    while (input.get(c))
+    {
+        any = true;
+        if (c == '\n')
+        {
+            return LineRead::Ok;
+        }
+        if (line.size() == max_line_length)
+        {
+            return LineRead::TooLong;
+        }
+        line.push_back(c);
+    }
+    return any ? LineRead::Ok : LineRead::End;
+}
+
+// The work one step of this scenario does, in pair tests. Every pairwise domain
+// tests each pair of bodies once; the rigid domains also test each body against
+// each ground plane; springs is linear, a body and a spring at a time.
+double step_work(const Scenario& scenario, std::size_t bodies, std::size_t springs)
+{
+    const double n = static_cast<double>(bodies);
+    if (scenario.type == ScenarioType::Springs || scenario.type == ScenarioType::Springs3D)
+    {
+        return n + static_cast<double>(springs);
+    }
+    const double planes = static_cast<double>(scenario.rigid_settings.ground.size() +
+                                              scenario.rigid3d_settings.ground.size());
+    return n * (n - 1.0) / 2.0 + n * planes + n;
+}
+
 // A `lattice` or `lattice3` line (M38), held until the whole file has been read
 // and only then expanded into particles, so the result does not depend on
 // whether `bounds` comes before or after it. `nz` stays 1 for the 2D key.
@@ -73,9 +142,18 @@ ScenarioParseResult parse_scenario(std::istream& input)
     bool saw_domain_key = false;
     std::optional<LatticeRequest> lattice;
 
-    while (std::getline(input, line))
+    for (;;)
     {
+        const LineRead read = read_line(input, line);
+        if (read == LineRead::End)
+        {
+            break;
+        }
         ++line_number;
+        if (read == LineRead::TooLong)
+        {
+            return make_error(line_number, "line is longer than 4096 characters");
+        }
 
         const std::size_t comment = line.find('#');
         if (comment != std::string::npos)
@@ -496,6 +574,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             scenario.rigid3d_settings.ground.push_back(
                 collide::Plane3{direction / magnitude, offset});
+            if (scenario.rigid3d_settings.ground.size() > max_planes)
+            {
+                return make_error(line_number, "scenario exceeds the maximum plane count (1000)");
+            }
         }
         else if (key == "coulomb")
         {
@@ -681,6 +763,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             scenario.rigid_settings.ground.push_back(
                 collide::Halfplane{direction / magnitude, offset});
+            if (scenario.rigid_settings.ground.size() > max_planes)
+            {
+                return make_error(line_number, "scenario exceeds the maximum plane count (1000)");
+            }
         }
         else if (key == "bounds")
         {
@@ -971,6 +1057,15 @@ ScenarioParseResult parse_scenario(std::istream& input)
             tokens >> extra;
             return make_error(line_number, "unexpected extra token '" + extra + "'");
         }
+
+        // The entity cap is checked as each line is read, so an oversized file
+        // fails on the line that crossed it, before allocating any further
+        // (issue #29). The lattice is the exception: its own line checks its
+        // count, and its particles are added, and counted, after the file.
+        if (entity_count(scenario) > max_entities)
+        {
+            return make_error(line_number, "scenario exceeds the maximum entity count (100000)");
+        }
     }
 
     // --- #7: getline stops on a read error as well as on end of input, so a
@@ -1025,11 +1120,37 @@ ScenarioParseResult parse_scenario(std::istream& input)
 
     // Defence-in-depth cap on total scenario size (see max_entities above): a
     // hostile or fat-fingered file cannot make the app allocate or step over an
-    // unbounded number of bodies and springs.
+    // unbounded number of bodies and springs. Every line was checked as it was
+    // read; this catches a lattice that, with the listed entities, goes over,
+    // and names the lattice's line.
     const std::size_t total_entities = entity_count(scenario);
     if (total_entities > max_entities)
     {
-        return make_error(line_number, "scenario exceeds the maximum entity count (100000)");
+        return make_error(lattice ? lattice->line : line_number,
+                          "scenario exceeds the maximum entity count (100000)");
+    }
+
+    // The work budget and the report cap (issue #25). Both depend on values
+    // that may sit on different lines, so neither names one.
+    const std::size_t springs =
+        scenario.spring_network.springs().size() + scenario.spring_network3d.springs().size();
+    const double work = static_cast<double>(scenario.steps) *
+                        step_work(scenario, total_entities - springs, springs);
+    if (work > max_work)
+    {
+        return ScenarioParseResult{
+            false,
+            "scenario exceeds the work budget: steps times pair tests per step must be "
+            "at most 1e11 (fewer steps or fewer bodies)",
+            {}};
+    }
+    if (scenario.output_every > 0 &&
+        static_cast<long long>(scenario.steps) / scenario.output_every + 1 > max_reports)
+    {
+        return ScenarioParseResult{
+            false,
+            "scenario would print more than 100000 reports (raise output_every)",
+            {}};
     }
 
     return ScenarioParseResult{true, "", std::move(scenario)};

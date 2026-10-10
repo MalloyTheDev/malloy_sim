@@ -7,6 +7,26 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Security
 
+- Issue #25: the caps bounded steps and entities separately, but a step of the
+  pairwise domains costs O(N^2), so together they allowed about 5e17 pair
+  tests, and M38's `lattice` made the largest N a one-line request: a 41-byte
+  file ran for hours. The parser now bounds the WORK, steps times the pair tests
+  a step does (plus a test per body per ground plane in the rigid domains, and
+  linear work for springs), at 1e11: about a quarter of an hour at the measured
+  7 ns per pair, against 3e7 for the largest shipped template. Output volume is
+  bounded too, at 1e5 reports. The 41-byte file is now refused at once.
+- Issue #26: ground planes (`ground`, `plane3`) were counted by no cap. Three
+  million planes (54 MB) parsed into 372 MB and ran at 0.21 s a step for one
+  box. Planes now have their own cap of 1000, checked as each is read, and
+  count toward the work budget; that file is refused at its line 1005 in 4 MB.
+- Issue #29: the entity cap was checked only after the whole file had been
+  parsed, so an oversized file was materialised in memory first (2 million
+  entity lines, 318 MB) and the error named its last line. The cap is now
+  checked as each line is read, so the error names the line that crossed it
+  (100002) and memory stays bounded (24 MB). Lines are read through a reader
+  that stops at 4096 characters, so one enormous line can no longer allocate
+  without limit (a 20 MB line is refused at line 1 in 4 MB). The limits are
+  documented together in `scenario.hpp`.
 - Resource caps on the scenario file, the one untrusted input the project takes.
   A scenario may now request at most 100000000 steps and 100000 total bodies and
   springs; beyond either, parsing fails with a clear error instead of letting the

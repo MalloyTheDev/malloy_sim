@@ -347,6 +347,23 @@ struct ScenarioParseResult
 // silently running a different simulation.
 // Semantic validity (dt > 0, mass > 0, ...) is left to the target domain's own
 // World::validate, so each rule lives in exactly one place.
+//
+// A scenario file is the one untrusted input, so the parser also bounds what a
+// file may ask for (the 2026-09-13 security review, and issues #25, #26, #29):
+//
+//   steps                at most 1e8
+//   entities             at most 1e5 bodies, particles, charges, spring bodies
+//                        and springs in total, checked as each line is read
+//   ground planes        at most 1000 `ground` or `plane3` lines
+//   work                 steps times the pair tests a step does, at most 1e11:
+//                        N(N-1)/2 pairs plus N per body and N per ground plane
+//                        for the pairwise domains, N + springs for springs
+//   reports              at most 1e5 (steps / output_every + 1); output_every
+//                        0 prints only the step-0 report
+//   line length          at most 4096 characters, comments included
+//
+// Each refusal is an error naming the line that crossed the limit, except the
+// work and report limits, whose inputs can sit on different lines.
 ScenarioParseResult parse_scenario(std::istream& input);
 
 // Convenience: open a file and parse it. A missing or unreadable file is
