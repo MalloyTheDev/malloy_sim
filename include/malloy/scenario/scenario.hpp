@@ -126,6 +126,9 @@ struct ScenarioParseResult
 //   steps <value>           number of steps         (default 1000)
 //   output_every <value>    steps between reports   (default 100)
 //
+//     A report is printed at step 0 and then every `output_every` steps; 0
+//     prints only the step-0 report, which is how a long run stays quiet.
+//
 // type nbody:
 //
 //   g <value>             gravitational constant   (default 1.0)
@@ -143,10 +146,11 @@ struct ScenarioParseResult
 // type rigid3d:
 //
 //   Rigid bodies in three dimensions: free rotation (M20), a constant torque
-//   (M21), and gravity and restitution contacts against ground planes (M22).
-//   Friction is not here; a normal contact on a centred sphere imparts no spin,
-//   so this domain's contacts are translational until friction gets its own
-//   milestone.
+//   (M21), gravity and restitution contacts against ground planes (M22),
+//   Coulomb friction (M23, the `friction` key below), and collisions between
+//   bodies: spheres (M24), oriented boxes (M33) and a box against a sphere
+//   (M34). A normal contact on a centred sphere imparts no spin; friction and
+//   off-centre box contacts do.
 //
 //   rigid_body3d <mass> <Ix> <Iy> <Iz> <radius>
 //                <px> <py> <pz>
@@ -185,8 +189,8 @@ struct ScenarioParseResult
 //     half-widths hx, hy, hz along its own axes. Its inertia is COMPUTED from
 //     the box and mass (M26), not given, so shape and inertia always agree;
 //     there is no radius and no Ix Iy Iz. The pose and velocity fields are
-//     exactly as for rigid_body3d. A box collides with ground planes only so
-//     far; box against box is a later milestone.
+//     exactly as for rigid_body3d. A box collides with ground planes, with
+//     other boxes and with spheres.
 //
 //   torque <tx> <ty> <tz>   a constant WORLD-frame torque on every body
 //                           (default 0 0 0, the torque-free M20 case)
@@ -268,6 +272,15 @@ struct ScenarioParseResult
 //
 //     An immovable body: infinite mass and inertia. A separate key because
 //     MSVC's stream extraction does not accept the token "inf".
+//
+//   rigid_box <mass> <hx> <hy> <px> <py> <angle> <vx> <vy> <omega>
+//
+//     A body that collides as an ORIENTED BOX rather than a disc (M36), of
+//     half-widths hx and hy along its own axes, centred on the body origin,
+//     which is also its centre of mass. Its inertia is COMPUTED from the box
+//     and mass, m ((2 hx)^2 + (2 hy)^2) / 12, not given, so shape and inertia
+//     always agree. A box collides with other boxes (M36) and rests on the
+//     ground planes (M37); box against a disc is not built yet.
 //
 // type charges:
 //

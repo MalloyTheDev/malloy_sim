@@ -50,6 +50,18 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issues #38, #39 and #40: documentation that had drifted from the code.
+  `scenario.hpp` now documents the 2D `rigid_box` key (parsed since M36 and
+  used by two templates, but listed nowhere), what `output_every 0` does, and
+  the rigid3d domain's friction and body-pair collisions, where two sentences
+  still called them later milestones (the parser limits were documented with
+  issue #25). The rigid and collide headers no longer describe box collisions
+  and contact spin as unbuilt (M23, M30, M33, M34, M37 built them), and the 3D
+  rigid step comment now gives the real contact order: body pairs first, then
+  ground planes. Two errors of M38's own: `thermo.hpp` said point particles
+  obey P A = N T "exactly" when its own tests derive a clamp-lag bound, and
+  `hard_sphere_gas.scn` quoted half of each surface area (205.02 of 241.92,
+  not 102.51 of 120.96; the ratio, and so the 0.246 and its check, stand).
 - Issue #35: a 3D sphere-against-sphere contact applied its friction impulse
   at two different points. Each arm was its body's radius along the normal,
   which reach two points the depth of the overlap apart, so the equal and

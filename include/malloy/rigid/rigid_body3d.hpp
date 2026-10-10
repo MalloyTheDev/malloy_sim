@@ -58,8 +58,9 @@ struct RigidBody3D
     // body ORIGIN offset from the centre of mass. That 2D offset existed only
     // to give a contact a moment arm; a sphere needs no such device, and the
     // consequence is that a NORMAL contact on a centred sphere passes through
-    // the centre of mass and so imparts no spin. Spin from contact waits for
-    // friction, its own milestone.
+    // the centre of mass and so imparts no spin. Spin from a contact comes from
+    // friction (M23), whose tangential impulse at the contact point does have a
+    // lever arm, and from box contacts whose point lies off the centre.
     math::Real radius{0.0};
 
     // Collision box half-widths along the body's own axes (M30). When all three
@@ -73,9 +74,9 @@ struct RigidBody3D
     // principal moments of `mass_properties_3d(SolidBox)` would not, unless the
     // box's moments already happen to ascend; issue #21.)
     //
-    // A box collides only with ground planes so far; box against box (and box
-    // against sphere), which need a separating-axis test and an edge-edge case,
-    // are a later milestone.
+    // A box collides with ground planes (M30), with other boxes by the
+    // separating-axis test, edge-edge case included (M33), and with spheres
+    // (M34), so every 3D pair of bodies collides.
     math::Vec3 half_extents{};
 
     // Valid when mass and all three principal moments are strictly positive and

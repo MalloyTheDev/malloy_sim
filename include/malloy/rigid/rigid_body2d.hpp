@@ -49,8 +49,9 @@ struct RigidBody2D
     // half-widths and the body `angle`, the 2D sibling of `RigidBody3D`'s
     // `half_extents`. Both components positive means the body collides as a box
     // (against other boxes) instead of a disc; the default of zero means it is
-    // not a box, so a pre-M36 body keeps its disc behaviour. Box against disc,
-    // and box against a ground plane, are deferred to their own milestones.
+    // not a box, so a pre-M36 body keeps its disc behaviour. A box also rests
+    // on the ground planes (M37); box against disc is deferred to its own
+    // milestone.
     math::Vec2 half_extents{};
 
     // Infinite mass and inertia mean immovable: a wall or a floor. M11 left

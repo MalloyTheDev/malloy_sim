@@ -71,8 +71,10 @@ struct Aabb3
 //
 // Against a PLANE it needs no separating-axis search: a plane has one normal,
 // so a box is inside the solid exactly where its corners are, and the eight
-// corners tested against that one normal are the whole story. Box against box,
-// which does need SAT and an edge-edge case, is a later milestone.
+// corners tested against that one normal are the whole story. Box against box
+// does need the separating-axis test, edge-edge case included, and has it
+// (M33, `contact` and `contacts` in contact3d.hpp), as does box against sphere
+// (M34).
 struct Box3
 {
     math::Vec3 center{};

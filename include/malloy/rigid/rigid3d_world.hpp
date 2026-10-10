@@ -178,13 +178,16 @@ public:
     //      velocity. Without gravity and without a contact this is still a body
     //      flying straight while it tumbles.
     //
-    //   5. resolve contacts: each body against every ground plane, in a fixed
-    //      body-then-plane order so a run repeats (docs/04). A sphere overlapping
-    //      a plane is pushed out along the plane normal and given a normal
-    //      impulse that reverses its closing speed to -restitution times itself.
-    //      The plane is immovable, so only the sphere changes. A body with zero
-    //      radius does not collide. This is the ONLY place the collision radius
-    //      and the ground planes are read.
+    //   5. resolve contacts, in a fixed order so a run repeats (docs/04): first
+    //      every pair of bodies in ascending pair order (sphere against sphere,
+    //      M24; box against box, M33; box against sphere, M34), then every body
+    //      against every ground plane (M22, boxes M30). An overlap is pushed
+    //      apart along the contact normal and given a normal impulse that
+    //      reverses the closing speed to -restitution times itself, with Coulomb
+    //      friction along the tangent (M23); a ground plane is immovable, so only
+    //      the body changes. A body with neither a radius nor box half-widths
+    //      does not collide. This is the only place the colliders and the
+    //      ground planes are read.
     //
     // On validation failure, before or after the update, the state is left
     // unchanged and the failing status is returned; this never throws.

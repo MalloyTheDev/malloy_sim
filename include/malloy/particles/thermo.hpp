@@ -52,7 +52,10 @@ math::Real slow_fraction3d(const std::vector<Particle3D>& particles);
 // by the elapsed time and by the total length of wall, the box's perimeter
 // 2 (W + H). It is a time average from the start of the run, which is what a
 // gauge on the wall reads. For point particles of an ideal gas it obeys
-// P A = N T exactly (A = W H, docs/04); finite radii raise it (excluded area).
+// P A = N T (A = W H) to within a bound: the fixed step's wall clamp lands a
+// particle ON the wall and lowers each bounce rate by at most v dt / L, and a
+// finite run counts whole bounces (docs/04). Finite radii raise it (excluded
+// area).
 //
 // Empty when `elapsed` is not a positive finite time: before any time has
 // passed no impulse has been measured, so no pressure exists rather than a 0.

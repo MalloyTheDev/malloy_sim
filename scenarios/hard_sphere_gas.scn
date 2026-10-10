@@ -27,8 +27,8 @@
 #     gives a bulk density rho = 0.719, so eta = 0.047, Z = 1.212 and a bulk
 #     pressure rho T Z = 0.291;
 #   - spheres touch only the part of each wall r in from its edges, the inner
-#     box's surface S' = 102.51 out of the full 120.96, so the gauge reads
-#     0.291 * 102.51 / 120.96 = 0.246.
+#     box's surface S' = 205.02 out of the full 241.92, so the gauge reads
+#     0.291 * 205.02 / 241.92 = 0.246.
 #
 # The tolerance, 0.009, is three standard deviations of the run-to-run scatter
 # (0.0013, measured at seven nearby timesteps) plus a 2 per cent model budget,
