@@ -410,18 +410,15 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             // The inertia is COMPUTED from the box's geometry and mass (M26),
             // not typed in, so the collision shape and the inertia always
-            // describe the one box. Density follows from mass and volume; an
-            // axis-aligned box's principal frame is the identity, so the moments
-            // drop straight in. A degenerate box gives a zero-mass result whose
-            // invalid body the domain's validate() then rejects.
+            // describe the one box. The moments are taken in the box's OWN axis
+            // order, the order `half_extents` is in: the principal moments from
+            // mass_properties_3d come back sorted, which swapped x and z for any
+            // box with hx < hz (issue #21). A degenerate box gives zero moments,
+            // whose invalid body the domain's validate() then rejects.
             const math::Vec3 half_extents{hx, hy, hz};
-            const math::Real volume = math::Real{8} * hx * hy * hz;
-            const math::Real density = mass / volume;
-            const rigid::MassProperties3D properties = rigid::mass_properties_3d(
-                rigid::SolidBox{math::Vec3{}, half_extents, math::Quat{}, density});
             rigid::RigidBody3D body;
             body.mass = mass;
-            body.inertia = properties.inertia;
+            body.inertia = rigid::box_inertia(half_extents, mass);
             body.half_extents = half_extents;
             body.position = math::Vec3{px, py, pz};
             body.velocity = math::Vec3{vx, vy, vz};

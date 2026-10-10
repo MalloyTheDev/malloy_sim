@@ -4455,6 +4455,30 @@ int main()
         //     their ordering and rigid_body_from all have to be right for the
         //     flip to land on the middle axis. ---
         {
+            // Issue #21: box_inertia gives the moments in the box's OWN axis
+            // order, unsorted, for a body whose half_extents keep that order.
+            // Every permutation of (1, 2, 3) at mass 48 (16 times the sums of
+            // the other two squares), and the sorted principal moments of the
+            // same box are a permutation of them.
+            using malloy::rigid::box_inertia;
+            const Vec3 ascending = box_inertia(Vec3{1.0, 2.0, 3.0}, 48.0);
+            MALLOY_CHECK_TRUE(approx_equal(ascending, Vec3{208.0, 160.0, 80.0}, 1e-9));
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{2.0, 3.0, 1.0}, 48.0),
+                                           Vec3{160.0, 80.0, 208.0}, 1e-9));
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{3.0, 1.0, 2.0}, 48.0),
+                                           Vec3{80.0, 208.0, 160.0}, 1e-9));
+            const MassProperties3D sorted = mass_properties_3d(
+                SolidBox{Vec3{}, Vec3{1.0, 2.0, 3.0}, Quat{}, 48.0 / 48.0});
+            MALLOY_CHECK_TRUE(approx_equal(sorted.inertia, Vec3{80.0, 160.0, 208.0}, 1e-9));
+            // Invalid input gives zero moments, which no body accepts.
+            const Real bad_inf = std::numeric_limits<Real>::infinity();
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{1.0, 0.0, 1.0}, 1.0), Vec3{}, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{1.0, -1.0, 1.0}, 1.0), Vec3{}, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{1.0, bad_inf, 1.0}, 1.0), Vec3{}, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{1.0, 1.0, 1.0}, 0.0), Vec3{}, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(box_inertia(Vec3{1.0, 1.0, 1.0}, -2.0), Vec3{}, 0.0));
+        }
+        {
             using malloy::rigid::Rigid3DWorld;
             const MassProperties3D mp = mass_properties_3d(
                 SolidBox{Vec3{}, Vec3{3.0, 2.0, 1.0}, Quat{}, 1.0});
@@ -5447,6 +5471,117 @@ int main()
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(
                 malloy::rigid::total_linear_momentum3d(w.bodies()), p0, 1e-10));
             MALLOY_CHECK_TRUE(malloy::math::length(w.bodies()[0].angular_velocity) > 1e-3);
+        }
+    }
+
+    // --- Issues #22 and #23: the head-on and flat-landing cases above, turned to
+    //     GENERIC orientations. Axis-aligned, every projection is exact; turned,
+    //     a bare touch rounded clipped points off the face (a one-corner or
+    //     lopsided manifold), clipping added a vertex partway along an edge, and
+    //     a twisted face-on-face landing let an in-plane edge axis win. Each put
+    //     torque into a hit that has none. ---
+    {
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::rotate;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+        using malloy::math::Vec3;
+
+        // 2D: box_collision2d's head-on hit (masses 2 and 1, restitution 0.5),
+        // both squares turned and moving along their own x axis. The heavy one
+        // stops, the light one leaves at 1, no spin, kinetic energy 0.5.
+        for (int k = 0; k < 200; ++k)
+        {
+            const Real angle = 0.1 + 0.007 * k;
+            const Vec2 u{std::cos(angle), std::sin(angle)};
+            RigidBody2D a;
+            a.mass = 2.0;
+            a.inertia = 2.0 * 2.0 / 12.0;
+            a.half_extents = Vec2{0.5, 0.5};
+            a.angle = angle;
+            a.position = u * -0.6;
+            a.velocity = u;
+            RigidBody2D b = a;
+            b.mass = 1.0;
+            b.inertia = 2.0 / 12.0;
+            b.position = u * 0.6;
+            b.velocity = u * -1.0;
+            RigidWorld w{SimulationSettings{0.001}, {a, b}, RigidSettings{0.5}};
+            for (int i = 0; i < 300; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 1e-9);
+            MALLOY_CHECK_NEAR(w.bodies()[1].angular_velocity, 0.0, 1e-9);
+            MALLOY_CHECK_NEAR(malloy::rigid::total_kinetic_energy(w.bodies()), 0.5, 1e-9);
+        }
+
+        // 3D: box_collision's head-on hit, turned about a generic axis. 0.114,
+        // 0.702 and 1.479 are angles that spun before the fix.
+        for (const Real angle : {0.114, 0.3, 0.702, 1.0, 1.479, 2.2})
+        {
+            const Quat r = from_axis_angle(Vec3{0.3, -0.7, 0.2}, angle);
+            const Vec3 u = rotate(r, Vec3{1.0, 0.0, 0.0});
+            const Real moment = 2.0 * (0.25 + 0.25) / 3.0;
+            RigidBody3D a;
+            a.mass = 2.0;
+            a.inertia = Vec3{moment, moment, moment};
+            a.half_extents = Vec3{0.5, 0.5, 0.5};
+            a.orientation = r;
+            a.position = u * -1.2;
+            a.velocity = u;
+            RigidBody3D b = a;
+            b.mass = 1.0;
+            b.inertia = a.inertia * 0.5;
+            b.position = u * 1.2;
+            b.velocity = u * -1.0;
+            Rigid3DSettings st;
+            st.restitution = 0.5;
+            Rigid3DWorld w{SimulationSettings{0.002}, {a, b}, st};
+            for (int i = 0; i < 400; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[0].angular_velocity), 0.0, 1e-9);
+            MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[1].angular_velocity), 0.0, 1e-9);
+            MALLOY_CHECK_NEAR(malloy::rigid::total_kinetic_energy3d(w.bodies()), 0.5, 1e-9);
+        }
+
+        // 3D: a small box dropped flat onto a big one, turned about the shared
+        // normal by every whole degree from 1 to 89, both boxes in a generic
+        // orientation. The landing is centred over b's centre of mass, so it
+        // must not spin b; before the fix some twists resolved at one in-plane
+        // edge point up to 0.9 away and left b spinning at nearly 2 rad/s.
+        {
+            const Quat r = from_axis_angle(Vec3{0.3, -0.7, 0.2}, 0.9);
+            const Vec3 up = rotate(r, Vec3{0.0, 0.0, 1.0});
+            for (int degrees = 1; degrees < 90; ++degrees)
+            {
+                const Real twist = degrees * 3.14159265358979323846 / 180.0;
+                RigidBody3D a;
+                a.mass = 10.0;
+                a.inertia = Vec3{1.0, 1.5, 2.0};
+                a.half_extents = Vec3{1.0, 0.7, 0.5};
+                a.orientation = r;
+                RigidBody3D b;
+                b.mass = 1.0;
+                b.inertia = Vec3{0.06, 0.083, 0.083};
+                b.half_extents = Vec3{0.4, 0.3, 0.3};
+                b.orientation = normalize(r * from_axis_angle(Vec3{0.0, 0.0, 1.0}, twist));
+                b.position = rotate(r, Vec3{0.1, 0.05, 0.0}) + up * 0.8053;
+                b.velocity = up * -1.0;
+                Rigid3DWorld w{SimulationSettings{0.001}, {a, b}};
+                for (int i = 0; i < 40; ++i)
+                {
+                    MALLOY_CHECK_TRUE(w.step().ok());
+                }
+                // (a DOES spin: the landing is centred under b, which sits off
+                // a's centre, so the same impulse has a lever arm on a.)
+                MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[1].angular_velocity), 0.0, 1e-9);
+            }
         }
     }
 

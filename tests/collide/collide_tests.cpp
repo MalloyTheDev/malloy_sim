@@ -4,6 +4,7 @@
 #include <test_check.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -1513,6 +1514,154 @@ int main()
         // Invalid boxes give no manifold.
         MALLOY_CHECK_TRUE(
             (contacts(Box3{Vec3{}, Vec3{-1.0, 0.5, 0.5}, none}, Box3{Vec3{}, half, none}).empty()));
+    }
+
+    // --- Issues #22 and #23: box-box manifolds under GENERIC orientations. The
+    //     tests above use identity or single-axis rotations, where every cross
+    //     product and projection is exact, and so could not see either defect. ---
+    {
+        using malloy::collide::Box3;
+        using malloy::collide::Obb2;
+        using malloy::collide::contacts;
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::rotate;
+        using malloy::math::Vec3;
+
+        // #22: face on face with a twist about the shared normal. An edge of
+        // each box lies in the face plane, and their cross product IS the face
+        // normal up to rounding, so the edge axis ties the face axis; it must
+        // not win. The manifold is a face patch (at least three points) with
+        // the face normal, and its centroid sits under b's centre.
+        {
+            const Quat r = from_axis_angle(Vec3{0.3, -0.7, 0.2}, 0.9);
+            const Vec3 up = rotate(r, Vec3{0.0, 0.0, 1.0});
+            for (int degrees = 1; degrees < 90; ++degrees)
+            {
+                const Real twist = degrees * 3.14159265358979323846 / 180.0;
+                const Box3 a{Vec3{}, Vec3{1.0, 0.7, 0.5}, r};
+                const Vec3 centre = rotate(r, Vec3{0.1, 0.05, 0.0}) + up * (0.8 - 0.004);
+                const Box3 b{centre, Vec3{0.4, 0.3, 0.3},
+                             normalize(r * from_axis_angle(Vec3{0.0, 0.0, 1.0}, twist))};
+                const auto hits = contacts(a, b);
+                MALLOY_CHECK_TRUE(hits.size() >= 3);
+                Vec3 sum{};
+                for (const auto& hit : hits)
+                {
+                    MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, up, 1e-9));
+                    MALLOY_CHECK_NEAR(hit.penetration, 0.004, 1e-9);
+                    sum += hit.point;
+                }
+                const Vec3 arm = sum / static_cast<Real>(hits.size()) - centre;
+                const Vec3 lateral = arm - up * malloy::math::dot(arm, up);
+                MALLOY_CHECK_NEAR(malloy::math::length(lateral), 0.0, 1e-9);
+                // The single contact agrees on the axis.
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(contact(a, b)->normal, up, 1e-9));
+            }
+        }
+
+        // #23: a bare touch under a generic rotation. Two equal cubes, aligned
+        // with each other and touching face to face to rounding, must give the
+        // full four-point face, not one corner and not a fifth vertex that
+        // clipping put partway along an edge lying in a side plane. At this
+        // rotation clipping did both: a 5-point manifold, then a lopsided one.
+        {
+            for (const Real angle : {0.114, 0.702, 1.479})
+            {
+                const Quat r = from_axis_angle(Vec3{0.3, -0.7, 0.2}, angle);
+                const Vec3 u = rotate(r, Vec3{1.0, 0.0, 0.0});
+                for (const Real gap : {0.0, 1e-15, -1e-15, -0.004})
+                {
+                    const Box3 a{u * -0.5, Vec3{0.5, 0.5, 0.5}, r};
+                    const Box3 b{u * (0.5 + gap), Vec3{0.5, 0.5, 0.5}, r};
+                    const auto hits = contacts(a, b);
+                    if (gap > 0.0 && hits.empty())
+                    {
+                        continue; // a hair apart is allowed to be apart
+                    }
+                    MALLOY_CHECK_TRUE(hits.size() == 4);
+                    Vec3 sum{};
+                    for (const auto& hit : hits)
+                    {
+                        MALLOY_CHECK_TRUE(hit.penetration >= 0.0);
+                        sum += hit.point;
+                    }
+                    // The centroid lies on the line of centres: no lever arm.
+                    const Vec3 mid = sum / 4.0 - (a.center + b.center) * 0.5;
+                    MALLOY_CHECK_NEAR(malloy::math::length(mid - u * malloy::math::dot(mid, u)),
+                                      0.0, 1e-9);
+                }
+            }
+            // 2D: the same for two squares turned to a generic angle, both
+            // endpoints of the touching face kept, symmetric about the line of
+            // centres.
+            for (int k = 0; k < 200; ++k)
+            {
+                const Real angle = 0.1 + 0.007 * k;
+                const Vec2 u{std::cos(angle), std::sin(angle)};
+                const Obb2 a{u * -0.5, Vec2{0.5, 0.5}, angle};
+                const Obb2 b{u * 0.5, Vec2{0.5, 0.5}, angle};
+                const auto hits = contacts(a, b);
+                MALLOY_CHECK_TRUE(hits.size() == 2);
+                MALLOY_CHECK_TRUE(hits[0].penetration >= 0.0 && hits[1].penetration >= 0.0);
+                const Vec2 mid = (hits[0].point + hits[1].point) * 0.5;
+                MALLOY_CHECK_NEAR(mid.x * -u.y + mid.y * u.x, 0.0, 1e-9);
+            }
+        }
+
+        // A property over many random box pairs (a fixed, fully specified
+        // generator, so the run repeats): whenever two boxes overlap, the single
+        // contact lies within its penetration of BOTH boxes, and moving b along
+        // the normal by the penetration leaves them no deeper than a touch. It
+        // guards the face preference of #22 against growing too generous: a 5
+        // per cent margin (ODE's) broke the first in three of 85000 such pairs,
+        // the face winning where the contact was really edge on edge.
+        {
+            std::uint64_t state = 0x9E3779B97F4A7C15ULL;
+            const auto next = [&state]() {
+                state += 0x9E3779B97F4A7C15ULL; // splitmix64
+                std::uint64_t z = state;
+                z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+                z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+                z ^= z >> 31;
+                return static_cast<Real>(z >> 11) * (1.0 / 9007199254740992.0); // [0, 1)
+            };
+            const auto signed_unit = [&next]() { return 2.0 * next() - 1.0; };
+            const auto distance_outside = [](const Box3& box, const Vec3& p) {
+                const Vec3 d = rotate(malloy::math::conjugate(box.orientation), p - box.center);
+                const Real dx = std::fmax(0.0, std::abs(d.x) - box.half_extents.x);
+                const Real dy = std::fmax(0.0, std::abs(d.y) - box.half_extents.y);
+                const Real dz = std::fmax(0.0, std::abs(d.z) - box.half_extents.z);
+                return std::sqrt(dx * dx + dy * dy + dz * dz);
+            };
+            int overlapping = 0;
+            for (int it = 0; it < 20000; ++it)
+            {
+                const Box3 a{Vec3{signed_unit(), signed_unit(), signed_unit()},
+                             Vec3{0.1 + 0.9 * next(), 0.1 + 0.9 * next(), 0.1 + 0.9 * next()},
+                             normalize(Quat{signed_unit(), Vec3{signed_unit(), signed_unit(),
+                                                                signed_unit()}})};
+                const Box3 b{Vec3{signed_unit(), signed_unit(), signed_unit()},
+                             Vec3{0.1 + 0.9 * next(), 0.1 + 0.9 * next(), 0.1 + 0.9 * next()},
+                             normalize(Quat{signed_unit(), Vec3{signed_unit(), signed_unit(),
+                                                                signed_unit()}})};
+                const auto hit = contact(a, b);
+                if (!hit)
+                {
+                    continue;
+                }
+                ++overlapping;
+                MALLOY_CHECK_TRUE(distance_outside(a, hit->point) <= hit->penetration + 1e-9);
+                MALLOY_CHECK_TRUE(distance_outside(b, hit->point) <= hit->penetration + 1e-9);
+                const Box3 moved{b.center + hit->normal * hit->penetration, b.half_extents,
+                                 b.orientation};
+                const auto after = contact(a, moved);
+                MALLOY_CHECK_TRUE(!after || after->penetration <= 1e-9);
+                MALLOY_CHECK_FALSE(contacts(a, b).empty());
+            }
+            MALLOY_CHECK_TRUE(overlapping > 5000); // the property was actually exercised
+        }
     }
 
     std::cout << "malloy_collide_tests passed\n";

@@ -100,6 +100,17 @@ MassProperties3D mass_properties_3d(const std::vector<SolidSphere>& parts);
 // one-element vector); only the box, a distinct type, needs its own.
 MassProperties3D mass_properties_3d(const SolidBox& box);
 
+// The moments of a solid uniform box of `mass` about its OWN axes, in the box's
+// own x, y, z order: (1/3) m (hy^2 + hz^2), (1/3) m (hx^2 + hz^2) and
+// (1/3) m (hx^2 + hy^2). Unlike MassProperties3D::inertia these are NOT sorted,
+// so they belong to a body that keeps the box's own frame, with `half_extents`
+// along its x, y and z. That is how to build a box BODY: going through
+// rigid_body_from(mass_properties_3d(box)) instead sorts the moments and puts
+// the permutation into the orientation, so the same half-widths would then lie
+// along the wrong body axes (issue #21). Zero for a non-positive or non-finite
+// half-width or mass, so the body that receives it fails validation.
+math::Vec3 box_inertia(const math::Vec3& half_extents, math::Real mass);
+
 // The mass properties of a solid uniform body bounded by a closed triangle
 // mesh, the general primitive. Mass is density times the enclosed volume; the
 // centre of mass and the inertia tensor are the volume integrals of position

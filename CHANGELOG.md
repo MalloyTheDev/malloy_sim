@@ -30,6 +30,35 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #21: `rigid_box3d` gave a box the wrong inertia. The loader took the
+  principal moments from `mass_properties_3d(SolidBox)`, which come back sorted
+  ascending, and kept the box's own orientation and half-widths, so any box
+  with hx < hz had its x and z moments swapped (half-widths 1, 2, 3 at mass 48
+  gave 80, 160, 208 instead of 208, 160, 80). The only test used half-widths
+  whose moments already ascend. The new `rigid::box_inertia` gives the moments
+  in the box's own axis order; the loader and the `SolidBox` overload both use
+  it, and tests now cover every permutation. Every shipped template uses cubes,
+  so none changes.
+- Issue #22: a 3D box landing flat with a twist about the shared normal could
+  spin up. An edge of each box lies in the face plane, so their cross product
+  is the face normal up to rounding and tied the face axis; when rounding let
+  the edge win, the manifold collapsed to one edge point up to 0.9 from the
+  centre of mass, leaving the box spinning at nearly 2 rad/s where 0 is right.
+  An edge axis must now beat the best face by more than rounding. ODE and Bullet
+  also apply a 5 per cent margin, which changed no outcome measured here and is
+  aimed at resting stacks, which are not built, so it is not carried.
+- Issue #23: a bare box-box touch could fall back to one corner. At a touch the
+  clipped points sit within rounding of the reference face, and dropping the
+  ones a hair in front left a lopsided manifold, or none, and the corner
+  contact brought back the torque the M33/M36 review pass removed (rotated
+  copies of `box_collision.scn` spun in 67 of 200 cases, and of
+  `box_collision2d.scn` in 3 of 200). Points within a rounding-level tolerance
+  are now kept, at penetration 0. Fixing that exposed a second cause in 3D:
+  clipping an incident edge that lies along a side plane can add a vertex
+  partway along the edge, and that vertex weights the centroid. Such vertices,
+  and repeated ones, are now dropped. All of those scans now give 0, and
+  regression tests run the rotated hits, every whole-degree twist, and a
+  property over 20000 random box pairs.
 - M33/M36 review pass: box-against-box contacts pushed at the wrong point. Both
   resolved a box pair at the single vertex `collide::contact` reports, which for
   a face resting on a face sits on a face CORNER. A head-on hit between two

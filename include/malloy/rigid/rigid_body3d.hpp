@@ -67,9 +67,11 @@ struct RigidBody3D
     // half-widths, turned by `orientation` and centred on the centre of mass,
     // and the sphere `radius` is ignored. When they are zero (the default) the
     // body falls back to the sphere collider, so every pre-M30 body is
-    // unchanged. A box built from `mass_properties_3d(SolidBox)` sets these to
-    // the same half-widths, so its collision shape and its inertia describe the
-    // one box.
+    // unchanged. A box body takes `inertia` from `box_inertia(half_extents,
+    // mass)`, whose moments are in the same axis order as these half-widths, so
+    // its collision shape and its inertia describe the one box. (The sorted
+    // principal moments of `mass_properties_3d(SolidBox)` would not, unless the
+    // box's moments already happen to ascend; issue #21.)
     //
     // A box collides only with ground planes so far; box against box (and box
     // against sphere), which need a separating-axis test and an edge-edge case,

@@ -1709,11 +1709,48 @@ int main()
             body.position, malloy::math::Vec3{4.0, -5.0, 6.0}, 0.0));
         // Inertia is the solid box's, (1/3) m (h_j^2 + h_k^2) with h the half
         // widths: m = 48, so about x it is 16*(2^2 + 1^2) = 80, about y
-        // 16*(3^2 + 1^2) = 160, about z 16*(3^2 + 2^2) = 208. eigen_symmetric
-        // returns them ascending, the same values as the M26 box tests.
+        // 16*(3^2 + 1^2) = 160, about z 16*(3^2 + 2^2) = 208.
         MALLOY_CHECK_NEAR(body.inertia.x, 80.0, 1e-9);
         MALLOY_CHECK_NEAR(body.inertia.y, 160.0, 1e-9);
         MALLOY_CHECK_NEAR(body.inertia.z, 208.0, 1e-9);
+    }
+    {
+        // Issue #21: the moments must follow the box's OWN axes. The case above
+        // has descending half-widths, whose moments happen to ascend, so it
+        // could not tell the box-frame moments from the sorted principal ones
+        // (the symmetric-configuration trap of docs/05). These half-widths are
+        // ascending, (1, 2, 3), so the moments DESCEND: about x it is
+        // 16*(2^2 + 3^2) = 208, about y 16*(1^2 + 3^2) = 160, about z
+        // 16*(1^2 + 2^2) = 80. Sorted, they came back as (80, 160, 208), the
+        // x and z moments swapped. A middle-axis case pins y as well.
+        std::istringstream in(
+            "type rigid3d\n"
+            "rigid_box3d 48.0  1.0 2.0 3.0   0 0 0   0 0 1 0   0 0 0   0 0 0\n"
+            "rigid_box3d 48.0  2.0 3.0 1.0   0 0 5   0 0 1 0   0 0 0   0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        const auto& ascending = r.scenario.rigid_bodies3d[0];
+        MALLOY_CHECK_NEAR(ascending.inertia.x, 208.0, 1e-9);
+        MALLOY_CHECK_NEAR(ascending.inertia.y, 160.0, 1e-9);
+        MALLOY_CHECK_NEAR(ascending.inertia.z, 80.0, 1e-9);
+        // (2, 3, 1): about x 16*(9 + 1) = 160, about y 16*(4 + 1) = 80,
+        // about z 16*(4 + 9) = 208.
+        const auto& rotated = r.scenario.rigid_bodies3d[1];
+        MALLOY_CHECK_NEAR(rotated.inertia.x, 160.0, 1e-9);
+        MALLOY_CHECK_NEAR(rotated.inertia.y, 80.0, 1e-9);
+        MALLOY_CHECK_NEAR(rotated.inertia.z, 208.0, 1e-9);
+        // The rotational energy a spin about z carries is the box's, with the
+        // z moment 80: (1/2) 80 1^2 = 40, not the 104 the swap gave.
+        malloy::rigid::RigidBody3D spinning = ascending;
+        spinning.angular_velocity = malloy::math::Vec3{0.0, 0.0, 1.0};
+        MALLOY_CHECK_NEAR(malloy::rigid::total_kinetic_energy3d({spinning}), 40.0, 1e-9); // at rest, so all rotational
+        // A degenerate box still gives zero moments, so validate() rejects it.
+        std::istringstream flat("type rigid3d\n"
+                                "rigid_box3d 1.0  1.0 0.0 1.0   0 0 0   0 0 1 0   0 0 0   0 0 0\n");
+        const ScenarioParseResult f = parse_scenario(flat);
+        MALLOY_CHECK_TRUE(f.ok);
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(f.scenario.rigid_bodies3d[0].inertia,
+                                                     malloy::math::Vec3{}, 0.0));
     }
     {
         // rigid_box3d belongs to rigid3d only, and needs all seventeen fields.

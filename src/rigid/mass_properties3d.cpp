@@ -133,17 +133,28 @@ MassProperties3D mass_properties_3d(const SolidBox& box)
     }
     const math::Vec3 h = box.half_extents;
     const math::Real mass = box.density * math::Real{8} * h.x * h.y * h.z;
-    // Solid box moments about its own axes: (1/12) m (w_j^2 + w_k^2) with w the
-    // FULL widths (2h), which is (1/3) m (h_j^2 + h_k^2).
-    const math::Real third = math::Real{1} / math::Real{3};
-    const math::Vec3 own{third * mass * (h.y * h.y + h.z * h.z),
-                         third * mass * (h.x * h.x + h.z * h.z),
-                         third * mass * (h.x * h.x + h.y * h.y)};
+    const math::Vec3 own = box_inertia(h, mass);
     // Carry the box-frame diagonal into the lab frame: R diag(own) R^T.
     const math::Mat3 rotation = math::to_mat3(box.orientation);
     const math::Mat3 tensor =
         rotation * math::diagonal3(own) * math::transpose(rotation);
     return finalize(mass, box.center, tensor);
+}
+
+math::Vec3 box_inertia(const math::Vec3& half_extents, math::Real mass)
+{
+    const math::Vec3 h = half_extents;
+    if (!(h.x > math::Real{0}) || !(h.y > math::Real{0}) || !(h.z > math::Real{0}) ||
+        !math::is_finite(h) || !(mass > math::Real{0}) || !math::is_finite(mass))
+    {
+        return math::Vec3{};
+    }
+    // Solid box moments about its own axes: (1/12) m (w_j^2 + w_k^2) with w the
+    // FULL widths (2h), which is (1/3) m (h_j^2 + h_k^2).
+    const math::Real third = math::Real{1} / math::Real{3};
+    return math::Vec3{third * mass * (h.y * h.y + h.z * h.z),
+                      third * mass * (h.x * h.x + h.z * h.z),
+                      third * mass * (h.x * h.x + h.y * h.y)};
 }
 
 MassProperties3D mass_properties_3d(const SolidMesh& mesh)

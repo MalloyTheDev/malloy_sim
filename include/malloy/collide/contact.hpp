@@ -100,16 +100,19 @@ std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane);
 // two points: two for a face resting on a face, one for a corner. Each has:
 //
 //   normal       the SAT normal, from `a` toward `b`, the same for every point.
-//   penetration  how far that point lies behind the reference face.
+//   penetration  how far that point lies behind the reference face (0 for a
+//                point kept within rounding in front of it, issue #23).
 //   point        that point, moved half its penetration toward the reference
 //                face, the midway convention of every pair.
 //
 // A rigid body that reduces this to its centroid gets a contact through the
 // middle of a face-on-face touch, so two aligned boxes meeting head-on exchange
 // momentum along the line of centres with no torque; the single vertex of
-// `contact` sits on a corner and would invent one. Never empty when the boxes
-// overlap (a bare touch that rounds every clipped point to the outside falls
-// back to the single-point contact), so `!contacts(a, b).empty()` agrees with
+// `contact` sits on a corner and would invent one. Points within a
+// rounding-level tolerance in front of the reference face are kept, so a bare
+// touch gives both ends of the face rather than one (issue #23). Never empty
+// when the boxes overlap (if nothing survives clipping, it falls back to the
+// single-point contact), so `!contacts(a, b).empty()` agrees with
 // `overlaps(a, b)`. Empty when apart or either box is invalid; never throws.
 std::vector<Contact> contacts(const Obb2& a, const Obb2& b);
 } // namespace malloy::collide

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <vector>
 
 #include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/math.hpp>
@@ -310,6 +312,62 @@ math::Vec3 closest_segment_midpoint(const math::Vec3& p1, const math::Vec3& d1,
 // unit edge directions, not a distance.
 constexpr math::Real kParallelEpsSq = 1e-8;
 
+// An edge axis must beat the best FACE axis by more than rounding before it is
+// chosen (issue #22). When two boxes meet face on face with any twist about the
+// shared normal, an edge of each lies in the face plane, and their cross product
+// IS the face normal up to rounding, so its overlap ties the face's. Left to
+// rounding, the edge could win and collapse a resting face into one arbitrary
+// edge point, with a large spurious torque. So an exact tie goes to the face:
+// an edge axis is taken only when its overlap is below the best face's by more
+// than this fraction of the boxes' size. A genuine edge-on-edge contact
+// overlaps far less along its edge axis than along any face, so it still wins.
+// (ODE and Bullet also apply a 5 per cent relative margin, against face/edge
+// flicker in resting stacks; it changed no outcome measured here, and stacking
+// is not built, so it is not carried.)
+constexpr math::Real kEdgeTieTolerance = 1e-9;
+
+// How far in front of the reference face a clipped point may lie and still be
+// kept (issue #23), as a fraction of the boxes' size. At a bare touch the SAT
+// depth is at rounding level and the clipped incident points sit within about
+// 1e-16 of the face on either side; dropping the ones a hair in front left a
+// lopsided manifold, or none, and resolving that at one corner put torque into
+// a head-on hit. A kept point that is in front counts as penetration 0.
+constexpr math::Real kTouchTolerance = 1e-9;
+
+// Remove, from a polygon in cyclic order, every vertex within `tolerance` of the
+// line through its two neighbours: a repeated vertex, or one partway along a
+// straight edge. Neither changes the polygon's shape, but both would weight a
+// vertex average. Repeats until nothing more can go; stops at three vertices.
+void drop_redundant_vertices(std::vector<math::Vec3>& poly, math::Real tolerance)
+{
+    bool removed = true;
+    while (removed && poly.size() > 3)
+    {
+        removed = false;
+        const std::size_t n = poly.size();
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            const math::Vec3& prev = poly[(i + n - 1) % n];
+            const math::Vec3& next = poly[(i + 1) % n];
+            const math::Vec3 chord = next - prev;
+            const math::Vec3 offset = poly[i] - prev;
+            const math::Real chord_sq = math::length_squared(chord);
+            // Distance from the vertex to the line prev-next; when prev and next
+            // coincide, its distance from that point.
+            const math::Real distance_sq =
+                chord_sq > tolerance * tolerance
+                    ? math::length_squared(math::cross(offset, chord)) / chord_sq
+                    : math::length_squared(offset);
+            if (distance_sq <= tolerance * tolerance)
+            {
+                poly.erase(poly.begin() + static_cast<std::ptrdiff_t>(i));
+                removed = true;
+                break;
+            }
+        }
+    }
+}
+
 enum AxisKind
 {
     FaceA,
@@ -342,7 +400,12 @@ bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out)
     const Obb box_b = make_obb(b);
     const math::Vec3 t = b.center - a.center;
 
-    bool have = false;
+    // The best face axis and the best edge axis are kept apart, so a tie
+    // between them can go to the face (kEdgeTieTolerance, issue #22).
+    MinAxis face{};
+    MinAxis edge{};
+    bool have_face = false;
+    bool have_edge = false;
     auto test = [&](const math::Vec3& axis, AxisKind kind, int i, int j) -> bool
     {
         const math::Real gap = std::abs(math::dot(t, axis));
@@ -352,9 +415,11 @@ bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out)
         {
             return false; // a separating axis exists: the boxes are apart
         }
-        if (!have || overlap < out.overlap)
+        MinAxis& best = kind == Edge ? edge : face;
+        bool& have = kind == Edge ? have_edge : have_face;
+        if (!have || overlap < best.overlap)
         {
-            out = MinAxis{axis, overlap, kind, i, j};
+            best = MinAxis{axis, overlap, kind, i, j};
             have = true;
         }
         return true;
@@ -388,6 +453,20 @@ bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out)
             {
                 return false;
             }
+        }
+    }
+
+    // A face axis unless an edge axis is better by more than rounding
+    // (kEdgeTieTolerance).
+    out = face;
+    if (have_edge)
+    {
+        const math::Real size =
+            std::fmax(std::fmax(std::fmax(box_a.e[0], box_a.e[1]), box_a.e[2]),
+                      std::fmax(std::fmax(box_b.e[0], box_b.e[1]), box_b.e[2]));
+        if (edge.overlap < face.overlap - kEdgeTieTolerance * size)
+        {
+            out = edge;
         }
     }
     return true;
@@ -698,17 +777,29 @@ std::vector<Contact3> contacts(const Box3& a, const Box3& b)
         poly = clip_polygon(poly, -u, ref.e[side] - side_centre);
     }
 
-    // Keep what lies inside the reference box (behind its face).
+    // Drop vertices that add nothing to the polygon's shape. When an incident
+    // edge lies within rounding of a side plane, clipping can emit an extra
+    // vertex partway along that edge, or on top of a corner; either one pulls
+    // the manifold's centroid toward itself, so two aligned faces gave five
+    // points instead of four and a head-on hit spun up (issue #23).
+    const math::Real size =
+        std::fmax(std::fmax(std::fmax(ref.e[0], ref.e[1]), ref.e[2]),
+                  std::fmax(std::fmax(inc.e[0], inc.e[1]), inc.e[2]));
+    const math::Real tolerance = kTouchTolerance * size;
+    drop_redundant_vertices(poly, tolerance);
+
+    // Keep what lies inside the reference box (behind its face), or within a
+    // rounding-level tolerance in front of it (kTouchTolerance, issue #23).
     for (const math::Vec3& v : poly)
     {
         const math::Real separation = math::dot(face_normal, v) - face_offset;
-        if (separation > math::Real{0})
+        if (separation > tolerance)
         {
             continue; // in front of the reference face: not touching
         }
         Contact3 hit;
         hit.normal = n;
-        hit.penetration = -separation;
+        hit.penetration = std::fmax(math::Real{0}, -separation);
         hit.point = v + face_normal * (-separation / math::Real{2});
         result.push_back(hit);
     }

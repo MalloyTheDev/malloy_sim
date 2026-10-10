@@ -91,14 +91,22 @@ std::optional<Contact3> contact(const Box3& a, const Box3& b);
 // inside the reference box, giving up to eight points: four for a face resting
 // flat on a face, fewer for a tilted or overhanging one. When an edge-edge axis
 // wins, the contact genuinely is a point, so the manifold is the single contact
-// `contact(Box3, Box3)` reports. Each entry has the SAT normal (from `a` toward
-// `b`), its own penetration behind the reference face, and the midway point.
+// `contact(Box3, Box3)` reports. An edge axis that merely TIES a face axis does
+// not win: two faces meeting with a twist about their shared normal have edges
+// in the face plane whose cross product is that normal, and the face is the
+// contact (issue #22). Each entry has the SAT normal (from `a` toward `b`), its
+// own penetration behind the reference face (0 for a point kept within
+// rounding in front of it), and the midway point. Clipping can leave a vertex
+// on top of another or partway along a straight edge; those are dropped, since
+// they would weight the centroid (issue #23).
 //
 // A rigid body that reduces this to its centroid gets a contact through the
 // middle of a face-on-face touch, so two aligned boxes meeting head-on exchange
 // momentum along the line of centres with no torque, as M30 does for a box on a
-// plane. Never empty when the boxes overlap (a bare touch that rounds every
-// clipped point to the outside falls back to the single-point contact), so
+// plane. Points within a rounding-level tolerance in front of the reference
+// face are kept, so a bare touch gives the whole face rather than a lopsided
+// part of it (issue #23). Never empty when the boxes overlap (if nothing
+// survives clipping, it falls back to the single-point contact), so
 // `!contacts(a, b).empty()` agrees with `overlaps(a, b)`. Empty when apart or
 // either box is invalid; never throws.
 std::vector<Contact3> contacts(const Box3& a, const Box3& b);

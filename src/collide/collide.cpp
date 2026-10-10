@@ -664,20 +664,28 @@ std::vector<Contact> contacts(const Obb2& a, const Obb2& b)
     math::Vec2 q = edge_mid - inc.u[1 - j] * inc.e[1 - j];
 
     // Clip to the reference face's extent, then keep what lies inside the
-    // reference box (behind its face).
+    // reference box (behind its face), or within a rounding-level tolerance in
+    // front of it. At a bare touch the clipped points sit within about 1e-16 of
+    // the face on either side; dropping the ones a hair in front left a
+    // lopsided manifold, or none, and resolving that at one corner put torque
+    // into a head-on hit (issue #23). A kept point in front counts as
+    // penetration 0.
+    const math::Real size =
+        std::fmax(std::fmax(ref.e[0], ref.e[1]), std::fmax(inc.e[0], inc.e[1]));
+    const math::Real tolerance = math::Real{1e-9} * size;
     if (clip_segment(p, q, side, side_centre + side_extent) &&
         clip_segment(p, q, -side, side_extent - side_centre))
     {
         for (const math::Vec2& v : {p, q})
         {
             const math::Real separation = math::dot(face_normal, v) - face_offset;
-            if (separation > math::Real{0})
+            if (separation > tolerance)
             {
                 continue; // in front of the reference face: not touching
             }
             Contact hit;
             hit.normal = n;
-            hit.penetration = -separation;
+            hit.penetration = std::fmax(math::Real{0}, -separation);
             hit.point = v + face_normal * (-separation / math::Real{2});
             result.push_back(hit);
         }
