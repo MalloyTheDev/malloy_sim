@@ -77,6 +77,33 @@ and reversed impulses. When writing a physics test, deliberately break symmetry:
 A useful check on a new test is to ask what wrong implementation would still
 pass it, and then either add a case that would not, or confirm by mutation.
 
+## Statistical checks (M38)
+
+A gas is chaotic, but a run is deterministic (docs/04), so a check on a
+statistical quantity returns the same number every time on the same binary and
+platform. That makes it tempting to set the tolerance from the observed value.
+Do not: a tolerance fitted to one run proves nothing about the physics.
+
+Instead, every tolerance on a statistical quantity is DERIVED and the derivation
+is written beside the check:
+
+- three standard deviations of the quantity's own scatter, from its sampling
+  distribution where one is known (binomial for a fraction, Beta for an energy
+  share), or measured as the run-to-run spread when the timestep is perturbed
+  slightly (which reshuffles every collision) for a time average like pressure;
+- plus an explicit budget for model error when the comparison is with an
+  approximate theory (a first-order wall correction, a finite step);
+- and it must EXCLUDE the obvious wrong answer. Say what it excludes: the ideal
+  gas pressure, the unrelaxed start, the starting energy ratio.
+
+Exact quantities keep tight tolerances even in a statistical template: a
+conserved temperature, or a statistic of the deterministic start.
+
+A bound can replace a standard deviation when the error has one. The point
+particle ideal-gas test computes its own tolerance from the run (whole bounces
+counted, plus the clamp lag), and also asserts that tolerance is tight enough to
+mean something.
+
 ## When to migrate to Catch2
 
 Only consider Catch2 after M5 when test count, diagnostics, parameterization, or CI reporting become painful.

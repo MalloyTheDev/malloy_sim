@@ -1,0 +1,83 @@
+# MalloySim scenario: a hard-disk gas, its temperature and its pressure (M38).
+#
+# A box of colliding particles is a gas. M38 reads it as one: a temperature
+# from the kinetic energy, a pressure from the impulse the walls deliver, and a
+# velocity distribution that relaxes to Maxwell-Boltzmann. Nothing about the
+# dynamics is new; these are the M10 particles, measured (docs/04 defines each
+# quantity, with Boltzmann's constant k_B = 1).
+#
+# 100 disks of mass 1 and radius 0.2 start on a 10 by 10 grid filling a box of
+# side 10 (the `lattice` key), every one at speed 1, in exactly opposite pairs
+# so the net momentum is zero. The area fraction is 100 pi 0.2^2 / 100 = 0.126.
+#
+# Temperature. T = 2 KE / (d N) with d = 2: KE = 100 * 0.5 * 1^2 = 50, so
+# T = 0.5. Collisions are elastic and there is no gravity, so kinetic energy is
+# conserved and T stays 0.5 for the whole run, to rounding.
+#
+# Relaxation. Every speed starts equal, so speed_ratio <v^4>/<v^2>^2 is exactly
+# 1. Collisions spread the speeds into the 2D Maxwell-Boltzmann distribution,
+# where v^2 is exponential, so the fraction of disks slower than the mean,
+# slow_fraction, settles at 1 - 1/e = 0.632. With only 100 disks a snapshot
+# scatters about that by sqrt(0.632 * 0.368 / 100) = 0.048, so the check allows
+# three of those, 0.145. (speed_ratio itself heads for 2, but its snapshot
+# scatter at N = 100 is too large to check usefully, so it is checked at step 0
+# only, where it is exact.)
+#
+# Pressure. An ideal gas obeys P A = N T, which here is 0.5. Hard disks push
+# harder, because each one excludes area from the others: Henderson's equation
+# of state, Z = (1 + eta^2/8) / (1 - eta)^2, accurate to well under 1 per cent
+# at this density. Two wall effects matter in a box this small:
+#
+#   - a disk's centre cannot come within r of a wall, so the gas fills a
+#     (10 - 2r)^2 square, and it is slightly denser against the walls than in
+#     the bulk (first-order adsorption, Gamma = (2/3) rho^2 sigma^3 per unit
+#     length of wall, sigma = 2r). Solving N = rho (10 - 2r)^2 + 4 (10 - 2r) Gamma
+#     gives a bulk density rho = 1.065, so eta = 0.134, Z = 1.336 and a bulk
+#     pressure rho T Z = 0.711;
+#   - the walls feel that force only where a disk can touch them, which stops r
+#     short of each corner, but `pressure` spreads it over the whole perimeter,
+#     as a gauge covering the wall would. It reads 0.711 * 9.6 / 10 = 0.683.
+#
+# The tolerance, 0.025, is three standard deviations of the run-to-run scatter
+# (0.003, measured by re-running at seven nearby timesteps, which reshuffles the
+# collisions) plus a 2 per cent budget for the model: the first-order wall
+# correction, the corners and the finite step. It is derived, not fitted to
+# this run (docs/05). The ideal-gas 0.5 lies far outside it.
+
+type particles
+
+dt 0.01
+steps 4000
+output_every 1000
+
+restitution 1.0
+bounds -5.0 -5.0 5.0 5.0
+
+# lattice <nx> <ny> <mass> <radius> <speed>
+lattice 10 10  1.0 0.2 1.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   T 5.00000000e-01   P -              (no time has passed yet)
+#   step   4000   T 5.00000000e-01   P 6.83837509e-01
+#
+# The invariants:
+#
+# 1. Temperature is conserved exactly: elastic collisions, no gravity.
+# 2. The net momentum starts at exactly zero (opposite pairs). It is not
+#    conserved after that: the walls exchange momentum with the gas, so the
+#    gas sloshes (p_x is about 24 at step 4000, against N m v = 100).
+# 3. The speeds relax from all-equal to Maxwell-Boltzmann (slow_fraction 0.632).
+# 4. The pressure is the hard-disk value, about 37 per cent above the ideal gas.
+#
+# On the ASCII view: a regular grid of points that dissolves into a gas.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    temperature    5.00000000e-01   tol 1e-12
+# check step 0    speed_ratio    1.00000000e+00   tol 1e-12
+# check step 0    momentum_x     0.00000000e+00   tol 1e-12
+# check step 0    momentum_y     0.00000000e+00   tol 1e-12
+# check step 4000 temperature    5.00000000e-01   tol 1e-9
+# check step 4000 slow_fraction  6.32000000e-01   tol 0.145
+# check step 4000 pressure       6.83000000e-01   tol 0.025

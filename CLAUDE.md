@@ -62,7 +62,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M37 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M38 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -77,7 +77,8 @@ force on a 3D body, charged particles in three dimensions, an oriented box
 resting and tumbling on a ground plane, spring networks in three dimensions,
 colliding particles in three dimensions, box-against-box collision,
 box-against-sphere collision, Coulomb friction for particle contacts,
-box-against-box collision in two dimensions, and a 2D box on a ground plane.
+box-against-box collision in two dimensions, a 2D box on a ground plane, and
+the kinetic theory of a hard-disk gas (temperature, pressure, relaxation).
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -108,7 +109,18 @@ separating-axis test, the first non-disc 2D collision) and M37 (a 2D box
 resting on a ground plane, the 2D sibling of M30) are all done. See
 `docs/07_POST_M5_ROADMAP.md`.
 
-Do not start any further milestone (M38 or later) unless explicitly asked, and
+M38 opened the next track, **thermodynamics**, the way M12 added ballistics: as
+measurement on an existing domain rather than a new one. A box of
+`malloy_particles` particles is read as a gas: `particles::temperature`, a
+per-wall impulse tally on each particle world (`wall_impulse()`) and
+`particles::pressure` from it, the relaxation statistics `speed_ratio` and
+`slow_fraction`, and a deterministic `lattice`/`lattice3` scenario key that lays
+out a whole gas (`include/malloy/particles/thermo.hpp`). No new world, settings
+type, `type` key or test executable. Thermal walls (heat flow, which needs a
+fully specified PRNG inside the domain, never the std distributions) and a
+moving piston (work) are the natural next steps, each its own milestone.
+
+Do not start any further milestone (M39 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -157,7 +169,7 @@ dispatch to:
 
 ```text
 type nbody          # or: particles, rigid, springs, charges, nbody3d,
-                    #     rigid3d, charges3d
+                    #     rigid3d, charges3d, springs3d, particles3d
 dt 0.001
 steps 10000
 ```
@@ -190,8 +202,13 @@ the precision it claims instead of inheriting one.
 
 Quantities available in every domain: `energy`, `kinetic`, `momentum_x`,
 `momentum_y`. Also `angular` in nbody and rigid, `elastic` in springs, and
-`speed` in charges. Naming a quantity a domain does not have FAILS rather than
-being skipped, so a check cannot quietly stop checking.
+`speed` in charges. Since M38, particles and particles3d also have
+`temperature`, `pressure`, `speed_ratio` and `slow_fraction`; pressure does not
+exist before any time has passed, so a `step 0 pressure` check fails. Naming a
+quantity a domain does not have FAILS rather than being skipped, so a check
+cannot quietly stop checking. A check on a statistical quantity carries a
+DERIVED tolerance, stated beside it, never one fitted to the run
+(`docs/05_TESTING_STRATEGY.md`).
 
 ## Testing policy
 

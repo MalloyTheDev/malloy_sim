@@ -33,6 +33,18 @@ void damp_tangential(math::Real& component, math::Real max_delta)
 void resolve_pair(Particle2D& a, Particle2D& b, math::Real restitution,
                   math::Real friction)
 {
+    // Reject a pair that is clearly apart before building a contact (M38). It
+    // is the same squared-distance test collide::contact makes first, on the
+    // same arithmetic, so the result is bit-identical; in a gas almost every
+    // pair is apart, and skipping the contact keeps the O(N^2) loop cheap.
+    // Every pair is still visited, so this is not a broadphase.
+    const math::Real ex = b.position.x - a.position.x;
+    const math::Real ey = b.position.y - a.position.y;
+    const math::Real reach = a.radius + b.radius;
+    if (ex * ex + ey * ey > reach * reach)
+    {
+        return;
+    }
     const std::optional<collide::Contact> hit =
         collide::contact(collide::Circle{a.position, a.radius},
                          collide::Circle{b.position, b.radius});
@@ -104,10 +116,13 @@ void resolve_pair(Particle2D& a, Particle2D& b, math::Real restitution,
 // the tangential velocity is also damped, clamped Coulomb-style to `friction`
 // times the normal impulse per unit mass, which is `(1 + restitution)` times the
 // incoming normal speed. Friction 0 leaves the tangent untouched, so the motion
-// is exactly the old reflect.
+// is exactly the old reflect. Each bounce also adds its normal impulse,
+// m (1 + e) times the incoming normal speed, to the tally for the wall it hit.
 void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
-                   math::Real restitution, math::Real friction)
+                   math::Real restitution, math::Real friction,
+                   WallImpulse2D& impulse)
 {
+    const math::Real kick = p.mass * (math::Real{1} + restitution);
     if (p.position.x - p.radius < bounds.min.x)
     {
         p.position.x = bounds.min.x + p.radius;
@@ -117,6 +132,7 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
             p.velocity.x = -p.velocity.x * restitution;
             damp_tangential(p.velocity.y,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.min_x += kick * normal_speed;
         }
     }
     else if (p.position.x + p.radius > bounds.max.x)
@@ -128,6 +144,7 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
             p.velocity.x = -p.velocity.x * restitution;
             damp_tangential(p.velocity.y,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.max_x += kick * normal_speed;
         }
     }
 
@@ -140,6 +157,7 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
             p.velocity.y = -p.velocity.y * restitution;
             damp_tangential(p.velocity.x,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.min_y += kick * normal_speed;
         }
     }
     else if (p.position.y + p.radius > bounds.max.y)
@@ -151,6 +169,7 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
             p.velocity.y = -p.velocity.y * restitution;
             damp_tangential(p.velocity.x,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.max_y += kick * normal_speed;
         }
     }
 }
@@ -222,6 +241,7 @@ sim_core::StepResult ParticleWorld::step()
     }
 
     previous_ = particles_;
+    const WallImpulse2D previous_impulse = wall_impulse_;
 
     const math::Real dt = simulation_settings_.dt;
     const math::Real restitution = particle_settings_.restitution;
@@ -254,7 +274,8 @@ sim_core::StepResult ParticleWorld::step()
     // (3) then keep everything inside the box.
     for (std::size_t i = 0; i < count; ++i)
     {
-        resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction);
+        resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction,
+                      wall_impulse_);
     }
 
     // (4) a step that produced non-finite state must not report success.
@@ -263,6 +284,7 @@ sim_core::StepResult ParticleWorld::step()
         if (!p.is_valid())
         {
             particles_.swap(previous_);
+            wall_impulse_ = previous_impulse;
             return sim_core::StepResult{sim_core::StepStatus::InvalidState};
         }
     }

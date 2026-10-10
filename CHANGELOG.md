@@ -884,6 +884,113 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M38] - 2026-10-10  (a hard-disk gas: kinetic theory)
+
+### Added
+
+- A wall-impulse tally on both particle worlds: `WallImpulse2D` and
+  `WallImpulse3D`, read through `wall_impulse()`. Each bounce adds its normal
+  impulse, m (1 + e) times the incoming normal speed, to the wall it hit. Only
+  the normal component counts (friction pushes along a wall, not into it), and a
+  step rolled back for non-finite state rolls the tally back with it. Reading a
+  bounce changes nothing, so every existing template runs bit-identically.
+- `include/malloy/particles/thermo.hpp`: `temperature`, `speed_ratio`,
+  `slow_fraction` and `pressure`, each with a 3D sibling, and `lattice_gas` /
+  `lattice_gas3d`, a deterministic gas start with no random numbers (a grid,
+  every speed equal, directions in exactly opposite pairs at successive golden
+  angles, so the momentum is exactly zero).
+- Scenario keys `lattice <nx> <ny> <mass> <radius> <speed>` (type particles) and
+  `lattice3 <nx> <ny> <nz> ...` (type particles3d). The count is capped BEFORE
+  anything is allocated, the grid is expanded only after the whole file is read
+  (so `bounds` may come before or after it), at most one lattice is allowed, and
+  a spacing below one diameter is refused.
+- `# check` quantities `temperature`, `pressure`, `speed_ratio` and
+  `slow_fraction` for particles and particles3d, and T and P columns on both
+  particle runners in the app. A `step 0 pressure` check fails: no time has
+  passed, so no pressure exists.
+- The `hard_disk_gas` and `hard_sphere_gas` templates. Twenty-eight templates
+  now, across ten domains.
+- A distance early-out before a particle pair builds a contact. It is the same
+  squared-distance test `collide::contact` makes first, so results are
+  bit-identical (confirmed after 4000 chaotic steps), and it halves the Debug
+  cost of a gas. Every pair is still visited: it is not a broadphase.
+
+### A box of particles, read as a gas
+
+M38 opens thermodynamics the way M12 added ballistics: as measurement on an
+existing domain, not a new one. A `GasWorld` would have duplicated
+`ParticleWorld`, and ADR 0008's trigger exists to catch exactly that; instead the
+gas is `ParticleWorld`, its step is unchanged, and no `type` key, settings type
+or test executable was added.
+
+The numbers were fixed by a measurement spike before any template was written.
+The pressure a gauge on the walls reads is the hard-gas equation of state at the
+BULK density, and in a box of this size the walls matter as much as the
+excluded area does: centres cannot come within r of a wall, the gas is denser
+against the walls than in the bulk, and the walls feel force only where a
+particle can touch them. With those corrections the 2D template is predicted at
+0.683 (Henderson) and the 3D one at 0.246 (Carnahan-Starling); seven runs at
+nearby timesteps gave 0.678 +- 0.003 and 0.248 +- 0.001. The ideal-gas values,
+0.5 and 0.193, are far outside the derived tolerances, as is the naive
+excluded-volume figure that ignores the walls. A denser 3D candidate was dropped
+because the first-order wall correction underestimated it by 2 per cent.
+
+Each template's tolerance is three standard deviations of the measured
+run-to-run scatter plus a 2 per cent model budget, written beside the check.
+docs/05 now states that policy: a statistical tolerance is derived, never fitted
+to the run, and must exclude the obvious wrong answer. The end-of-run
+`speed_ratio` turned out too noisy to check at these sizes (its scatter is heavy
+tailed), so it is checked at step 0, where it is exactly 1, and relaxation is
+checked through `slow_fraction` with a binomial tolerance.
+
+### Invariants
+
+The tests pin the statistics in closed form on hand-built lists with unequal
+masses; pressure over the right perimeter or area with every wall distinct, and
+empty at, before and at a non-finite time; each bounce tallied on its own wall
+at restitution 0.5 with friction on, and a 3D corner hit tallied on three axes;
+a point particle between two walls in closed form (dt = 1/64 makes every
+position exact, so the max-x wall is hit at exactly steps 129 and 643, and the
+clamp's lag gives the mean force m v^2 / (L + v dt)); exact momentum balance,
+p(t) - p(0) equal to the wall tallies, in 2D and in 3D with gravity's M g t
+added; the point-particle ideal-gas law P A = KE and P V = (2/3) KE inside a
+bound the test computes from the run; equipartition from an all-x start
+(KE_x / KE from 0.96 to 0.496, within a Beta 3-sigma of a half) and across a
+mass 1 / mass 4 mixture (heavy to light from 4 to 1.003); pressure stable when
+dt is halved; the tally restored by a rolled-back step; an empty world; and the
+lattice builder's layout, exact opposite pairs, exact zero momentum, documented
+directions and isotropy. The parser tests cover order independence, mixing with
+explicit particles, every malformed form, the cap reported on the lattice line,
+and spacing too tight on each axis alone.
+
+### Mutation testing
+
+Twenty-eight mutations, all caught: the tally on the wrong wall in 2D and 3D,
+restitution dropped from the kick, the rollback not restoring the tally in
+either world, the wrong dimension in temperature, the N factor dropped from
+`speed_ratio`, ties counted as slow, a wall or half the perimeter dropped from
+pressure, a pressure at time 0, the 3D wall area wrong, unpaired or per-particle
+lattice directions, an off-centre grid, a skewed 3D height sequence, each
+axis's spacing check skipped, the cap, the one-lattice rule, the domain gate and
+the count floor disabled, radius used for diameter, and the early-out made
+strict or given too short a reach. Three needed a second pass. One was skipped
+by the harness (its search text matched twice). The 2D y-spacing check survived
+because the crowded test was too tight on both axes at once, so the x check
+alone refused it; the tests now use a single-axis case for every axis in both
+dimensions. And the skewed 3D height sequence survived because the energy-share
+test cannot see it: a mirrored pair makes any height sequence look isotropic,
+so the documented directions are now pinned for the first pairs.
+
+### Docs
+
+docs/04 defines temperature, pressure, the ideal-gas limit and its error, the
+wall corrections, and the two relaxation statistics; docs/05 adds the
+statistical-check policy; ADR 0008 records why M38 added no integration path.
+In passing: the scenario header now documents `friction` for both particle
+types (accepted since M35, never listed), docs/03 no longer says the particle
+domain is "not responsible for gravity" (it has had gravity since M12), and the
+quoted app output in `particle_collision3d.scn` shows the new columns.
+
 ## [M37] - 2026-09-12  (a 2D box on a ground plane)
 
 ### Added

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <utility>
 #include <vector>
 
 using malloy::collide::Aabb;
@@ -30,6 +31,18 @@ using malloy::particles::total_kinetic_energy;
 using malloy::particles::total_kinetic_energy3d;
 using malloy::particles::total_momentum;
 using malloy::particles::total_momentum3d;
+using malloy::particles::lattice_gas;
+using malloy::particles::lattice_gas3d;
+using malloy::particles::pressure;
+using malloy::particles::pressure3d;
+using malloy::particles::slow_fraction;
+using malloy::particles::slow_fraction3d;
+using malloy::particles::speed_ratio;
+using malloy::particles::speed_ratio3d;
+using malloy::particles::temperature;
+using malloy::particles::temperature3d;
+using malloy::particles::WallImpulse2D;
+using malloy::particles::WallImpulse3D;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
 
@@ -1040,6 +1053,533 @@ int main()
             MALLOY_CHECK_NEAR(capped.particles()[0].velocity.x, 2.0 * scale, 1e-3);
             MALLOY_CHECK_NEAR(capped.particles()[0].velocity.z, 1.0 * scale, 1e-3);
             MALLOY_CHECK_NEAR(capped.particles()[0].velocity.y, 1.0, 1e-3);
+        }
+    }
+
+    // --- M38: kinetic theory. The gas quantities are pure functions of the
+    //     state and of the wall tally, and the tally is exact bookkeeping that
+    //     changes no trajectory. ---
+    {
+
+        // --- The statistics in closed form, on hand-built lists. The masses
+        //     differ, which pins temperature as mass-weighted and the two
+        //     velocity statistics as unweighted. ---
+        {
+            const std::vector<Particle2D> two = {
+                Particle2D{Vec2{}, Vec2{3.0, 4.0}, 2.0, 0.1}, // v^2 25, KE 25
+                Particle2D{Vec2{}, Vec2{1.0, 0.0}, 4.0, 0.1}, // v^2 1, KE 2
+            };
+            // T = 2 KE / (d N) = 2 * 27 / (2 * 2)
+            MALLOY_CHECK_NEAR(temperature(two), 13.5, 1e-12);
+            // <v^4> / <v^2>^2 = ((625 + 1) / 2) / 13^2
+            MALLOY_CHECK_NEAR(speed_ratio(two), 313.0 / 169.0, 1e-12);
+            // the mean v^2 is 13, and one of the two is below it
+            MALLOY_CHECK_NEAR(slow_fraction(two), 0.5, 1e-12);
+
+            const std::vector<Particle3D> three = {
+                Particle3D{Vec3{}, Vec3{1.0, 2.0, 2.0}, 2.0, 0.1}, // v^2 9, KE 9
+                Particle3D{Vec3{}, Vec3{0.0, 0.0, 1.0}, 1.0, 0.1}, // v^2 1, KE 0.5
+                Particle3D{Vec3{}, Vec3{0.0, 1.0, 1.0}, 1.0, 0.1}, // v^2 2, KE 1
+            };
+            // T = 2 * 10.5 / (3 * 3); <v^4> = 86/3 over <v^2>^2 = 16; 2 of 3 below 4
+            MALLOY_CHECK_NEAR(temperature3d(three), 21.0 / 9.0, 1e-12);
+            MALLOY_CHECK_NEAR(speed_ratio3d(three), 86.0 / 48.0, 1e-12);
+            MALLOY_CHECK_NEAR(slow_fraction3d(three), 2.0 / 3.0, 1e-12);
+
+            // Empty and motionless lists give 0 rather than dividing by zero.
+            MALLOY_CHECK_EQ(temperature(std::vector<Particle2D>{}), 0.0);
+            MALLOY_CHECK_EQ(speed_ratio(std::vector<Particle2D>{}), 0.0);
+            MALLOY_CHECK_EQ(slow_fraction(std::vector<Particle2D>{}), 0.0);
+            MALLOY_CHECK_EQ(temperature3d(std::vector<Particle3D>{}), 0.0);
+            MALLOY_CHECK_EQ(speed_ratio3d(std::vector<Particle3D>{}), 0.0);
+            MALLOY_CHECK_EQ(slow_fraction3d(std::vector<Particle3D>{}), 0.0);
+            const std::vector<Particle2D> still = {
+                Particle2D{Vec2{}, Vec2{}, 1.0, 0.1},
+                Particle2D{Vec2{1.0, 0.0}, Vec2{}, 2.0, 0.1},
+            };
+            MALLOY_CHECK_EQ(temperature(still), 0.0);
+            MALLOY_CHECK_EQ(speed_ratio(still), 0.0);
+            MALLOY_CHECK_EQ(slow_fraction(still), 0.0); // nothing is below a mean of 0
+        }
+
+        // --- Pressure is total impulse over elapsed time and total wall: the
+        //     perimeter in 2D, the surface area in 3D. Every wall's impulse is
+        //     distinct, so a wall left out of the sum shows. Before any time has
+        //     passed there is no pressure at all, not a 0. ---
+        {
+            const Aabb box{Vec2{-1.0, -2.0}, Vec2{1.0, 1.0}}; // 2 by 3, perimeter 10
+            const WallImpulse2D impulse{1.0, 2.0, 3.0, 4.0};   // total 10
+            const auto p = pressure(impulse, box, 2.0);
+            MALLOY_CHECK_TRUE(p.has_value());
+            MALLOY_CHECK_NEAR(*p, 10.0 / (2.0 * 10.0), 1e-15);
+            MALLOY_CHECK_FALSE(pressure(impulse, box, 0.0).has_value());
+            MALLOY_CHECK_FALSE(pressure(impulse, box, -1.0).has_value());
+            MALLOY_CHECK_FALSE(pressure(impulse, box, nan).has_value());
+            MALLOY_CHECK_FALSE(pressure(impulse, box, inf).has_value());
+
+            const Aabb3 box3{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 2.0, 3.0}}; // area 2(2+6+3)
+            const WallImpulse3D impulse3{1.0, 2.0, 3.0, 4.0, 5.0, 6.0};  // total 21
+            const auto p3 = pressure3d(impulse3, box3, 0.5);
+            MALLOY_CHECK_TRUE(p3.has_value());
+            MALLOY_CHECK_NEAR(*p3, 21.0 / (0.5 * 22.0), 1e-15);
+            MALLOY_CHECK_FALSE(pressure3d(impulse3, box3, 0.0).has_value());
+            MALLOY_CHECK_FALSE(pressure3d(impulse3, box3, -1.0).has_value());
+            MALLOY_CHECK_FALSE(pressure3d(impulse3, box3, nan).has_value());
+            MALLOY_CHECK_FALSE(pressure3d(impulse3, box3, inf).has_value());
+        }
+
+        // --- Each bounce adds m (1 + e) times the incoming normal speed to the
+        //     wall it hit and to no other. One particle per wall, each with a
+        //     distinct mass and speed, at restitution 0.5. Friction is on, and
+        //     its tangential impulse is NOT tallied: it pushes along a wall,
+        //     not into it, so the normal figures are unchanged by it. ---
+        {
+            const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+            ParticleSettings settings;
+            settings.restitution = 0.5;
+            settings.bounds = box;
+            settings.friction = 0.3;
+            const std::vector<Particle2D> four = {
+                Particle2D{Vec2{-0.85, -0.5}, Vec2{-3.0, 0.5}, 2.0, 0.1}, // min_x 2*1.5*3
+                Particle2D{Vec2{0.85, 0.5}, Vec2{1.0, -0.5}, 3.0, 0.1},   // max_x 3*1.5*1
+                Particle2D{Vec2{0.5, -0.85}, Vec2{0.5, -2.0}, 1.0, 0.1},  // min_y 1*1.5*2
+                Particle2D{Vec2{-0.5, 0.85}, Vec2{-0.5, 4.0}, 1.0, 0.1},  // max_y 1*1.5*4
+            };
+            ParticleWorld w{SimulationSettings{0.1}, settings, four};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            MALLOY_CHECK_NEAR(w.wall_impulse().min_x, 9.0, 1e-12);
+            MALLOY_CHECK_NEAR(w.wall_impulse().max_x, 4.5, 1e-12);
+            MALLOY_CHECK_NEAR(w.wall_impulse().min_y, 3.0, 1e-12);
+            MALLOY_CHECK_NEAR(w.wall_impulse().max_y, 6.0, 1e-12);
+
+            // 3D: one particle driven into a corner hits three walls in one
+            // step, each tallied on its own axis (friction 0, so no wall's
+            // bounce alters the normal speed another one sees).
+            ParticleSettings3D settings3;
+            settings3.restitution = 0.5;
+            settings3.bounds = Aabb3{Vec3{-1.0, -1.0, -1.0}, Vec3{1.0, 1.0, 1.0}};
+            ParticleWorld3D w3{SimulationSettings{0.1}, settings3,
+                               {Particle3D{Vec3{0.85, -0.85, 0.85}, Vec3{1.0, -2.0, 3.0}, 2.0, 0.1}}};
+            MALLOY_CHECK_TRUE(w3.step().ok());
+            MALLOY_CHECK_NEAR(w3.wall_impulse().max_x, 3.0, 1e-12); // 2 * 1.5 * 1
+            MALLOY_CHECK_NEAR(w3.wall_impulse().min_y, 6.0, 1e-12); // 2 * 1.5 * 2
+            MALLOY_CHECK_NEAR(w3.wall_impulse().max_z, 9.0, 1e-12); // 2 * 1.5 * 3
+            MALLOY_CHECK_EQ(w3.wall_impulse().min_x, 0.0);
+            MALLOY_CHECK_EQ(w3.wall_impulse().max_y, 0.0);
+            MALLOY_CHECK_EQ(w3.wall_impulse().min_z, 0.0);
+        }
+
+        // --- One point particle between the x walls, in closed form. dt = 1/64
+        //     and speed 1/2 put every position on a multiple of 1/128, exact in
+        //     binary. Landing exactly ON a wall is not a bounce; the next step
+        //     overshoots and is clamped back, so the particle spends one step
+        //     there and a crossing of the 2-wide box takes 256 + 1 steps. The
+        //     max-x wall is hit at steps 129, 643, ..., the min-x wall at 386,
+        //     each hit delivering 2 m v = 3. That lag is the clamp's: the mean
+        //     force is m v^2 / (L + v dt), not m v^2 / L. ---
+        {
+            const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+            ParticleWorld w{SimulationSettings{1.0 / 64.0}, ParticleSettings{1.0, box},
+                            {Particle2D{Vec2{0.0, 0.0}, Vec2{0.5, 0.0}, 3.0, 0.0}}};
+            const auto run_to = [&w](int step) {
+                while (static_cast<int>(w.tick_count()) < step)
+                {
+                    if (!w.step().ok())
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            MALLOY_CHECK_TRUE(run_to(128));
+            MALLOY_CHECK_EQ(w.wall_impulse().max_x, 0.0);
+            MALLOY_CHECK_TRUE(run_to(129));
+            MALLOY_CHECK_EQ(w.wall_impulse().max_x, 3.0);
+            MALLOY_CHECK_TRUE(run_to(385));
+            MALLOY_CHECK_EQ(w.wall_impulse().min_x, 0.0);
+            MALLOY_CHECK_TRUE(run_to(386));
+            MALLOY_CHECK_EQ(w.wall_impulse().min_x, 3.0);
+            MALLOY_CHECK_TRUE(run_to(642));
+            MALLOY_CHECK_EQ(w.wall_impulse().max_x, 3.0);
+            MALLOY_CHECK_TRUE(run_to(643));
+            MALLOY_CHECK_EQ(w.wall_impulse().max_x, 6.0);
+            MALLOY_CHECK_EQ(w.wall_impulse().min_y + w.wall_impulse().max_y, 0.0);
+            // 9 of impulse over 643/64 of time and a perimeter of 8.
+            MALLOY_CHECK_NEAR(*pressure(w.wall_impulse(), box, w.elapsed_time()),
+                              72.0 / 643.0, 1e-15);
+            // One period is 514 steps: 2 m v per period on the max-x wall is
+            // exactly m v^2 / (L + v dt).
+            MALLOY_CHECK_NEAR(3.0 / (514.0 / 64.0), 3.0 * 0.25 / (2.0 + 0.5 / 64.0), 1e-15);
+        }
+
+        // --- Momentum balance, exact: walls are the only external agent here
+        //     (no gravity, friction 0), and each wall's tally is the momentum it
+        //     gave, so p(t) - p(0) = (J_minx - J_maxx, J_miny - J_maxy). Unequal
+        //     masses and radii, a non-square box and restitution 0.9 keep it
+        //     asymmetric. Run twice: the tally is as repeatable as the state. ---
+        {
+            const Aabb box{Vec2{-3.0, -2.0}, Vec2{3.0, 2.0}};
+            std::vector<Particle2D> gas = lattice_gas(box, 6, 4, 1.0, 0.15, 1.0);
+            for (std::size_t i = 0; i < gas.size(); i += 3)
+            {
+                gas[i].mass = 2.5;
+                gas[i].radius = 0.25;
+            }
+            const Vec2 p0 = total_momentum(gas);
+            ParticleWorld a{SimulationSettings{0.01}, ParticleSettings{0.9, box}, gas};
+            ParticleWorld b{SimulationSettings{0.01}, ParticleSettings{0.9, box}, gas};
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(a.step().ok());
+                MALLOY_CHECK_TRUE(b.step().ok());
+            }
+            const WallImpulse2D& j = a.wall_impulse();
+            MALLOY_CHECK_TRUE(j.min_x > 0.0 && j.max_x > 0.0 && j.min_y > 0.0 && j.max_y > 0.0);
+            const Vec2 dp = total_momentum(a.particles()) - p0;
+            MALLOY_CHECK_NEAR(dp.x, j.min_x - j.max_x, 1e-9);
+            MALLOY_CHECK_NEAR(dp.y, j.min_y - j.max_y, 1e-9);
+            MALLOY_CHECK_EQ(j.min_x, b.wall_impulse().min_x);
+            MALLOY_CHECK_EQ(j.max_x, b.wall_impulse().max_x);
+            MALLOY_CHECK_EQ(j.min_y, b.wall_impulse().min_y);
+            MALLOY_CHECK_EQ(j.max_y, b.wall_impulse().max_y);
+            MALLOY_CHECK_EQ(a.particles()[5].position.x, b.particles()[5].position.x);
+        }
+        {
+            // 3D, now WITH gravity, which adds M g t to the balance: every step
+            // adds m g dt to every velocity, walls or not.
+            const Aabb3 box{Vec3{-2.0, -1.5, -1.0}, Vec3{2.0, 1.5, 1.0}};
+            std::vector<Particle3D> gas = lattice_gas3d(box, 4, 3, 2, 1.0, 0.15, 1.0);
+            Real total_mass = 0.0;
+            for (std::size_t i = 0; i < gas.size(); ++i)
+            {
+                if (i % 3 == 0)
+                {
+                    gas[i].mass = 2.5;
+                    gas[i].radius = 0.25;
+                }
+                total_mass += gas[i].mass;
+            }
+            ParticleSettings3D settings;
+            settings.restitution = 0.9;
+            settings.bounds = box;
+            settings.gravity = Vec3{0.2, -0.5, 0.3};
+            const Vec3 p0 = total_momentum3d(gas);
+            ParticleWorld3D w{SimulationSettings{0.01}, settings, gas};
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            const WallImpulse3D& j = w.wall_impulse();
+            const Vec3 pushed = settings.gravity * (total_mass * w.elapsed_time());
+            const Vec3 dp = total_momentum3d(w.particles()) - p0;
+            MALLOY_CHECK_NEAR(dp.x, j.min_x - j.max_x + pushed.x, 1e-9);
+            MALLOY_CHECK_NEAR(dp.y, j.min_y - j.max_y + pushed.y, 1e-9);
+            MALLOY_CHECK_NEAR(dp.z, j.min_z - j.max_z + pushed.z, 1e-9);
+            MALLOY_CHECK_TRUE(j.min_z > 0.0 && j.max_z > 0.0);
+        }
+
+        // --- Point particles never collide (a contact needs the centres within
+        //     r_a + r_b = 0), so each bounces between the walls on its own and
+        //     the gas is exactly ideal: P A = N T = KE in 2D, P V = N T =
+        //     (2/3) KE in 3D. The error is bounded, not fitted: a particle's
+        //     hits on a pair of walls are within one of their mean count, each
+        //     hit carrying 2 m |v_axis|, and the clamp lag lowers each rate by
+        //     at most v dt / L. So
+        //       |ratio - 1| <= sum(2 m |v_axis|) L / (4 t KE) + v dt / L. ---
+        {
+            const Real side = 1.0;
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{side, side}};
+            const std::vector<Particle2D> points = lattice_gas(box, 4, 4, 1.0, 0.0, 1.0);
+            ParticleWorld w{SimulationSettings{0.01}, ParticleSettings{1.0, box}, points};
+            for (int i = 0; i < 20000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            Real lumps = 0.0;
+            for (const Particle2D& p : points)
+            {
+                lumps += 2.0 * p.mass * (std::abs(p.velocity.x) + std::abs(p.velocity.y));
+            }
+            const Real ke = total_kinetic_energy(points);
+            const Real t = w.elapsed_time();
+            const Real bound = lumps * side / (4.0 * t * ke) + 1.0 * 0.01 / side;
+            const Real ratio = *pressure(w.wall_impulse(), box, t) * side * side / ke;
+            MALLOY_CHECK_TRUE(bound < 0.02); // the test is only meaningful if tight
+            MALLOY_CHECK_NEAR(ratio, 1.0, bound);
+        }
+        {
+            const Real side = 1.0;
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{side, side, side}};
+            const std::vector<Particle3D> points = lattice_gas3d(box, 4, 2, 2, 1.0, 0.0, 1.0);
+            ParticleWorld3D w{SimulationSettings{0.01}, ParticleSettings3D{1.0, box}, points};
+            for (int i = 0; i < 20000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            Real lumps = 0.0;
+            for (const Particle3D& p : points)
+            {
+                lumps += 2.0 * p.mass *
+                         (std::abs(p.velocity.x) + std::abs(p.velocity.y) + std::abs(p.velocity.z));
+            }
+            const Real ke = total_kinetic_energy3d(points);
+            const Real t = w.elapsed_time();
+            const Real bound = lumps * side / (4.0 * t * ke) + 1.0 * 0.01 / side;
+            const Real ratio =
+                *pressure3d(w.wall_impulse(), box, t) * side * side * side / (2.0 / 3.0 * ke);
+            MALLOY_CHECK_TRUE(bound < 0.025);
+            MALLOY_CHECK_NEAR(ratio, 1.0, bound);
+        }
+
+        // --- Equipartition. A gas started moving almost entirely along x (a
+        //     small y component lets rows meet off-axis) shares its energy
+        //     until KE_x / KE is 1/2. At equilibrium that ratio is Beta(N/2,
+        //     N/2), standard deviation 1 / (2 sqrt(N + 1)); the check allows
+        //     three of those. Temperature is conserved throughout (elastic). ---
+        {
+            const Aabb box{Vec2{-4.0, -4.0}, Vec2{4.0, 4.0}};
+            std::vector<Particle2D> gas = lattice_gas(box, 8, 8, 1.0, 0.2, 1.0);
+            for (std::size_t i = 0; i < gas.size(); ++i)
+            {
+                const Real along = i % 2 == 0 ? 1.0 : -1.0;
+                const Real across = (i / 2) % 2 == 0 ? 0.2 : -0.2;
+                gas[i].velocity = Vec2{along, across};
+            }
+            const auto x_share = [](const std::vector<Particle2D>& list) {
+                Real kx = 0.0;
+                for (const Particle2D& p : list)
+                {
+                    kx += 0.5 * p.mass * p.velocity.x * p.velocity.x;
+                }
+                return kx / total_kinetic_energy(list);
+            };
+            MALLOY_CHECK_TRUE(x_share(gas) > 0.95);
+            const Real t0 = temperature(gas);
+            ParticleWorld w{SimulationSettings{0.01}, ParticleSettings{1.0, box}, gas};
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            const Real n = static_cast<Real>(gas.size());
+            MALLOY_CHECK_NEAR(x_share(w.particles()), 0.5, 3.0 / (2.0 * std::sqrt(n + 1.0)));
+            MALLOY_CHECK_NEAR(temperature(w.particles()), t0, 1e-12 * t0);
+            // Relaxed: the slow fraction is the 2D Maxwell-Boltzmann 1 - 1/e,
+            // within three binomial standard deviations for this N.
+            const Real expected = 1.0 - std::exp(-1.0);
+            MALLOY_CHECK_NEAR(slow_fraction(w.particles()), expected,
+                              3.0 * std::sqrt(expected * (1.0 - expected) / n));
+        }
+
+        // --- Equipartition across masses: a mixture of masses 1 and 4 started
+        //     at the SAME speed holds four times the energy in its heavy half.
+        //     Collisions bring the mean kinetic energy per particle of the two
+        //     species to the same value, the temperature both share. A snapshot
+        //     of each half (32 disks, 64 degrees of freedom) scatters by
+        //     sqrt(2/64) relatively, so their ratio by about 0.25; averaging
+        //     over the second half of the run, with at least 10 independent
+        //     samples (one per two collision times), brings three standard
+        //     deviations to 0.24. ---
+        {
+            const Aabb box{Vec2{-4.0, -4.0}, Vec2{4.0, 4.0}};
+            std::vector<Particle2D> gas = lattice_gas(box, 8, 8, 1.0, 0.2, 1.0);
+            for (std::size_t i = 0; i < gas.size(); i += 2)
+            {
+                gas[i].mass = 4.0;
+            }
+            const auto species_ratio = [](const std::vector<Particle2D>& list) {
+                Real heavy = 0.0;
+                Real light = 0.0;
+                for (const Particle2D& p : list)
+                {
+                    const Real ke = 0.5 * p.mass * malloy::math::dot(p.velocity, p.velocity);
+                    (p.mass > 2.0 ? heavy : light) += ke;
+                }
+                return std::pair<Real, Real>{heavy, light};
+            };
+            const auto [heavy0, light0] = species_ratio(gas);
+            MALLOY_CHECK_NEAR(heavy0 / light0, 4.0, 1e-12);
+            ParticleWorld w{SimulationSettings{0.01}, ParticleSettings{1.0, box}, gas};
+            Real heavy_sum = 0.0;
+            Real light_sum = 0.0;
+            for (int i = 1; i <= 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                if (i > 2000 && i % 20 == 0)
+                {
+                    const auto [heavy, light] = species_ratio(w.particles());
+                    heavy_sum += heavy;
+                    light_sum += light;
+                }
+            }
+            MALLOY_CHECK_NEAR(heavy_sum / light_sum, 1.0, 0.24);
+        }
+
+        // --- Pressure does not hinge on the timestep: halving dt (and doubling
+        //     the steps) moves it by less than the run-to-run scatter allows.
+        //     Different dt means different collisions, so this is a statistical
+        //     comparison: three standard deviations of the difference (about
+        //     0.005 each at this size) plus 0.01 for any first-order bias. ---
+        {
+            const Aabb box{Vec2{-4.0, -4.0}, Vec2{4.0, 4.0}};
+            const std::vector<Particle2D> gas = lattice_gas(box, 8, 8, 1.0, 0.2, 1.0);
+            ParticleWorld coarse{SimulationSettings{0.01}, ParticleSettings{1.0, box}, gas};
+            ParticleWorld fine{SimulationSettings{0.005}, ParticleSettings{1.0, box}, gas};
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(coarse.step().ok());
+            }
+            for (int i = 0; i < 4000; ++i)
+            {
+                MALLOY_CHECK_TRUE(fine.step().ok());
+            }
+            const Real p_coarse = *pressure(coarse.wall_impulse(), box, coarse.elapsed_time());
+            const Real p_fine = *pressure(fine.wall_impulse(), box, fine.elapsed_time());
+            MALLOY_CHECK_NEAR(p_coarse, p_fine, 0.03);
+            MALLOY_CHECK_TRUE(p_coarse > 0.55); // and clearly above the ideal 0.5
+        }
+
+        // --- A step rolled back for non-finite state rolls the tally back too.
+        //     A huge (finite) gravity makes the velocity unsquarable in one
+        //     step, AFTER the particle has bounced off the max-x wall in that
+        //     same step; the bounce must not survive the rollback. ---
+        {
+            const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+            ParticleSettings settings;
+            settings.bounds = box;
+            settings.gravity = Vec2{1e300, 0.0};
+            ParticleWorld w{SimulationSettings{1.0}, settings,
+                            {Particle2D{Vec2{0.5, 0.0}, Vec2{1.0, 0.0}, 1.0, 0.1}}};
+            MALLOY_CHECK_TRUE(w.validate() == StepStatus::Ok);
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_EQ(w.wall_impulse().max_x, 0.0);
+            MALLOY_CHECK_EQ(w.particles()[0].position.x, 0.5);
+
+            ParticleSettings3D settings3;
+            settings3.bounds = Aabb3{Vec3{-1.0, -1.0, -1.0}, Vec3{1.0, 1.0, 1.0}};
+            settings3.gravity = Vec3{0.0, 0.0, 1e300};
+            ParticleWorld3D w3{SimulationSettings{1.0}, settings3,
+                               {Particle3D{Vec3{0.0, 0.0, 0.5}, Vec3{0.0, 0.0, 1.0}, 1.0, 0.1}}};
+            MALLOY_CHECK_TRUE(w3.validate() == StepStatus::Ok);
+            MALLOY_CHECK_TRUE(w3.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_EQ(w3.wall_impulse().max_z, 0.0);
+            MALLOY_CHECK_EQ(w3.particles()[0].position.z, 0.5);
+        }
+
+        // --- An empty world: steps fine, delivers no impulse, and after time
+        //     has passed its pressure exists and is 0. ---
+        {
+            const Aabb box{Vec2{-1.0, -1.0}, Vec2{1.0, 1.0}};
+            ParticleWorld w{SimulationSettings{0.1}, ParticleSettings{1.0, box}, {}};
+            MALLOY_CHECK_FALSE(pressure(w.wall_impulse(), box, w.elapsed_time()).has_value());
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const auto p = pressure(w.wall_impulse(), box, w.elapsed_time());
+            MALLOY_CHECK_TRUE(p.has_value());
+            MALLOY_CHECK_EQ(*p, 0.0);
+            MALLOY_CHECK_EQ(temperature(w.particles()), 0.0);
+        }
+
+        // --- The lattice builder: cell centres in row-major order (x fastest),
+        //     one mass, radius and speed, and directions in exactly opposite
+        //     pairs, pair k at k golden angles, so the momentum is exactly zero
+        //     for an even count and one particle's for an odd one. ---
+        {
+            const Aabb box{Vec2{-2.0, -1.0}, Vec2{2.0, 1.0}}; // 1 by 1 cells
+            const std::vector<Particle2D> grid = lattice_gas(box, 4, 2, 1.5, 0.2, 2.0);
+            MALLOY_CHECK_EQ(grid.size(), std::size_t{8});
+            MALLOY_CHECK_VEC2_NEAR(grid[0].position, (Vec2{-1.5, -0.5}), 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(grid[1].position, (Vec2{-0.5, -0.5}), 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(grid[5].position, (Vec2{-0.5, 0.5}), 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(grid[7].position, (Vec2{1.5, 0.5}), 1e-15);
+            for (std::size_t i = 0; i < grid.size(); ++i)
+            {
+                MALLOY_CHECK_EQ(grid[i].mass, 1.5);
+                MALLOY_CHECK_EQ(grid[i].radius, 0.2);
+                MALLOY_CHECK_NEAR(malloy::math::length(grid[i].velocity), 2.0, 1e-12);
+                if (i % 2 == 1)
+                {
+                    MALLOY_CHECK_EQ(grid[i].velocity.x, -grid[i - 1].velocity.x);
+                    MALLOY_CHECK_EQ(grid[i].velocity.y, -grid[i - 1].velocity.y);
+                }
+            }
+            MALLOY_CHECK_EQ(total_momentum(grid).x, 0.0);
+            MALLOY_CHECK_EQ(total_momentum(grid).y, 0.0);
+            // pair 0 points along +x; pair 1 a golden angle, about 137.5 degrees, on
+            const Real golden = 3.14159265358979323846 * (3.0 - std::sqrt(5.0));
+            MALLOY_CHECK_VEC2_NEAR(grid[0].velocity, (Vec2{2.0, 0.0}), 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(grid[2].velocity,
+                                   (Vec2{2.0 * std::cos(golden), 2.0 * std::sin(golden)}), 1e-12);
+            // An odd count leaves the last particle unpaired.
+            const std::vector<Particle2D> odd = lattice_gas(box, 3, 1, 1.0, 0.2, 1.0);
+            MALLOY_CHECK_EQ(odd.size(), std::size_t{3});
+            MALLOY_CHECK_VEC2_NEAR(total_momentum(odd), odd[2].velocity, 1e-15);
+            // Degenerate counts build nothing.
+            MALLOY_CHECK_TRUE(lattice_gas(box, 0, 3, 1.0, 0.2, 1.0).empty());
+            MALLOY_CHECK_TRUE(lattice_gas(box, 3, -1, 1.0, 0.2, 1.0).empty());
+            // Directions cover the circle evenly: on a 20 by 20 lattice the x
+            // share of the kinetic energy is within 0.01 of a half.
+            const Aabb wide{Vec2{-10.0, -10.0}, Vec2{10.0, 10.0}};
+            const std::vector<Particle2D> many = lattice_gas(wide, 20, 20, 1.0, 0.1, 1.0);
+            Real kx = 0.0;
+            for (const Particle2D& p : many)
+            {
+                kx += 0.5 * p.velocity.x * p.velocity.x;
+            }
+            MALLOY_CHECK_NEAR(kx / total_kinetic_energy(many), 0.5, 0.01);
+        }
+        {
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{2.0, 3.0, 4.0}}; // 1 by 1 by 1 cells
+            const std::vector<Particle3D> grid = lattice_gas3d(box, 2, 3, 4, 1.5, 0.2, 2.0);
+            MALLOY_CHECK_EQ(grid.size(), std::size_t{24});
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(grid[0].position, Vec3{0.5, 0.5, 0.5}, 1e-15));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(grid[1].position, Vec3{1.5, 0.5, 0.5}, 1e-15));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(grid[2].position, Vec3{0.5, 1.5, 0.5}, 1e-15));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(grid[6].position, Vec3{0.5, 0.5, 1.5}, 1e-15));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(grid[23].position, Vec3{1.5, 2.5, 3.5}, 1e-15));
+            for (std::size_t i = 0; i < grid.size(); ++i)
+            {
+                MALLOY_CHECK_EQ(grid[i].mass, 1.5);
+                MALLOY_CHECK_EQ(grid[i].radius, 0.2);
+                MALLOY_CHECK_NEAR(malloy::math::length(grid[i].velocity), 2.0, 1e-12);
+                if (i % 2 == 1)
+                {
+                    MALLOY_CHECK_EQ(grid[i].velocity.x, -grid[i - 1].velocity.x);
+                    MALLOY_CHECK_EQ(grid[i].velocity.y, -grid[i - 1].velocity.y);
+                    MALLOY_CHECK_EQ(grid[i].velocity.z, -grid[i - 1].velocity.z);
+                }
+            }
+            const Vec3 p = total_momentum3d(grid);
+            MALLOY_CHECK_TRUE(p.x == 0.0 && p.y == 0.0 && p.z == 0.0);
+            // The documented directions: pair k at azimuth k golden angles and
+            // height z = 1 - 2 frac((k + 1/2) sqrt 2). Pinned for pairs 0 and 1,
+            // because a skewed z sequence would still look isotropic once each
+            // pair is mirrored, so the energy shares below cannot catch it.
+            const Real golden3 = 3.14159265358979323846 * (3.0 - std::sqrt(5.0));
+            for (int k = 0; k < 2; ++k)
+            {
+                const Real s = (k + 0.5) * std::sqrt(2.0);
+                const Real z = 1.0 - 2.0 * (s - std::floor(s));
+                const Real ring = std::sqrt(1.0 - z * z);
+                const Vec3 expected{2.0 * ring * std::cos(k * golden3),
+                                    2.0 * ring * std::sin(k * golden3), 2.0 * z};
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(grid[2 * k].velocity, expected, 1e-12));
+            }
+            const std::vector<Particle3D> odd = lattice_gas3d(box, 1, 1, 3, 1.0, 0.2, 1.0);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(total_momentum3d(odd), odd[2].velocity, 1e-15));
+            MALLOY_CHECK_TRUE(lattice_gas3d(box, 2, 2, 0, 1.0, 0.2, 1.0).empty());
+            // Directions cover the sphere evenly: on a 10 by 10 by 10 lattice
+            // each axis holds a third of the kinetic energy to within 0.005.
+            const Aabb3 cube{Vec3{0.0, 0.0, 0.0}, Vec3{10.0, 10.0, 10.0}};
+            const std::vector<Particle3D> many = lattice_gas3d(cube, 10, 10, 10, 1.0, 0.1, 1.0);
+            Vec3 share{};
+            for (const Particle3D& q : many)
+            {
+                share += Vec3{q.velocity.x * q.velocity.x, q.velocity.y * q.velocity.y,
+                              q.velocity.z * q.velocity.z};
+            }
+            const Real all = share.x + share.y + share.z;
+            MALLOY_CHECK_NEAR(share.x / all, 1.0 / 3.0, 0.005);
+            MALLOY_CHECK_NEAR(share.y / all, 1.0 / 3.0, 0.005);
+            MALLOY_CHECK_NEAR(share.z / all, 1.0 / 3.0, 0.005);
         }
     }
 

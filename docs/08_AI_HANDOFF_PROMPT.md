@@ -24,9 +24,9 @@ Before doing anything, read:
 
 Current status:
 
-M1-M37 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
+M1-M38 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
 dimensions (with ballistics as uniform
-gravity in that domain, and Coulomb friction on their contacts since M35), 2D rigid bodies with contact response (discs, and since M36 oriented boxes by the separating-axis test, resting on a ground plane since M37) and their own
+gravity in that domain, Coulomb friction on their contacts since M35, and read as a gas since M38, with a temperature, a wall pressure and relaxation to Maxwell-Boltzmann), 2D rigid bodies with contact response (discs, and since M36 oriented boxes by the separating-axis test, resting on a ground plane since M37) and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
 both torque-free and under a constant applied torque, a sphere bouncing on a 3D
 ground plane, rolling with friction, and colliding with another sphere, mass properties
@@ -35,14 +35,14 @@ assembled into compound bodies with combine), a constant applied force to go
 with the torque (the two halves of a wrench), an oriented box that rests and
 tumbles on a ground plane (M30, the first non-sphere 3D collision), box against
 box (M33, two oriented boxes by the separating-axis test, resolved as one
-contact point), a box against a sphere (M34, the box's nearest point to the
+contact at the centroid of their clipped manifold), a box against a sphere (M34, the box's nearest point to the
 sphere centre, the last movable pair in 3D), spring
 networks in two and (M31) three dimensions, and charged particles in electric
 and magnetic fields in two and
 (M29) three dimensions, where the field is a vector and a charge spirals along
 it, are the five finished domains, and the scenario format dispatches
 between them with a type key across ten scenario types. The classical mechanics track is complete
-(docs/07_POST_M5_ROADMAP.md).
+(docs/07_POST_M5_ROADMAP.md), and M38 opened thermodynamics.
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to

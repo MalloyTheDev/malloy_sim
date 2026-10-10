@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -166,6 +167,20 @@ int drive(const char* title, World& world, const Report& report, int steps,
     return 0;
 }
 
+// The wall-pressure column (M38). Before any time has passed no impulse has been
+// measured, so there is no pressure to print, rather than a 0.
+void print_pressure(const std::optional<malloy::math::Real>& pressure)
+{
+    if (pressure)
+    {
+        std::cout << std::setw(16) << *pressure;
+    }
+    else
+    {
+        std::cout << std::setw(16) << "-";
+    }
+}
+
 // Runs one particle scenario to completion, reporting the conserved quantities
 // this domain actually has. Deliberately a separate function from
 // run_scenario: ParticleWorld and NBodyWorld share no base class, and ADR 0006
@@ -194,7 +209,11 @@ int run_particles(const char* title, const SimulationSettings& sim,
         std::cout << std::scientific;
         std::cout << "   E " << std::setw(16) << total_energy(now, settings.gravity)
                   << "   p " << std::setw(16) << total_momentum(now).x << std::setw(16)
-                  << total_momentum(now).y << '\n';
+                  << total_momentum(now).y << "   T " << std::setw(16)
+                  << malloy::particles::temperature(now) << "   P ";
+        print_pressure(malloy::particles::pressure(world.wall_impulse(), settings.bounds,
+                                                   world.elapsed_time()));
+        std::cout << '\n';
         std::cout << std::fixed;
         print_view(view, positions_of(now));
     };
@@ -241,7 +260,11 @@ int run_particles3d(const char* title, const SimulationSettings& sim,
         std::cout << std::scientific;
         std::cout << "   E " << std::setw(16) << particle_total_energy3d(now, settings.gravity)
                   << "   |p| " << std::setw(16)
-                  << malloy::math::length(particle_momentum3d(now)) << '\n';
+                  << malloy::math::length(particle_momentum3d(now)) << "   T "
+                  << std::setw(16) << malloy::particles::temperature3d(now) << "   P ";
+        print_pressure(malloy::particles::pressure3d(world.wall_impulse(), settings.bounds,
+                                                     world.elapsed_time()));
+        std::cout << '\n';
         std::cout << std::fixed;
         print_view(view, projected(now));
     };

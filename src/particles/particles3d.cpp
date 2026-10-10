@@ -37,6 +37,19 @@ void damp_tangential(math::Real& t1, math::Real& t2, math::Real max_delta)
 void resolve_pair(Particle3D& a, Particle3D& b, math::Real restitution,
                   math::Real friction)
 {
+    // Reject a pair that is clearly apart before building a contact (M38). It
+    // is the same squared-distance test collide::contact makes first, on the
+    // same arithmetic, so the result is bit-identical; in a gas almost every
+    // pair is apart, and skipping the contact keeps the O(N^2) loop cheap.
+    // Every pair is still visited, so this is not a broadphase.
+    const math::Real ex = b.position.x - a.position.x;
+    const math::Real ey = b.position.y - a.position.y;
+    const math::Real ez = b.position.z - a.position.z;
+    const math::Real reach = a.radius + b.radius;
+    if (ex * ex + ey * ey + ez * ez > reach * reach)
+    {
+        return;
+    }
     const std::optional<collide::Contact3> hit =
         collide::contact(collide::Sphere{a.position, a.radius},
                          collide::Sphere{b.position, b.radius});
@@ -106,10 +119,13 @@ void resolve_pair(Particle3D& a, Particle3D& b, math::Real restitution,
 // two tangential axes of the wall are also damped, clamped Coulomb-style to
 // `friction` times the normal impulse per unit mass, which is `(1 + restitution)`
 // times the incoming normal speed. Friction 0 is exactly the old reflect. Per
-// axis, the 3D copy of the 2D resolver with a third axis added.
+// axis, the 3D copy of the 2D resolver with a third axis added, including the
+// tally of each bounce's normal impulse against the wall it hit.
 void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
-                   math::Real restitution, math::Real friction)
+                   math::Real restitution, math::Real friction,
+                   WallImpulse3D& impulse)
 {
+    const math::Real kick = p.mass * (math::Real{1} + restitution);
     if (p.position.x - p.radius < bounds.min.x)
     {
         p.position.x = bounds.min.x + p.radius;
@@ -119,6 +135,7 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
             p.velocity.x = -p.velocity.x * restitution;
             damp_tangential(p.velocity.y, p.velocity.z,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.min_x += kick * normal_speed;
         }
     }
     else if (p.position.x + p.radius > bounds.max.x)
@@ -130,6 +147,7 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
             p.velocity.x = -p.velocity.x * restitution;
             damp_tangential(p.velocity.y, p.velocity.z,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.max_x += kick * normal_speed;
         }
     }
 
@@ -142,6 +160,7 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
             p.velocity.y = -p.velocity.y * restitution;
             damp_tangential(p.velocity.x, p.velocity.z,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.min_y += kick * normal_speed;
         }
     }
     else if (p.position.y + p.radius > bounds.max.y)
@@ -153,6 +172,7 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
             p.velocity.y = -p.velocity.y * restitution;
             damp_tangential(p.velocity.x, p.velocity.z,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.max_y += kick * normal_speed;
         }
     }
 
@@ -165,6 +185,7 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
             p.velocity.z = -p.velocity.z * restitution;
             damp_tangential(p.velocity.x, p.velocity.y,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.min_z += kick * normal_speed;
         }
     }
     else if (p.position.z + p.radius > bounds.max.z)
@@ -176,6 +197,7 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
             p.velocity.z = -p.velocity.z * restitution;
             damp_tangential(p.velocity.x, p.velocity.y,
                             friction * (math::Real{1} + restitution) * normal_speed);
+            impulse.max_z += kick * normal_speed;
         }
     }
 }
@@ -248,6 +270,7 @@ sim_core::StepResult ParticleWorld3D::step()
     }
 
     previous_ = particles_;
+    const WallImpulse3D previous_impulse = wall_impulse_;
 
     const math::Real dt = simulation_settings_.dt;
     const math::Real restitution = particle_settings_.restitution;
@@ -278,7 +301,8 @@ sim_core::StepResult ParticleWorld3D::step()
     // (4) keep everything inside the box.
     for (std::size_t i = 0; i < count; ++i)
     {
-        resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction);
+        resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction,
+                      wall_impulse_);
     }
 
     for (const Particle3D& p : particles_)
@@ -286,6 +310,7 @@ sim_core::StepResult ParticleWorld3D::step()
         if (!p.is_valid())
         {
             particles_.swap(previous_);
+            wall_impulse_ = previous_impulse;
             return sim_core::StepResult{sim_core::StepStatus::InvalidState};
         }
     }

@@ -41,6 +41,51 @@ V1 determinism means same binary, same platform, same initial state, same fixed 
 
 Use normalized demo units first. Do not use real astronomical SI units in the first demo.
 
+## Kinetic theory (M38)
+
+A box of colliding particles is read as a gas (`include/malloy/particles/thermo.hpp`).
+Each definition below is the one the code computes and the templates check.
+
+- **Boltzmann's constant is 1**, in keeping with the normalized units, so a
+  temperature is an energy.
+- **Temperature** is the mean kinetic energy per degree of freedom,
+  `T = 2 KE / (d N)` with `d` = 2 or 3. It is measured in the lab frame, so a
+  gas drifting as a whole counts its drift as heat; a gas in a box has none once
+  the walls have absorbed it.
+- **Pressure** is the total NORMAL impulse the walls have delivered since the run
+  began, divided by the elapsed time and by the total length of wall (the
+  perimeter `2 (W + H)`) or, in 3D, the total wall area. It is a time average
+  over the whole run, what a gauge covering every wall would read. Before any
+  time has passed it does not exist (an empty value, not 0). Friction's
+  tangential impulse is along a wall, not into it, and is not counted.
+- **The ideal gas** is the point-particle limit: particles of radius 0 never
+  collide, and obey `P A = N T` in 2D and `P V = N T` in 3D. Two effects bound
+  the measured error: the wall clamp lands a particle ON the wall and
+  wastes part of a step, lowering each bounce rate by at most `v dt / L`; and a
+  finite run counts whole bounces, so each particle's tally is within one bounce
+  of its mean.
+- **Finite radii raise the pressure** by the excluded-volume factor `Z` of the
+  bulk gas (Henderson's equation for hard disks, Carnahan-Starling for hard
+  spheres). In a box this small two wall effects matter as much: a centre cannot
+  come within `r` of a wall, so the gas fills the box shrunk by `r` on every
+  side and is denser against the walls than in the bulk (first-order adsorption
+  `(2/3) rho^2 sigma^3` per unit length in 2D, `pi rho^2 sigma^4 / 4` per unit
+  area in 3D, with `sigma = 2r`); and particles touch only the part of each wall
+  `r` in from its ends, while the gauge spreads that force over the whole wall.
+  `hard_disk_gas.scn` works the numbers through.
+- **`speed_ratio`** is `<v^4> / <v^2>^2`: exactly 1 when every speed is equal,
+  2 for a 2D Maxwell-Boltzmann gas, 5/3 in 3D. **`slow_fraction`** is the share
+  of particles with `v^2` below the mean: `1 - 1/e = 0.632` in 2D, 0.608 in 3D.
+  Both are unweighted by mass, so those targets are for a gas of equal masses.
+  `slow_fraction` is decided by rounding when every speed is equal, so it is read
+  after relaxation, and `speed_ratio` describes the start.
+- **No random numbers.** A gas starts from `lattice`: a grid with every speed
+  equal and directions in exactly opposite pairs, pair `k` at `k` golden angles
+  (2D) or on two independent equidistributed sequences (3D). Collisions do the
+  randomizing. If a later milestone needs randomness, it uses a fully specified
+  generator inside its domain, never the std distributions, whose algorithms the
+  standard leaves to the implementation.
+
 ## N-body softening
 
 Use softening from the first N-body implementation.

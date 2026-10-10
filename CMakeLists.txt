@@ -144,6 +144,7 @@ target_link_libraries(malloy_collide
 add_library(malloy_particles STATIC
     src/particles/particles.cpp
     src/particles/particles3d.cpp
+    src/particles/thermo.cpp
 )
 add_library(malloy::particles ALIAS malloy_particles)
 target_include_directories(malloy_particles PUBLIC include)

@@ -12,6 +12,19 @@
 
 namespace malloy::particles
 {
+// The total normal impulse each of the six walls has delivered since the run
+// began (M38), the 3D sibling of WallImpulse2D: non-negative, normal component
+// only, and divided by the elapsed time and the wall area it is the pressure.
+struct WallImpulse3D
+{
+    math::Real min_x{0.0};
+    math::Real max_x{0.0};
+    math::Real min_y{0.0};
+    math::Real max_y{0.0};
+    math::Real min_z{0.0};
+    math::Real max_z{0.0};
+};
+
 // A concrete 3D colliding-particle simulation, the 3D sibling of ParticleWorld.
 // Concrete and derived from nothing (ADR 0006). Particles collide as spheres
 // (the M22/M24 sphere geometry) and are confined to a 3D box.
@@ -54,11 +67,16 @@ public:
     }
     const ParticleSettings3D& particle_settings() const { return particle_settings_; }
 
+    // The impulse each wall has delivered so far; read-only bookkeeping that
+    // changes no trajectory and is rolled back with a rolled-back step.
+    const WallImpulse3D& wall_impulse() const { return wall_impulse_; }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     ParticleSettings3D particle_settings_;
     std::vector<Particle3D> particles_;
     std::vector<Particle3D> previous_;
+    WallImpulse3D wall_impulse_{};
     std::optional<time::FixedStep> step_;
 };
 

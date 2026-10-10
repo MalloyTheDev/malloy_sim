@@ -109,6 +109,17 @@ fit at all.
 M18 is therefore evidence AGAINST extraction rather than for it. The trigger
 fired, the question was asked, and the duplication stays.
 
+## M38: a gas adds no path
+
+M38 reads a box of colliding particles as a gas. It could have been built as a
+`GasWorld`, and that would have been a sixth copy of the particle path, the
+duplication this ADR's trigger exists to catch. It was not: the gas IS
+`ParticleWorld`, `ParticleWorld::step` is unchanged, and the new code is a
+wall-impulse tally (bookkeeping inside the existing wall resolver) plus pure
+functions over the particle list. No translational path was added, so the
+trigger did not fire. The right response to "a new domain needs the same
+integration" was, here, that it was not a new domain.
+
 ## Deferred
 
 Rigid-body spring attachment points and the torque they generate stay deferred.

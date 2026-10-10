@@ -36,7 +36,7 @@ Not responsible for printing, rendering, app loop policy, config files, input, o
 
 ## `malloy_scenario`
 
-Responsible for parsing a scenario/config text file into a `Scenario` for whichever domain its `type` key names, and for reporting syntax errors with a line number. It knows every domain's key set, which is the price of a plain dispatch switch and is cheaper than the abstraction it replaces.
+Responsible for parsing a scenario/config text file into a `Scenario` for whichever domain its `type` key names, and for reporting syntax errors with a line number. It knows every domain's key set, which is the price of a plain dispatch switch and is cheaper than the abstraction it replaces. Since M38 one key pair, `lattice`/`lattice3`, turns a single line into many particles: it is capped against the entity limit before anything is allocated, and expanded only after the whole file is read, so the result does not depend on whether `bounds` comes first.
 
 Not responsible for semantic validation (that stays in each domain's own `World::validate()`), physics, printing, rendering, or CLI argument handling.
 
@@ -54,9 +54,9 @@ Not responsible for density, mass, inertia, bodies, velocity, contact response, 
 
 ## `malloy_particles`
 
-Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form.
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form. Since M38 it also reads a box of particles as a gas (`thermo.hpp`): each world keeps a per-wall tally of the normal impulse its walls have delivered (`wall_impulse()`, bookkeeping that changes no trajectory and is rolled back with a rolled-back step), and pure functions turn the state and that tally into a temperature, a wall pressure and two relaxation statistics, plus `lattice_gas`/`lattice_gas3d`, a deterministic grid start with no random numbers.
 
-Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, gravity, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
+Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, random numbers, broadphase acceleration, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 
 ## `malloy_rigid`
 

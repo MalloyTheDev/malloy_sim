@@ -828,6 +828,14 @@ int main()
                     if (q == "momentum_x") return malloy::particles::total_momentum3d(b).x;
                     if (q == "momentum_y") return malloy::particles::total_momentum3d(b).y;
                     if (q == "momentum_z") return malloy::particles::total_momentum3d(b).z;
+                    // M38: the gas quantities. Pressure is empty before any
+                    // time has passed, so a `step 0 pressure` check FAILS.
+                    if (q == "temperature") return malloy::particles::temperature3d(b);
+                    if (q == "speed_ratio") return malloy::particles::speed_ratio3d(b);
+                    if (q == "slow_fraction") return malloy::particles::slow_fraction3d(b);
+                    if (q == "pressure")
+                        return malloy::particles::pressure3d(
+                            world.wall_impulse(), settings.bounds, world.elapsed_time());
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -850,6 +858,12 @@ int main()
                     if (q == "kinetic") return malloy::particles::total_kinetic_energy(b);
                     if (q == "momentum_x") return malloy::particles::total_momentum(b).x;
                     if (q == "momentum_y") return malloy::particles::total_momentum(b).y;
+                    if (q == "temperature") return malloy::particles::temperature(b);
+                    if (q == "speed_ratio") return malloy::particles::speed_ratio(b);
+                    if (q == "slow_fraction") return malloy::particles::slow_fraction(b);
+                    if (q == "pressure")
+                        return malloy::particles::pressure(
+                            world.wall_impulse(), settings.bounds, world.elapsed_time());
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -938,6 +952,143 @@ int main()
             r.scenario.particle_list3d[0].position, malloy::math::Vec3{1.0, 2.0, 3.0}, eps));
         MALLOY_CHECK_TRUE(malloy::math::approx_equal(
             r.scenario.particle_list3d[0].velocity, malloy::math::Vec3{-4.0, -5.0, -6.0}, eps));
+    }
+
+    // --- M38: `lattice` builds a whole gas in one line. It is expanded after
+    //     the file is read, so `bounds` may come before or after it, and its
+    //     particles follow any listed one by one. ---
+    {
+        std::istringstream before("type particles\n"
+                                  "bounds -2 -1 2 1\n"
+                                  "lattice 4 2 1.5 0.2 2.0\n");
+        std::istringstream after("type particles\n"
+                                 "particle 3.0 0.1 0 0 0 0\n"
+                                 "lattice 4 2 1.5 0.2 2.0\n"
+                                 "bounds -2 -1 2 1\n");
+        const ScenarioParseResult a = parse_scenario(before);
+        const ScenarioParseResult b = parse_scenario(after);
+        MALLOY_CHECK_TRUE(a.ok);
+        MALLOY_CHECK_TRUE(b.ok);
+        MALLOY_CHECK_EQ(a.scenario.particle_list.size(), std::size_t{8});
+        MALLOY_CHECK_EQ(b.scenario.particle_list.size(), std::size_t{9});
+        MALLOY_CHECK_NEAR(b.scenario.particle_list[0].mass, 3.0, eps); // listed one first
+        for (std::size_t i = 0; i < 8; ++i)
+        {
+            const auto& x = a.scenario.particle_list[i];
+            const auto& y = b.scenario.particle_list[i + 1];
+            MALLOY_CHECK_TRUE(x.position.x == y.position.x && x.position.y == y.position.y);
+            MALLOY_CHECK_TRUE(x.velocity.x == y.velocity.x && x.velocity.y == y.velocity.y);
+            MALLOY_CHECK_NEAR(x.mass, 1.5, eps);
+            MALLOY_CHECK_NEAR(x.radius, 0.2, eps);
+            MALLOY_CHECK_NEAR(malloy::math::length(x.velocity), 2.0, eps);
+        }
+        // Laid out in the FINAL bounds, 1 by 1 cells from (-2, -1).
+        MALLOY_CHECK_NEAR(a.scenario.particle_list[0].position.x, -1.5, eps);
+        MALLOY_CHECK_NEAR(a.scenario.particle_list[0].position.y, -0.5, eps);
+        MALLOY_CHECK_NEAR(a.scenario.particle_list[7].position.x, 1.5, eps);
+        MALLOY_CHECK_NEAR(a.scenario.particle_list[7].position.y, 0.5, eps);
+    }
+    {
+        std::istringstream in("type particles3d\n"
+                              "lattice3 2 3 4 1.5 0.2 2.0\n"
+                              "bounds3 0 0 0 2 3 4\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_EQ(r.scenario.particle_list3d.size(), std::size_t{24});
+        MALLOY_CHECK_TRUE(malloy::math::approx_equal(r.scenario.particle_list3d[23].position,
+                                                     malloy::math::Vec3{1.5, 2.5, 3.5}, eps));
+        // Spacing exactly one diameter is allowed: the particles just touch.
+        std::istringstream touching("type particles\nbounds -1 -1 1 1\nlattice 4 4 1 0.25 1\n");
+        MALLOY_CHECK_TRUE(parse_scenario(touching).ok);
+        // Mass, radius and speed are the world's to judge, not the parser's: a
+        // negative radius parses and is then refused by validate().
+        std::istringstream negative("type particles\nlattice 2 2 1 -0.1 1\n");
+        const ScenarioParseResult n = parse_scenario(negative);
+        MALLOY_CHECK_TRUE(n.ok);
+        malloy::particles::ParticleWorld world{n.scenario.simulation,
+                                              n.scenario.particle_settings,
+                                              n.scenario.particle_list};
+        MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidState);
+    }
+    // Malformed lattices are refused.
+    {
+        const char* const bad[] = {
+            "type nbody\nlattice 2 2 1 0.1 1\n",                        // wrong domain
+            "type particles3d\nlattice 2 2 1 0.1 1\n",                  // 2D key in 3D
+            "type particles\nlattice3 2 2 2 1 0.1 1\n",                 // 3D key in 2D
+            "type particles\nlattice 2 1 0.1 1\n",                      // too few fields
+            "type particles\nlattice 2 2 1 0.1 1 9\n",                  // extra token
+            "type particles\nlattice 0 2 1 0.1 1\n",                    // count below 1
+            "type particles\nlattice 2 -3 1 0.1 1\n",                   // negative count
+            "type particles\nlattice 2.5 2 1 0.1 1\n",                  // not an integer
+            "type particles\nlattice 2 2 1 0.1 1\nlattice 2 2 1 0.1 1\n", // a second one
+            "type particles\nlattice 1000 1000 1 0 1\n",                // 1e6, over the cap
+            "type particles\nlattice 100001 1 1 0 1\n",                 // one count over it
+            "type particles3d\nlattice3 100 100 11 1 0 1\n",            // 110000
+            "type particles3d\nlattice3 2147483647 2147483647 2147483647 1 0 1\n",
+        };
+        for (const char* text : bad)
+        {
+            std::istringstream in(text);
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_FALSE(r.error.empty());
+        }
+        // Spacing below a diameter would start the particles overlapping. It is
+        // only known once the bounds are final, so it is reported at the end of
+        // the file, but against the line holding the lattice. Each case is too
+        // tight on ONE axis only, so every axis's check is needed on its own.
+        const char* const crowded[] = {
+            "type particles\nbounds -1 -2 1 2\nlattice 4 4 1 0.3 1\n",          // x 0.5, y 1
+            "type particles\nbounds -2 -1 2 1\nlattice 4 4 1 0.3 1\n",          // x 1, y 0.5
+            "type particles3d\nbounds3 -1 -2 -2 1 2 2\nlattice3 4 4 4 1 0.3 1\n", // x only
+            "type particles3d\nbounds3 -2 -1 -2 2 1 2\nlattice3 4 4 4 1 0.3 1\n", // y only
+            "type particles3d\nbounds3 -2 -2 -1 2 2 1\nlattice3 4 4 4 1 0.3 1\n", // z only
+        };
+        for (const char* text : crowded)
+        {
+            std::istringstream in(text);
+            const ScenarioParseResult c = parse_scenario(in);
+            MALLOY_CHECK_FALSE(c.ok);
+            MALLOY_CHECK_TRUE(c.error.find("line 3") != std::string::npos);
+            MALLOY_CHECK_TRUE(c.error.find("diameter") != std::string::npos);
+        }
+        std::istringstream flat("type particles3d\n"
+                                "lattice3 2 2 5 1 0.25 1\n"
+                                "bounds3 -1 -1 -1 1 1 1\n"); // z spacing 0.4 < 0.5
+        const ScenarioParseResult f = parse_scenario(flat);
+        MALLOY_CHECK_FALSE(f.ok);
+        MALLOY_CHECK_TRUE(f.error.find("line 2") != std::string::npos);
+        // The cap is reported on the lattice line itself, before allocating,
+        // not left to the end-of-file total (which would name the last line).
+        std::istringstream huge("type particles\nlattice 1000 1000 1 0 1\ndt 0.1\n");
+        const ScenarioParseResult h = parse_scenario(huge);
+        MALLOY_CHECK_FALSE(h.ok);
+        MALLOY_CHECK_TRUE(h.error.find("line 2") != std::string::npos);
+    }
+
+    // --- M38: before any time has passed there is no pressure, so a
+    //     `# check step 0 pressure` line FAILS rather than comparing a 0. ---
+    {
+        std::istringstream in("type particles\nbounds -2 -2 2 2\nlattice 2 2 1 0.1 1\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        malloy::particles::ParticleWorld world{r.scenario.simulation,
+                                              r.scenario.particle_settings,
+                                              r.scenario.particle_list};
+        const auto value_of = [&](const std::string&) {
+            return malloy::particles::pressure(world.wall_impulse(),
+                                               r.scenario.particle_settings.bounds,
+                                               world.elapsed_time());
+        };
+        std::ostringstream sink;
+        std::streambuf* const saved = std::cerr.rdbuf(sink.rdbuf());
+        const bool passed = check_passes("synthetic", TemplateCheck{0, "pressure", 0.0, 1.0}, value_of);
+        std::cerr.rdbuf(saved);
+        MALLOY_CHECK_FALSE(passed);
+        MALLOY_CHECK_TRUE(sink.str().find("unavailable") != std::string::npos);
+        MALLOY_CHECK_TRUE(world.step().ok());
+        MALLOY_CHECK_TRUE(value_of("pressure").has_value());
     }
 
     // --- A key from the wrong domain is an error, so a typo in `type` surfaces

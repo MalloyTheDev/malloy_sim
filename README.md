@@ -47,8 +47,10 @@ force on a 3D body, charged particles in three dimensions with helical
 motion, an oriented box resting and tumbling on a ground plane, spring
 networks in three dimensions, colliding particles in three dimensions,
 box-against-box collision, box-against-sphere collision, Coulomb friction
-for particle contacts, box-against-box collision in two dimensions, and a 2D
-box resting on a ground plane (milestones M1-M37).
+for particle contacts, box-against-box collision in two dimensions, a 2D box
+resting on a ground plane, and the kinetic theory of a hard-disk gas (its
+temperature, wall pressure and relaxation to Maxwell-Boltzmann; milestones
+M1-M38).
 
 ## Locked baseline
 
@@ -114,7 +116,7 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 26 templates ship across 10 domains, and
+and runnable with the shipped binary. 28 templates ship across 10 domains, and
 every one is parsed, validated and stepped by the test suite. Both numbers are
 checked against the directory by the scenario tests, so neither can go stale.
 
@@ -330,8 +332,10 @@ Intended, not yet built, and never added speculatively
   filled)
 - persistent forces and force/torque accumulators (gravity is a setting applied
   as an acceleration, not a registered force producer)
-- vehicles, fluids, thermodynamics (electromagnetism came off this list when
-  charged particles shipped in M18)
+- vehicles, fluids, and the rest of thermodynamics: heat flow through thermal
+  walls and work done by a moving piston (the kinetic theory of a hard-disk gas
+  shipped in M38, and electromagnetism came off this list when charged
+  particles shipped in M18)
 
 ### Not planned at all
 

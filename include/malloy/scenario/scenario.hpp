@@ -223,8 +223,19 @@ struct ScenarioParseResult
 //
 //   restitution <value>   bounciness in [0, 1]     (default 1.0)
 //   gravity <gx> <gy>     uniform acceleration     (default 0 0)
+//   friction <mu>         Coulomb coefficient      (default 0, frictionless)
 //   bounds <minx> <miny> <maxx> <maxy>             (default -1 -1 1 1)
 //   particle <mass> <radius> <px> <py> <vx> <vy>
+//   lattice <nx> <ny> <mass> <radius> <speed>
+//
+//     A whole gas in one line (M38): nx by ny identical particles centred in
+//     the cells of a grid that tiles `bounds`, all at `speed`, in exactly
+//     opposite pairs so the net momentum is zero (particles::lattice_gas). It is
+//     expanded after the file is read, so `bounds` may come before or after it,
+//     and its particles follow any `particle` lines. At most one lattice line;
+//     counts must be at least 1, the total is capped at 100000 BEFORE anything
+//     is allocated, and a grid spacing below one particle diameter is refused
+//     because the particles would start overlapping.
 //
 // type rigid:
 //
@@ -311,14 +322,19 @@ struct ScenarioParseResult
 // type particles3d:
 //
 //   Colliding spheres in a 3D box under gravity. The 3D form of type particles;
-//   the restitution key is shared, and the box and gravity take three
-//   components.
+//   the restitution and friction keys are shared, and the box and gravity take
+//   three components.
 //
 //   restitution <value>              bounciness in [0, 1]        (default 1.0)
+//   friction <mu>                    Coulomb coefficient         (default 0)
 //   gravity3 <gx> <gy> <gz>          uniform acceleration        (default 0 0 0)
 //   bounds3 <minx> <miny> <minz> <maxx> <maxy> <maxz>            (default the
 //                                    unit box -1 -1 -1 to 1 1 1)
 //   particle3 <mass> <radius> <px> <py> <pz> <vx> <vy> <vz>
+//   lattice3 <nx> <ny> <nz> <mass> <radius> <speed>
+//
+//     The 3D lattice: an nx by ny by nz grid, with the same rules as `lattice`
+//     (particles::lattice_gas3d).
 //
 // A key belonging to another domain is a parse error, so a typo in `type`
 // surfaces immediately rather than silently running the wrong simulation.

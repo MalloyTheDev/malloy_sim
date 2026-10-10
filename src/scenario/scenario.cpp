@@ -4,12 +4,14 @@
 #include <fstream>
 #include <limits>
 #include <istream>
+#include <optional>
 #include <sstream>
 #include <string>
 
 #include <malloy/collide/shapes.hpp>
 #include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/vec2.hpp>
+#include <malloy/particles/thermo.hpp>
 #include <malloy/rigid/mass_properties3d.hpp>
 #include <malloy/rigid/rigid_body2d.hpp>
 #include <malloy/springs/springs.hpp>
@@ -45,6 +47,20 @@ bool at_end_of_directive(std::istringstream& tokens)
 // steps and a handful of bodies, orders of magnitude below these limits.
 constexpr int max_steps = 100000000;         // 1e8 steps
 constexpr std::size_t max_entities = 100000; // total bodies plus springs
+
+// A `lattice` or `lattice3` line (M38), held until the whole file has been read
+// and only then expanded into particles, so the result does not depend on
+// whether `bounds` comes before or after it. `nz` stays 1 for the 2D key.
+struct LatticeRequest
+{
+    int nx{0};
+    int ny{0};
+    int nz{1};
+    math::Real mass{};
+    math::Real radius{};
+    math::Real speed{};
+    std::size_t line{0};
+};
 } // namespace
 
 ScenarioParseResult parse_scenario(std::istream& input)
@@ -55,6 +71,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
     // `type` selects which domain keys are legal, so it has to be settled
     // before any of them appear.
     bool saw_domain_key = false;
+    std::optional<LatticeRequest> lattice;
 
     while (std::getline(input, line))
     {
@@ -751,6 +768,49 @@ ScenarioParseResult parse_scenario(std::istream& input)
             scenario.particle_list3d.push_back(particles::Particle3D{
                 math::Vec3{px, py, pz}, math::Vec3{vx, vy, vz}, mass, radius});
         }
+        else if (key == "lattice" || key == "lattice3")
+        {
+            const bool three = key == "lattice3";
+            if (three ? scenario.type != ScenarioType::Particles3D
+                      : scenario.type != ScenarioType::Particles)
+            {
+                return make_error(line_number, three
+                                                   ? "lattice3 belongs to type particles3d"
+                                                   : "lattice belongs to type particles");
+            }
+            saw_domain_key = true;
+            if (lattice)
+            {
+                return make_error(line_number, "only one lattice line is allowed");
+            }
+            LatticeRequest request;
+            request.line = line_number;
+            const bool counts_read = three ? static_cast<bool>(tokens >> request.nx >> request.ny >> request.nz)
+                                           : static_cast<bool>(tokens >> request.nx >> request.ny);
+            if (!counts_read || !(tokens >> request.mass >> request.radius >> request.speed))
+            {
+                return make_error(line_number,
+                                  three ? "lattice3 requires: nx ny nz mass radius speed"
+                                        : "lattice requires: nx ny mass radius speed");
+            }
+            if (request.nx < 1 || request.ny < 1 || request.nz < 1)
+            {
+                return make_error(line_number, "lattice counts must be at least 1");
+            }
+            // The cap is checked HERE, before anything is allocated: this is the
+            // one key that turns a few bytes of input into many entities. Each
+            // count is bounded first so the product cannot overflow.
+            const std::size_t nx = static_cast<std::size_t>(request.nx);
+            const std::size_t ny = static_cast<std::size_t>(request.ny);
+            const std::size_t nz = static_cast<std::size_t>(request.nz);
+            if (nx > max_entities || ny > max_entities || nz > max_entities ||
+                nx * ny * nz > max_entities)
+            {
+                return make_error(line_number,
+                                  "lattice exceeds the maximum entity count (100000)");
+            }
+            lattice = request;
+        }
         else if (key == "rigid_body")
         {
             if (scenario.type != ScenarioType::Rigid)
@@ -921,6 +981,49 @@ ScenarioParseResult parse_scenario(std::istream& input)
     if (input.bad())
     {
         return make_error(line_number, "read error");
+    }
+
+    // M38: expand the lattice now that the bounds are final. Its particles are
+    // appended after any listed one by one. The spacing check needs the bounds,
+    // which is why it lives here rather than on the lattice line; an invalid
+    // box, or an invalid radius, is left for validate() to reject, so each rule
+    // lives in one place.
+    if (lattice)
+    {
+        const math::Real diameter = math::Real{2} * lattice->radius;
+        if (scenario.type == ScenarioType::Particles3D)
+        {
+            const collide::Aabb3& bounds = scenario.particle3d_settings.bounds;
+            if (bounds.is_valid() &&
+                ((bounds.max.x - bounds.min.x) / lattice->nx < diameter ||
+                 (bounds.max.y - bounds.min.y) / lattice->ny < diameter ||
+                 (bounds.max.z - bounds.min.z) / lattice->nz < diameter))
+            {
+                return make_error(lattice->line,
+                                  "lattice spacing is smaller than a particle diameter");
+            }
+            const std::vector<particles::Particle3D> grid = particles::lattice_gas3d(
+                bounds, lattice->nx, lattice->ny, lattice->nz, lattice->mass,
+                lattice->radius, lattice->speed);
+            scenario.particle_list3d.insert(scenario.particle_list3d.end(), grid.begin(),
+                                            grid.end());
+        }
+        else
+        {
+            const collide::Aabb& bounds = scenario.particle_settings.bounds;
+            if (bounds.is_valid() &&
+                ((bounds.max.x - bounds.min.x) / lattice->nx < diameter ||
+                 (bounds.max.y - bounds.min.y) / lattice->ny < diameter))
+            {
+                return make_error(lattice->line,
+                                  "lattice spacing is smaller than a particle diameter");
+            }
+            const std::vector<particles::Particle2D> grid =
+                particles::lattice_gas(bounds, lattice->nx, lattice->ny, lattice->mass,
+                                       lattice->radius, lattice->speed);
+            scenario.particle_list.insert(scenario.particle_list.end(), grid.begin(),
+                                          grid.end());
+        }
     }
 
     // Defence-in-depth cap on total scenario size (see max_entities above): a

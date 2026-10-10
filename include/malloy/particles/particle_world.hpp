@@ -12,6 +12,23 @@
 
 namespace malloy::particles
 {
+// The total normal impulse each wall of the box has delivered since the run
+// began (M38): the momentum it took to turn particles around, summed over every
+// bounce. A wall is immovable, so this is also the momentum the walls carried
+// away, which is what makes it measurable: divided by the elapsed time and the
+// length of wall it is the pressure the gas exerts (thermo.hpp).
+//
+// Every entry is non-negative and counts only the NORMAL component, m (1 + e)
+// times the speed into the wall. Friction's tangential impulse pushes along a
+// wall, not into it, so it is not pressure and is not tallied.
+struct WallImpulse2D
+{
+    math::Real min_x{0.0};
+    math::Real max_x{0.0};
+    math::Real min_y{0.0};
+    math::Real max_y{0.0};
+};
+
 // A concrete 2D colliding-particle simulation.
 //
 // Like NBodyWorld it is concrete, owns its own fixed-step update, and derives
@@ -71,6 +88,11 @@ public:
     }
     const ParticleSettings& particle_settings() const { return particle_settings_; }
 
+    // The impulse each wall has delivered so far. Tallying it reads the bounce
+    // without changing it, so every trajectory is exactly what it was before
+    // this existed. A step rolled back for non-finite state rolls this back too.
+    const WallImpulse2D& wall_impulse() const { return wall_impulse_; }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     ParticleSettings particle_settings_;
@@ -79,6 +101,7 @@ private:
     // produced non-finite values. A member so the common case reuses its
     // allocation rather than allocating once per step.
     std::vector<Particle2D> previous_;
+    WallImpulse2D wall_impulse_{};
     // Tick counting and elapsed time come from malloy_time rather than being
     // reimplemented per domain. Empty when dt is unusable.
     std::optional<time::FixedStep> step_;

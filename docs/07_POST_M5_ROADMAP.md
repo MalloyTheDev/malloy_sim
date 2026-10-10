@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M37 are complete, so this is the live roadmap for what comes next.
+M1-M38 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -51,6 +51,7 @@ M34 - box against a sphere                  [done]
 M35 - Coulomb friction for particles        [done]
 M36 - 2D oriented boxes (SAT)               [done]
 M37 - a 2D box on a ground plane            [done]
+M38 - a hard-disk gas (kinetic theory)      [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -152,11 +153,20 @@ None of these is scheduled; the order will be revisited after Track 2.
 
 ```text
 fluids (SPH, 2D)
-thermodynamics / ideal gas
+thermodynamics, beyond the ideal gas: thermal walls (heat flow), a piston (work)
 vehicles, as an application of rigid bodies
 ```
 
-Electromagnetism came off this list and shipped as M18.
+Electromagnetism came off this list and shipped as M18. Thermodynamics started
+as M38, and like ballistics in M12 it was measurement on an existing domain, not
+a new one: a box of `malloy_particles` particles read as a gas, with a
+temperature, a wall-impulse tally giving the pressure, relaxation statistics,
+and a deterministic `lattice` start. The two hard-gas templates match Henderson
+(2D) and Carnahan-Starling (3D) once the walls are accounted for. What follows
+it needs things M38 deliberately left out: thermal walls need random numbers (a
+fully specified generator inside the domain), and a piston needs a moving wall.
+Fluids (SPH) would be a genuinely new domain, with a neighbour search that the
+O(N^2) pair loop cannot afford.
 
 Unnumbered on purpose. These were once written as M15 to M18, and M15 then
 shipped as gravity for rigid bodies, so the labels pointed at the wrong

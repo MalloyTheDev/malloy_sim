@@ -1,0 +1,76 @@
+# MalloySim scenario: a hard-sphere gas, its temperature and its pressure (M38).
+#
+# The 3D sibling of hard_disk_gas.scn, which derives each quantity in full; only
+# the constants change with the dimension.
+#
+# 144 spheres of mass 1 and radius 0.25 start on a 6 by 6 by 4 grid (spacing
+# 1.2) filling a 7.2 by 7.2 by 4.8 box (the `lattice3` key), every one at speed
+# 1, in exactly opposite pairs so the net momentum is zero. The volume fraction
+# is 144 * (4/3) pi 0.25^3 / 248.832 = 0.038.
+#
+# Temperature. T = 2 KE / (d N) with d = 3: KE = 144 * 0.5 = 72, so T = 1/3,
+# conserved exactly (elastic, no gravity).
+#
+# Relaxation. speed_ratio starts at exactly 1. In the 3D Maxwell-Boltzmann
+# distribution m v^2 / T is chi-squared with three degrees of freedom, so the
+# fraction slower than the mean settles at 0.608, and a snapshot of 144 spheres
+# scatters about that by sqrt(0.608 * 0.392 / 144) = 0.041; the check allows
+# three of those, 0.122.
+#
+# Pressure. An ideal gas obeys P V = N T, which here is 48 / 248.832 = 0.193.
+# Hard spheres push harder: the Carnahan-Starling equation of state,
+# Z = (1 + eta + eta^2 - eta^3) / (1 - eta)^3. The same two wall effects as in
+# 2D, with the 3D adsorption Gamma = pi rho^2 sigma^4 / 4 per unit area of wall:
+#
+#   - centres fill the 6.7 by 6.7 by 4.3 box r inside the walls; solving
+#     N = rho V' + S' Gamma (V' and S' that inner box's volume and surface)
+#     gives a bulk density rho = 0.719, so eta = 0.047, Z = 1.212 and a bulk
+#     pressure rho T Z = 0.291;
+#   - spheres touch only the part of each wall r in from its edges, the inner
+#     box's surface S' = 102.51 out of the full 120.96, so the gauge reads
+#     0.291 * 102.51 / 120.96 = 0.246.
+#
+# The tolerance, 0.009, is three standard deviations of the run-to-run scatter
+# (0.0013, measured at seven nearby timesteps) plus a 2 per cent model budget,
+# as in 2D. It is derived, not fitted (docs/05). The ideal-gas 0.193 lies far
+# outside it.
+
+type particles3d
+
+dt 0.01
+steps 3000
+output_every 1000
+
+restitution 1.0
+bounds3 -3.6 -3.6 -2.4 3.6 3.6 2.4
+
+# lattice3 <nx> <ny> <nz> <mass> <radius> <speed>
+lattice3 6 6 4  1.0 0.25 1.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   T 3.33333333e-01   P -              (no time has passed yet)
+#   step   3000   T 3.33333333e-01   P 2.48246729e-01
+#
+# The invariants:
+#
+# 1. Temperature is conserved exactly: elastic collisions, no gravity.
+# 2. The net momentum starts at exactly zero (opposite pairs); the walls then
+#    exchange momentum with the gas, so it is not conserved after that.
+# 3. The speeds relax from all-equal to Maxwell-Boltzmann (slow_fraction 0.608).
+# 4. The pressure is the hard-sphere value, about 27 per cent above the ideal
+#    gas.
+#
+# On the ASCII view (x and y, with z dropped): a regular grid of points that
+# dissolves into a gas.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    temperature    3.33333333e-01   tol 1e-9
+# check step 0    speed_ratio    1.00000000e+00   tol 1e-12
+# check step 0    momentum_x     0.00000000e+00   tol 1e-12
+# check step 0    momentum_y     0.00000000e+00   tol 1e-12
+# check step 0    momentum_z     0.00000000e+00   tol 1e-12
+# check step 3000 temperature    3.33333333e-01   tol 1e-9
+# check step 3000 slow_fraction  6.08000000e-01   tol 0.122
+# check step 3000 pressure       2.46300000e-01   tol 0.009
