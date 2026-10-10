@@ -30,6 +30,24 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #24: an empty `charges` or `charges3d` scenario crashed the app. The
+  charge runners print the first particle's speed, read through `front()` of
+  an empty list: undefined behaviour, a null dereference in Release, and the
+  user saw no output at all. The runners now print a dash for an empty list.
+- Issue #31: an empty, comment-only, truncated or wrong scenario file "ran"
+  successfully. It parsed as a default nbody scenario with nothing in it, the
+  app stepped 1000 empty frames and exited 0, so a broken input looked like a
+  good one. The new `scenario::entity_count` counts what a scenario defines (the
+  parser's cap now uses it too), and the app refuses a file where it is zero,
+  with a clear message and exit 1. The parser still accepts a settings-only
+  fragment, since it checks syntax and settings rather than whether there is
+  anything to simulate; dozens of parser tests rely on that.
+- Four app checks now run the real terminal app on generated empty inputs
+  (empty, comment-only, empty charges, empty charges3d) and require the
+  refusal message, so a crash or a silent "successful" run fails them. They
+  run the app rather than adding a test executable, so the documented count of
+  fourteen test executables is unchanged. This begins closing the test gap of
+  issue #30, which the empty-charges crash came through.
 - Issue #21: `rigid_box3d` gave a box the wrong inertia. The loader took the
   principal moments from `mass_properties_3d(SolidBox)`, which come back sorted
   ascending, and kept the box's own orientation and half-widths, so any box

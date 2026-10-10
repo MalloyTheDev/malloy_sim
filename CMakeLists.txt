@@ -512,6 +512,28 @@ if(MALLOY_BUILD_TESTS)
 endif()
 
 # ----------------------------------------------------------------------------
+# App checks: run the real terminal app on inputs it must refuse cleanly, with a
+# clear message rather than a crash or a "successful" empty run (issues #24 and
+# #31). They run the app rather than adding a test executable, so they are
+# registered after the count above, which is unchanged. The inputs are written
+# at configure time, so no fixture files live in the repository. A crash prints
+# no message, so it fails the expression as surely as a wrong answer does.
+# ----------------------------------------------------------------------------
+if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
+    set(malloy_app_inputs "${CMAKE_CURRENT_BINARY_DIR}/app_inputs")
+    file(WRITE "${malloy_app_inputs}/empty.scn" "")
+    file(WRITE "${malloy_app_inputs}/comment_only.scn" "# nothing but a comment\n")
+    file(WRITE "${malloy_app_inputs}/charges_empty.scn" "type charges\nsteps 1\n")
+    file(WRITE "${malloy_app_inputs}/charges3d_empty.scn" "type charges3d\nsteps 1\n")
+    foreach(input IN ITEMS empty comment_only charges_empty charges3d_empty)
+        add_test(NAME malloy_app_refuses_${input}
+                 COMMAND malloy_nbody_terminal "${malloy_app_inputs}/${input}.scn")
+        set_tests_properties(malloy_app_refuses_${input} PROPERTIES
+            PASS_REGULAR_EXPRESSION "defines nothing to simulate")
+    endforeach()
+endif()
+
+# ----------------------------------------------------------------------------
 # Fuzzers (off by default; not registered as tests, so the count above is
 # unchanged). Require a fuzzer- and sanitizer-capable toolchain such as clang;
 # the default MSVC presets never build these. Coverage-guided robustness for

@@ -1067,6 +1067,41 @@ int main()
         MALLOY_CHECK_TRUE(h.error.find("line 2") != std::string::npos);
     }
 
+    // --- Issue #31: entity_count is what the app checks before running. A
+    //     settings-only fragment still parses (the parser checks syntax and
+    //     settings), but it counts zero, so the app refuses it. ---
+    {
+        const auto count_of = [](const char* text) {
+            std::istringstream in(text);
+            const ScenarioParseResult r = parse_scenario(in);
+            return r.ok ? malloy::scenario::entity_count(r.scenario) : std::size_t{999999};
+        };
+        MALLOY_CHECK_EQ(count_of(""), std::size_t{0});
+        MALLOY_CHECK_EQ(count_of("# only a comment\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count_of("type charges\nsteps 1\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count_of("type particles\nfriction 0.5\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count_of("body 1 0 0 0 0\nbody 1 1 0 0 0\n"), std::size_t{2});
+        MALLOY_CHECK_EQ(count_of("type particles\nbounds -2 -2 2 2\nlattice 3 2 1 0.1 1\n"),
+                        std::size_t{6});
+        MALLOY_CHECK_EQ(count_of("type springs\nspring_body 1 0 0 0 0\nspring_body 1 1 0 0 0\n"
+                                 "spring 0 1 1 1 0\n"),
+                        std::size_t{3}); // two bodies and the spring
+        MALLOY_CHECK_EQ(count_of("type charges3d\ncharge3 1 1 0 0 0 0 0 0\n"), std::size_t{1});
+        // One per remaining list, so a list left out of the sum shows.
+        MALLOY_CHECK_EQ(count_of("type charges\ncharge 1 1 0 0 0 0\n"), std::size_t{1});
+        MALLOY_CHECK_EQ(count_of("type nbody3d\nbody3 1 0 0 0 0 0 0\n"), std::size_t{1});
+        MALLOY_CHECK_EQ(count_of("type particles\nparticle 1 0.1 0 0 0 0\n"), std::size_t{1});
+        MALLOY_CHECK_EQ(count_of("type particles3d\nparticle3 1 0.1 0 0 0 0 0 0\n"),
+                        std::size_t{1});
+        MALLOY_CHECK_EQ(count_of("type rigid\nrigid_static 0.5 0 0 0\n"), std::size_t{1});
+        MALLOY_CHECK_EQ(
+            count_of("type rigid3d\nrigid_box3d 1 0.5 0.5 0.5 0 0 0 0 0 1 0 0 0 0 0 0 0\n"),
+            std::size_t{1});
+        MALLOY_CHECK_EQ(count_of("type springs3d\nspring_body3 1 0 0 0 0 0 0\n"
+                                 "spring_body3 1 1 0 0 0 0 0\nspring 0 1 1 1 0\n"),
+                        std::size_t{3});
+    }
+
     // --- M38: before any time has passed there is no pressure, so a
     //     `# check step 0 pressure` line FAILS rather than comparing a 0. ---
     {

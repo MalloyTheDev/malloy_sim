@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <iosfwd>
 #include <string>
 #include <vector>
@@ -351,4 +352,13 @@ ScenarioParseResult parse_scenario(std::istream& input);
 // Convenience: open a file and parse it. A missing or unreadable file is
 // reported as a parse failure, not an exception.
 ScenarioParseResult parse_scenario_file(const std::string& path);
+
+// How many entities a scenario defines: bodies, particles, charges, rigid
+// bodies, spring bodies and springs, summed over every domain. The parser caps
+// it, and the app refuses to run a scenario where it is zero (issue #31): an
+// empty, comment-only or wrong file parses as a default nbody scenario with
+// nothing in it, and running that would report success on a broken input. The
+// parser itself still accepts such a fragment, because it checks syntax and
+// settings, not whether there is something to simulate.
+std::size_t entity_count(const Scenario& scenario);
 } // namespace malloy::scenario

@@ -167,6 +167,22 @@ int drive(const char* title, World& world, const Report& report, int steps,
     return 0;
 }
 
+// The |v| column of the charge runners: the first particle's speed, or a dash
+// for a world with no particles. Reading front() of an empty list was undefined
+// behaviour, and crashed the app on an empty charges scenario (issue #24).
+template <typename Particles>
+void print_first_speed(const Particles& particles)
+{
+    if (particles.empty())
+    {
+        std::cout << std::setw(16) << "-";
+    }
+    else
+    {
+        std::cout << std::setw(16) << malloy::math::length(particles.front().velocity);
+    }
+}
+
 // The wall-pressure column (M38). Before any time has passed no impulse has been
 // measured, so there is no pressure to print, rather than a 0.
 void print_pressure(const std::optional<malloy::math::Real>& pressure)
@@ -474,9 +490,9 @@ int run_charges(const char* title, const SimulationSettings& sim,
         // Speed is reported because it is the quantity a magnetic field must
         // leave alone: it is the column that shows the rotation is exact.
         std::cout << "   E " << std::setw(16) << charge_total_energy(now, settings)
-                  << "   |v| " << std::setw(16)
-                  << malloy::math::length(now.front().velocity) << "   p "
-                  << std::setw(16) << charge_momentum(now).x << std::setw(16)
+                  << "   |v| ";
+        print_first_speed(now);
+        std::cout << "   p " << std::setw(16) << charge_momentum(now).x << std::setw(16)
                   << charge_momentum(now).y << '\n';
         std::cout << std::fixed;
         print_view(view, positions_of(now));
@@ -528,9 +544,9 @@ int run_charges3d(const char* title, const SimulationSettings& sim,
         // the rotation is exact, so speed does not move even as the particle
         // spirals along the field.
         std::cout << "   E " << std::setw(16) << charge_total_energy3d(now, settings)
-                  << "   |v| " << std::setw(16)
-                  << malloy::math::length(now.front().velocity) << "   |p| "
-                  << std::setw(16)
+                  << "   |v| ";
+        print_first_speed(now);
+        std::cout << "   |p| " << std::setw(16)
                   << malloy::math::length(malloy::charges::total_momentum3d(now)) << '\n';
         std::cout << std::fixed;
         print_view(view, projected(now));
@@ -710,6 +726,14 @@ int main(int argc, char** argv)
         if (!parsed.ok)
         {
             std::cerr << "scenario error: " << parsed.error << '\n';
+            return 1;
+        }
+        // Refuse a file that defines nothing to simulate, rather than "run" an
+        // empty default world and report success on a broken input (issue #31).
+        if (malloy::scenario::entity_count(parsed.scenario) == 0)
+        {
+            std::cerr << "scenario error: the file defines nothing to simulate "
+                         "(no bodies, particles, charges or springs)\n";
             return 1;
         }
         const auto& s = parsed.scenario;

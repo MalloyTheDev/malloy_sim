@@ -1025,22 +1025,27 @@ ScenarioParseResult parse_scenario(std::istream& input)
 
     // Defence-in-depth cap on total scenario size (see max_entities above): a
     // hostile or fat-fingered file cannot make the app allocate or step over an
-    // unbounded number of bodies and springs. Only one domain's lists are ever
-    // populated, but summing them all keeps this a single centralised check.
-    const std::size_t total_entities =
-        scenario.bodies.size() + scenario.bodies3d.size() +
-        scenario.particle_list.size() + scenario.particle_list3d.size() +
-        scenario.rigid_bodies.size() + scenario.rigid_bodies3d.size() +
-        scenario.charge_list.size() + scenario.charge_list3d.size() +
-        scenario.spring_bodies.size() + scenario.spring_bodies3d.size() +
-        scenario.spring_network.springs().size() +
-        scenario.spring_network3d.springs().size();
+    // unbounded number of bodies and springs.
+    const std::size_t total_entities = entity_count(scenario);
     if (total_entities > max_entities)
     {
         return make_error(line_number, "scenario exceeds the maximum entity count (100000)");
     }
 
     return ScenarioParseResult{true, "", std::move(scenario)};
+}
+
+std::size_t entity_count(const Scenario& scenario)
+{
+    // Only one domain's lists are ever populated, but summing them all keeps
+    // this one centralised count.
+    return scenario.bodies.size() + scenario.bodies3d.size() +
+           scenario.particle_list.size() + scenario.particle_list3d.size() +
+           scenario.rigid_bodies.size() + scenario.rigid_bodies3d.size() +
+           scenario.charge_list.size() + scenario.charge_list3d.size() +
+           scenario.spring_bodies.size() + scenario.spring_bodies3d.size() +
+           scenario.spring_network.springs().size() +
+           scenario.spring_network3d.springs().size();
 }
 
 ScenarioParseResult parse_scenario_file(const std::string& path)
