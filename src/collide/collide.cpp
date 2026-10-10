@@ -587,4 +587,108 @@ std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane)
     }
     return result;
 }
+
+namespace
+{
+// Index of the box axis most nearly parallel (or antiparallel) to `d`. Ties go
+// to the lower index, a fixed choice so a run repeats (docs/04).
+int most_aligned_axis(const Obb2Frame& o, const math::Vec2& d)
+{
+    return std::abs(math::dot(o.u[1], d)) > std::abs(math::dot(o.u[0], d)) ? 1 : 0;
+}
+
+// Keep the part of segment [p, q] with dot(plane_normal, x) <= offset, and
+// report whether any of it remains. A point exactly on the line counts as
+// inside and no intersection is added at it, so an endpoint on the boundary is
+// never duplicated.
+bool clip_segment(math::Vec2& p, math::Vec2& q, const math::Vec2& plane_normal,
+                  math::Real offset)
+{
+    const math::Real dp = math::dot(plane_normal, p) - offset;
+    const math::Real dq = math::dot(plane_normal, q) - offset;
+    if (dp > math::Real{0} && dq > math::Real{0})
+    {
+        return false; // wholly outside
+    }
+    if (dp > math::Real{0})
+    {
+        p = p + (q - p) * (dp / (dp - dq));
+    }
+    else if (dq > math::Real{0})
+    {
+        q = q + (p - q) * (dq / (dq - dp));
+    }
+    return true;
+}
+} // namespace
+
+std::vector<Contact> contacts(const Obb2& a, const Obb2& b)
+{
+    std::vector<Contact> result;
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return result;
+    }
+    MinAxis2 m;
+    if (!box2_min_axis(a, b, m))
+    {
+        return result;
+    }
+
+    const math::Vec2 t = b.center - a.center;
+    math::Vec2 n = m.axis; // oriented from a toward b, exactly as contact() does
+    if (math::dot(n, t) < math::Real{0})
+    {
+        n = -n;
+    }
+
+    // The reference box owns the separating face; the other box is incident.
+    // `face_normal` points out of the reference face toward the incident box.
+    const bool a_is_reference = m.kind == FaceA2;
+    const Obb2Frame ref = make_obb2(a_is_reference ? a : b);
+    const Obb2Frame inc = make_obb2(a_is_reference ? b : a);
+    const math::Vec2 face_normal = a_is_reference ? n : -n;
+    const int k = most_aligned_axis(ref, face_normal);
+    const math::Real face_offset = math::dot(face_normal, ref.c) + ref.e[k];
+    const math::Vec2 side = ref.u[1 - k];
+    const math::Real side_centre = math::dot(side, ref.c);
+    const math::Real side_extent = ref.e[1 - k];
+
+    // The incident edge: the face of the other box whose outward normal points
+    // most against the reference face.
+    const int j = most_aligned_axis(inc, face_normal);
+    const math::Real s =
+        math::dot(inc.u[j], face_normal) > math::Real{0} ? math::Real{-1} : math::Real{1};
+    const math::Vec2 edge_mid = inc.c + inc.u[j] * (s * inc.e[j]);
+    math::Vec2 p = edge_mid + inc.u[1 - j] * inc.e[1 - j];
+    math::Vec2 q = edge_mid - inc.u[1 - j] * inc.e[1 - j];
+
+    // Clip to the reference face's extent, then keep what lies inside the
+    // reference box (behind its face).
+    if (clip_segment(p, q, side, side_centre + side_extent) &&
+        clip_segment(p, q, -side, side_extent - side_centre))
+    {
+        for (const math::Vec2& v : {p, q})
+        {
+            const math::Real separation = math::dot(face_normal, v) - face_offset;
+            if (separation > math::Real{0})
+            {
+                continue; // in front of the reference face: not touching
+            }
+            Contact hit;
+            hit.normal = n;
+            hit.penetration = -separation;
+            hit.point = v + face_normal * (-separation / math::Real{2});
+            result.push_back(hit);
+        }
+    }
+    if (result.empty())
+    {
+        // A bare touch can round every clipped point a hair outside while the
+        // SAT still reports overlap; keep the single-point contact rather than
+        // reporting nothing, so the manifold agrees with overlaps().
+        result.push_back(*contact(a, b));
+    }
+    return result;
+}
 } // namespace malloy::collide

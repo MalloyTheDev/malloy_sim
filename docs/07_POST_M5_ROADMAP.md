@@ -179,7 +179,7 @@ a box mass primitive, and combine      [done, M26: three moments, tilt, compound
 mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume integrals]
 a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator]
 an oriented box against a plane        [done, M30: penetrating corners, one centroid contact]
-box against box (SAT, edge-edge)       [done, M33: one contact point, a bounce; the manifold and iterative solver a stack needs are still deferred]
+box against box (SAT, edge-edge)       [done, M33: the clipped manifold resolved as one centroid contact, a bounce; the per-point iterative solver a stack needs is still deferred]
 box against a sphere                    [done, M34: the box's nearest point to the sphere centre, the last movable pair in 3D]
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 rendering              (terminal-first holds until then, ADR 0002)

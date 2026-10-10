@@ -22,8 +22,12 @@
 #
 # The cube's inertia is not typed in: `rigid_box3d` computes it from the box and
 # the mass (M26). It falls from a height, bounces with restitution 0.5 losing
-# energy each time, and settles resting on the floor with its centre of mass at
-# half a side height.
+# energy each time, and settles on the floor with its centre of mass at half a
+# side height. "Settles" is not exact rest: the solver has no restitution
+# threshold, so each step's one step of gravity is bounced back at restitution
+# 0.5 and the cube keeps a steady micro-bounce of vertical speed
+# e*g*dt/(1+e) = 0.5*4*0.002/1.5 = 2.67e-3. That is the |p| residue in the
+# expected output below. It never grows, and a threshold is deferred work.
 
 type rigid3d
 

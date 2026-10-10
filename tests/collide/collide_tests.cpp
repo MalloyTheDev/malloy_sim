@@ -1262,6 +1262,259 @@ int main()
         }
     }
 
+    // --- Box-box contact MANIFOLDS (review pass after M37). contact() reports a
+    //     single vertex on a face corner; a rigid body that pushed there invented
+    //     a lever arm for a head-on hit. contacts() clips the incident face to the
+    //     reference face instead, so its centroid sits in the middle of the
+    //     touch. Every case also asserts the manifold agrees with overlaps(). ---
+    {
+        using malloy::collide::Obb2;
+        using malloy::collide::contact;
+        using malloy::collide::contacts;
+        using malloy::collide::overlaps;
+        using malloy::math::Vec2;
+        const Vec2 half{0.5, 0.5};
+
+        // Apart: empty.
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{Vec2{2.0, 0.0}, half, 0.0};
+            MALLOY_CHECK_TRUE(contacts(a, b).empty());
+            MALLOY_CHECK_FALSE(overlaps(a, b));
+        }
+
+        // Face on face, aligned: both ends of the incident edge, each 0.2 deep,
+        // midway at x = 0.4, and symmetric in y so the centroid is on the line
+        // of centres. The deepest equals the SAT penetration.
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{Vec2{0.8, 0.0}, half, 0.0};
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == !hits.empty());
+            MALLOY_CHECK_TRUE(hits.size() == 2);
+            Real sum_y = 0.0;
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_VEC2_NEAR(hit.normal, Vec2(1.0, 0.0), eps);
+                MALLOY_CHECK_NEAR(hit.penetration, 0.2, eps);
+                MALLOY_CHECK_NEAR(hit.point.x, 0.4, eps);
+                MALLOY_CHECK_NEAR(std::abs(hit.point.y), 0.5, eps);
+                sum_y += hit.point.y;
+            }
+            MALLOY_CHECK_NEAR(sum_y, 0.0, eps);
+            MALLOY_CHECK_NEAR(hits[0].penetration, contact(a, b)->penetration, eps);
+        }
+
+        // Face on face, offset by 0.6 in y: the incident edge spans y in
+        // [0.1, 1.1] and is clipped to the reference face's [-0.5, 0.5], so the
+        // manifold spans the true overlap [0.1, 0.5] and its centroid is 0.3.
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{Vec2{0.8, 0.6}, half, 0.0};
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(hits.size() == 2);
+            const Real lo = std::fmin(hits[0].point.y, hits[1].point.y);
+            const Real hi = std::fmax(hits[0].point.y, hits[1].point.y);
+            MALLOY_CHECK_NEAR(lo, 0.1, eps);
+            MALLOY_CHECK_NEAR(hi, 0.5, eps);
+            MALLOY_CHECK_NEAR(hits[0].penetration, 0.2, eps);
+            MALLOY_CHECK_NEAR(hits[1].penetration, 0.2, eps);
+
+            // The mirror, offset by -0.6: now the OTHER side plane does the
+            // clipping, so both of the reference face's side planes are pinned.
+            const Obb2 below{Vec2{0.8, -0.6}, half, 0.0};
+            const auto mirrored = contacts(a, below);
+            MALLOY_CHECK_TRUE(mirrored.size() == 2);
+            MALLOY_CHECK_NEAR(std::fmin(mirrored[0].point.y, mirrored[1].point.y), -0.5, eps);
+            MALLOY_CHECK_NEAR(std::fmax(mirrored[0].point.y, mirrored[1].point.y), -0.1, eps);
+        }
+
+        // A corner: b turned 45 degrees with its lowest corner 0.1 into a's top
+        // face. The incident edge is clipped, then only the corner lies behind
+        // the face: one point, at x = 0, normal +y.
+        {
+            const Real diag = std::sqrt(0.5);
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{Vec2{0.0, 0.5 + diag - 0.1}, half, 0.78539816339744830961};
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(hits.size() == 1);
+            MALLOY_CHECK_VEC2_NEAR(hits[0].normal, Vec2(0.0, 1.0), 1e-12);
+            MALLOY_CHECK_NEAR(hits[0].penetration, 0.1, 1e-12);
+            MALLOY_CHECK_NEAR(hits[0].point.x, 0.0, 1e-12);
+
+            // Arguments swapped: the SECOND box owns the separating face (the
+            // SAT's FaceB branch) and is the reference. Same corner, same depth,
+            // normal reversed to point from the first box toward the second.
+            const auto swapped = contacts(b, a);
+            MALLOY_CHECK_TRUE(swapped.size() == 1);
+            MALLOY_CHECK_VEC2_NEAR(swapped[0].normal, Vec2(0.0, -1.0), 1e-12);
+            MALLOY_CHECK_NEAR(swapped[0].penetration, 0.1, 1e-12);
+            MALLOY_CHECK_VEC2_NEAR(swapped[0].point, Vec2(0.0, 0.45), 1e-12); // corner 0.4, face 0.5
+        }
+
+        // A face of b wins (b turned 30 degrees, pushed along its own x), so b is
+        // the reference box and a is incident. The manifold keeps contact()'s
+        // normal and never reports more penetration than the SAT does.
+        {
+            const Real angle = 0.52359877559829887308; // pi / 6
+            const Vec2 bx{std::cos(angle), std::sin(angle)};
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 b{bx * 1.0, half, angle};
+            const auto single = contact(a, b);
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(single.has_value());
+            MALLOY_CHECK_FALSE(hits.empty());
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_VEC2_NEAR(hit.normal, single->normal, 1e-12);
+                MALLOY_CHECK_TRUE(hit.penetration >= 0.0);
+                MALLOY_CHECK_TRUE(hit.penetration <= single->penetration + 1e-12);
+            }
+        }
+
+        // A bare touch still produces a manifold (depth zero), and an invalid
+        // box produces none.
+        {
+            const Obb2 a{Vec2{0.0, 0.0}, half, 0.0};
+            const Obb2 touch{Vec2{1.0, 0.0}, half, 0.0};
+            const auto hits = contacts(a, touch);
+            MALLOY_CHECK_FALSE(hits.empty());
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, 0.0, eps);
+            }
+            const Obb2 bad{Vec2{}, Vec2{-1.0, 0.5}, 0.0};
+            MALLOY_CHECK_TRUE(contacts(a, bad).empty());
+            MALLOY_CHECK_TRUE(contacts(bad, a).empty());
+        }
+    }
+    {
+        using malloy::collide::Box3;
+        using malloy::collide::contact;
+        using malloy::collide::contacts;
+        using malloy::collide::overlaps;
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::Vec3;
+        const Vec3 half{0.5, 0.5, 0.5};
+        const Quat none{};
+
+        // Apart: empty.
+        MALLOY_CHECK_TRUE(
+            (contacts(Box3{Vec3{}, half, none}, Box3{Vec3{2.0, 0.0, 0.0}, half, none}).empty()));
+
+        // Face on face, aligned: all four corners of the incident face, each 0.2
+        // deep at x = 0.4, symmetric in y and z so the centroid is on the line of
+        // centres.
+        {
+            const Box3 a{Vec3{}, half, none};
+            const Box3 b{Vec3{0.8, 0.0, 0.0}, half, none};
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(overlaps(a, b) == !hits.empty());
+            MALLOY_CHECK_TRUE(hits.size() == 4);
+            Vec3 sum{};
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, Vec3{1.0, 0.0, 0.0}, eps));
+                MALLOY_CHECK_NEAR(hit.penetration, 0.2, eps);
+                MALLOY_CHECK_NEAR(hit.point.x, 0.4, eps);
+                sum += hit.point;
+            }
+            MALLOY_CHECK_NEAR(sum.y, 0.0, eps);
+            MALLOY_CHECK_NEAR(sum.z, 0.0, eps);
+        }
+
+        // Face on face, offset by 0.6 in BOTH y and z: the incident face is
+        // clipped against all four side planes of the reference face, so the
+        // manifold is the overlap square y, z in [0.1, 0.5] (centroid 0.3, 0.3).
+        // Offsetting both axes means a missing clip on either one shows.
+        {
+            const Box3 a{Vec3{}, half, none};
+            const Box3 b{Vec3{0.8, 0.6, 0.6}, half, none};
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(hits.size() == 4);
+            Vec3 sum{};
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_TRUE(hit.point.y >= 0.1 - eps && hit.point.y <= 0.5 + eps);
+                MALLOY_CHECK_TRUE(hit.point.z >= 0.1 - eps && hit.point.z <= 0.5 + eps);
+                MALLOY_CHECK_NEAR(hit.penetration, 0.2, eps);
+                sum += hit.point;
+            }
+            MALLOY_CHECK_NEAR(sum.y / 4.0, 0.3, eps);
+            MALLOY_CHECK_NEAR(sum.z / 4.0, 0.3, eps);
+
+            // The mirror, offset by -0.6 in y and z: the other two side planes do
+            // the clipping, so all four side planes of the reference face are
+            // pinned.
+            const Box3 below{Vec3{0.8, -0.6, -0.6}, half, none};
+            const auto mirrored = contacts(a, below);
+            MALLOY_CHECK_TRUE(mirrored.size() == 4);
+            Vec3 msum{};
+            for (const auto& hit : mirrored)
+            {
+                MALLOY_CHECK_TRUE(hit.point.y >= -0.5 - eps && hit.point.y <= -0.1 + eps);
+                MALLOY_CHECK_TRUE(hit.point.z >= -0.5 - eps && hit.point.z <= -0.1 + eps);
+                msum += hit.point;
+            }
+            MALLOY_CHECK_NEAR(msum.y / 4.0, -0.3, eps);
+            MALLOY_CHECK_NEAR(msum.z / 4.0, -0.3, eps);
+        }
+
+        // An edge resting on a face: b turned 45 degrees about z with its lowest
+        // edge (parallel to z) 0.1 into a's top face. Two points, the two ends of
+        // that edge clipped to the face, at x = 0 and z = +-0.5.
+        {
+            const Real diag = std::sqrt(0.5);
+            const Box3 a{Vec3{}, half, none};
+            const Box3 b{Vec3{0.0, 0.5 + diag - 0.1, 0.0}, half,
+                         from_axis_angle(Vec3{0.0, 0.0, 1.0}, 0.78539816339744830961)};
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(hits.size() == 2);
+            for (const auto& hit : hits)
+            {
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, Vec3{0.0, 1.0, 0.0}, 1e-12));
+                MALLOY_CHECK_NEAR(hit.penetration, 0.1, 1e-12);
+                MALLOY_CHECK_NEAR(hit.point.x, 0.0, 1e-12);
+                MALLOY_CHECK_NEAR(std::abs(hit.point.z), 0.5, 1e-12);
+            }
+
+            // The same pair with the arguments swapped: now the SECOND box owns
+            // the separating face (the SAT's FaceB branch), so it is the
+            // reference. The same two points come back, with the normal
+            // reversed to keep pointing from the first box toward the second.
+            const auto swapped = contacts(b, a);
+            MALLOY_CHECK_TRUE(swapped.size() == 2);
+            for (const auto& hit : swapped)
+            {
+                MALLOY_CHECK_TRUE(malloy::math::approx_equal(hit.normal, Vec3{0.0, -1.0, 0.0}, 1e-12));
+                MALLOY_CHECK_NEAR(hit.penetration, 0.1, 1e-12);
+                MALLOY_CHECK_NEAR(hit.point.x, 0.0, 1e-12);
+                MALLOY_CHECK_NEAR(hit.point.y, 0.45, 1e-12); // midway: edge 0.4, face 0.5
+            }
+        }
+
+        // Edge against edge (the M33 case): genuinely a point, so the manifold is
+        // exactly contact()'s single contact.
+        {
+            const Vec3 diag = normalize(Vec3{1.0, 1.0, 0.0});
+            const Box3 a{Vec3{}, half, none};
+            const Box3 b{diag * 1.2, half,
+                         from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.78539816339744830961)};
+            const auto single = contact(a, b);
+            const auto hits = contacts(a, b);
+            MALLOY_CHECK_TRUE(single.has_value());
+            MALLOY_CHECK_TRUE(hits.size() == 1);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(hits[0].point, single->point, 0.0));
+            MALLOY_CHECK_NEAR(hits[0].penetration, single->penetration, 0.0);
+        }
+
+        // Invalid boxes give no manifold.
+        MALLOY_CHECK_TRUE(
+            (contacts(Box3{Vec3{}, Vec3{-1.0, 0.5, 0.5}, none}, Box3{Vec3{}, half, none}).empty()));
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

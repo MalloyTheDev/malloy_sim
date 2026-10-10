@@ -321,15 +321,17 @@ Intended, not yet built, and never added speculatively
 - persistent per-particle forces or springs on particles (particles carry
   gravity, contact impulses and, since M35, contact friction, but no force
   accumulator; springs are their own domain)
-- the full box-box contact MANIFOLD and an iterative stacking solver (M33 and
-  M36 added box-against-box in 3D and 2D by the separating-axis test, but each
-  reduced to a single contact point: a bounce, not a stack); box against disc
+- an iterative, per-point contact solver for stacking (M33 and M36 added
+  box-against-box in 3D and 2D by the separating-axis test, and the clipped
+  contact manifold is resolved as one contact at its centroid: a bounce, not a
+  stack); box against disc
   in 2D is also not built yet (M34 added box-against-sphere and M30/M37 put a
   box on the ground in both dimensions, so the rest of the collision matrix is
   filled)
 - persistent forces and force/torque accumulators (gravity is a setting applied
   as an acceleration, not a registered force producer)
-- vehicles, fluids, thermodynamics, electromagnetism
+- vehicles, fluids, thermodynamics (electromagnetism came off this list when
+  charged particles shipped in M18)
 
 ### Not planned at all
 

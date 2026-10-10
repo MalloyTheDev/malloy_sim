@@ -204,20 +204,39 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settin
     const bool a_box = body_is_box2(a);
     const bool b_box = body_is_box2(b);
 
-    // Box against box (M36): the separating-axis contact, reduced to a single
-    // point (a bounce, not a stack), fed through the SAME solver the discs use
-    // (ADR 0008). The box is centred on the body origin with the body angle, so
-    // like a disc its contact normal generally misses the centre of mass and so
-    // generates torque.
+    // Box against box (M36): the separating-axis contact, fed through the SAME
+    // solver the discs use (ADR 0008). The clipped contact manifold is reduced to
+    // one contact at its CENTROID with the deepest penetration, exactly as M37
+    // reduces a box on the ground: a face resting on a face pushes through the
+    // middle of the touch, so two aligned boxes meeting head-on trade momentum
+    // along the line of centres with no torque, while a corner or an offset
+    // overlap lands the centroid off the centre of mass and spins the boxes as
+    // it should. (Until the review pass after M37 this used the single vertex
+    // `collide::contact` reports, which sits on a face corner and invented a
+    // lever arm for a head-on hit.) One contact, not a per-point solve: a bounce,
+    // not a stack.
     if (a_box && b_box)
     {
-        const std::optional<collide::Contact> hit = collide::contact(
+        const std::vector<collide::Contact> hits = collide::contacts(
             collide::Obb2{a.position, a.half_extents, a.angle},
             collide::Obb2{b.position, b.half_extents, b.angle});
-        if (hit)
+        if (hits.empty())
         {
-            apply_contact(a, b, *hit, settings);
+            return;
         }
+        math::Vec2 centroid{};
+        math::Real deepest = math::Real{0};
+        for (const collide::Contact& hit : hits)
+        {
+            centroid += hit.point;
+            deepest = std::fmax(deepest, hit.penetration);
+        }
+        centroid = centroid / static_cast<math::Real>(hits.size());
+        collide::Contact manifold;
+        manifold.normal = hits.front().normal; // the SAT normal, shared by every point
+        manifold.penetration = deepest;
+        manifold.point = centroid;
+        apply_contact(a, b, manifold, settings);
         return;
     }
     // A box against a disc is deferred, as box against sphere was in 3D before

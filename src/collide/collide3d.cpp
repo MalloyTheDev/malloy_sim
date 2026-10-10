@@ -591,4 +591,134 @@ std::optional<Contact3> contact(const Sphere& sphere, const Box3& box)
     }
     return hit;
 }
+
+namespace
+{
+// Index of the box axis most nearly parallel (or antiparallel) to `d`. Ties go
+// to the lowest index, a fixed choice so a run repeats (docs/04).
+int most_aligned_axis(const Obb& o, const math::Vec3& d)
+{
+    int best = 0;
+    math::Real best_alignment = std::abs(math::dot(o.u[0], d));
+    for (int k = 1; k < 3; ++k)
+    {
+        const math::Real alignment = std::abs(math::dot(o.u[k], d));
+        if (alignment > best_alignment)
+        {
+            best_alignment = alignment;
+            best = k;
+        }
+    }
+    return best;
+}
+
+// Sutherland-Hodgman: the part of polygon `poly` (vertices in cyclic order) with
+// dot(plane_normal, x) <= offset. A vertex exactly on the plane counts as inside
+// and no intersection is added at it, so a boundary vertex is never doubled
+// (a doubled vertex would bias the centroid a rigid body reduces this to).
+std::vector<math::Vec3> clip_polygon(const std::vector<math::Vec3>& poly,
+                                     const math::Vec3& plane_normal, math::Real offset)
+{
+    std::vector<math::Vec3> out;
+    const std::size_t count = poly.size();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const math::Vec3& current = poly[i];
+        const math::Vec3& next = poly[(i + 1) % count];
+        const math::Real dc = math::dot(plane_normal, current) - offset;
+        const math::Real dn = math::dot(plane_normal, next) - offset;
+        if (dc <= math::Real{0})
+        {
+            out.push_back(current);
+        }
+        if ((dc < math::Real{0} && dn > math::Real{0}) ||
+            (dc > math::Real{0} && dn < math::Real{0}))
+        {
+            out.push_back(current + (next - current) * (dc / (dc - dn)));
+        }
+    }
+    return out;
+}
+} // namespace
+
+std::vector<Contact3> contacts(const Box3& a, const Box3& b)
+{
+    std::vector<Contact3> result;
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return result;
+    }
+    MinAxis m;
+    if (!box_box_min_axis(a, b, m))
+    {
+        return result;
+    }
+    if (m.kind == Edge)
+    {
+        // Two crossing edges touch at a single point, which contact() already
+        // places at their closest approach.
+        result.push_back(*contact(a, b));
+        return result;
+    }
+
+    const math::Vec3 t = b.center - a.center;
+    math::Vec3 n = m.axis; // oriented from a toward b, exactly as contact() does
+    if (math::dot(n, t) < math::Real{0})
+    {
+        n = -n;
+    }
+
+    // The reference box owns the separating face; the other box is incident.
+    // `face_normal` points out of the reference face toward the incident box.
+    const bool a_is_reference = m.kind == FaceA;
+    const Obb ref = make_obb(a_is_reference ? a : b);
+    const Obb inc = make_obb(a_is_reference ? b : a);
+    const math::Vec3 face_normal = a_is_reference ? n : -n;
+    const int k = a_is_reference ? m.i : m.j;
+    const math::Real face_offset = math::dot(face_normal, ref.c) + ref.e[k];
+
+    // The incident face: the face of the other box whose outward normal points
+    // most against the reference face, as a quad in cyclic order.
+    const int j = most_aligned_axis(inc, face_normal);
+    const math::Real s =
+        math::dot(inc.u[j], face_normal) > math::Real{0} ? math::Real{-1} : math::Real{1};
+    const math::Vec3 centre = inc.c + inc.u[j] * (s * inc.e[j]);
+    const math::Vec3 half1 = inc.u[(j + 1) % 3] * inc.e[(j + 1) % 3];
+    const math::Vec3 half2 = inc.u[(j + 2) % 3] * inc.e[(j + 2) % 3];
+    std::vector<math::Vec3> poly = {centre + half1 + half2, centre - half1 + half2,
+                                    centre - half1 - half2, centre + half1 - half2};
+
+    // Clip it to the reference face's four side planes.
+    for (int step = 1; step <= 2; ++step)
+    {
+        const int side = (k + step) % 3;
+        const math::Vec3& u = ref.u[side];
+        const math::Real side_centre = math::dot(u, ref.c);
+        poly = clip_polygon(poly, u, side_centre + ref.e[side]);
+        poly = clip_polygon(poly, -u, ref.e[side] - side_centre);
+    }
+
+    // Keep what lies inside the reference box (behind its face).
+    for (const math::Vec3& v : poly)
+    {
+        const math::Real separation = math::dot(face_normal, v) - face_offset;
+        if (separation > math::Real{0})
+        {
+            continue; // in front of the reference face: not touching
+        }
+        Contact3 hit;
+        hit.normal = n;
+        hit.penetration = -separation;
+        hit.point = v + face_normal * (-separation / math::Real{2});
+        result.push_back(hit);
+    }
+    if (result.empty())
+    {
+        // A bare touch can round every clipped point a hair outside while the
+        // SAT still reports overlap; keep the single-point contact rather than
+        // reporting nothing, so the manifold agrees with overlaps().
+        result.push_back(*contact(a, b));
+    }
+    return result;
+}
 } // namespace malloy::collide

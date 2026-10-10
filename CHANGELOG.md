@@ -30,6 +30,40 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- M33/M36 review pass: box-against-box contacts pushed at the wrong point. Both
+  resolved a box pair at the single vertex `collide::contact` reports, which for
+  a face resting on a face sits on a face CORNER. A head-on hit between two
+  aligned boxes therefore had an invented lever arm: the impulse was computed
+  with angular terms that do not exist, and energy leaked into spin. With masses
+  2 and 1 closing at 2 and restitution 0.5, the correct outcome (the heavy box
+  stops, the light one leaves at +1, kinetic energy 0.5, no spin, exactly what
+  `box_sphere_collision.scn` gives) came out as 0.320 in 3D and 0.425 in 2D. The
+  defect was described at the time as "a little spin (|L| ~ 1e-5)", which hid it:
+  |L| is the TOTAL angular momentum, which an equal-and-opposite impulse
+  conserves wherever it acts, so it never measured the spin of either box. Worse,
+  `box_collision.scn` and `box_collision2d.scn` pinned the wrong energies as
+  their expected results.
+
+  Fixed with the contact manifold: new `collide::contacts(Obb2, Obb2)` and
+  `collide::contacts(Box3, Box3)` clip the incident face to the reference face
+  (a segment in 2D; Sutherland-Hodgman on a quad in 3D, up to eight points;
+  edge against edge stays the single point it genuinely is), and the rigid
+  worlds resolve that manifold as one contact at its centroid with the deepest
+  penetration, exactly as M30 and M37 already treat a box on the ground.
+  `collide::contact` is unchanged. The two templates now pin the correct 0.5 (to
+  1e-9, tightened from 1e-6), and a regression test pins the exact
+  one-dimensional outcome with zero spin in both dimensions, plus an offset hit
+  that MUST spin, so neither the corner contact nor a contact forced onto the
+  line of centres can pass. Still one contact per pair: a bounce, not a stack.
+
+  Found by the stacking-solver research spike, which also found: the box-drop
+  templates do not truly rest but micro-bounce at e*g*dt/(1+e) = 2.67e-3, since
+  there is no restitution threshold (now stated in both templates; the threshold
+  is deferred); `docs/05` still listed eleven test executables (fourteen exist);
+  README listed electromagnetism as unbuilt (it shipped in M18); and `docs/03`
+  said `malloy_rigid` was not responsible for oriented-box contacts (stale since
+  M30). All corrected.
+
 - M20 review pass. Four defects found reviewing the milestone after it shipped,
   all in the documentation and diagnostics rather than the integrator, and all
   corrected here.

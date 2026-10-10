@@ -1948,9 +1948,9 @@ int main()
 
     // --- M36: box against box in the 2D rigid domain, the separating-axis
     //     contact fed through the SAME impulse core as the discs (ADR 0008),
-    //     reduced to a single contact point: a bounce, not a stack. Total linear
-    //     momentum stays exact; like the 3D box pair the single corner contact
-    //     imparts a little spin, which is why the energy check allows for it. ---
+    //     reduced to one contact at the centroid of the clipped manifold: a
+    //     bounce, not a stack. Total linear momentum stays exact, and an aligned
+    //     head-on hit makes no spin (the review-pass block below pins that). ---
     {
         using malloy::math::Vec2;
         const Vec2 half{0.5, 0.5};
@@ -1982,9 +1982,9 @@ int main()
             MALLOY_CHECK_TRUE(w.bodies()[0].velocity.x < 1.0 - 1e-6);
         }
 
-        // Frictionless restitution 1 conserves total kinetic energy (translation
-        // plus the spin the corner contact imparts; 2D rotation is driftless, so
-        // this is tight); restitution below 1 strictly loses some.
+        // Frictionless restitution 1 conserves total kinetic energy (2D rotation
+        // is driftless, so this is tight); restitution below 1 strictly loses
+        // some.
         {
             const std::vector<RigidBody2D> start{
                 box_body(1.0, Vec2{0.0, 0.0}, Vec2{1.5, 0.0}),
@@ -5079,13 +5079,12 @@ int main()
 
     // --- M33: box against box, the first 3D body-vs-body collision that is not
     //     two spheres. It runs through the SAME impulse core (ADR 0008), with
-    //     the separating-axis contact standing in for the sphere one. Reduced to
-    //     a single contact point, so this is a bounce, not a stack (rule 12
-    //     defers the manifold and iterative solver a stack needs). That single
-    //     point sits on a face corner rather than the face centre, a documented
-    //     approximation, so even a head-on hit imparts a little spin. What stays
-    //     EXACT is total linear momentum (the impulse is equal and opposite) and,
-    //     at frictionless restitution 1, total kinetic energy. ---
+    //     the separating-axis contact standing in for the sphere one. The
+    //     clipped manifold is reduced to one contact at its centroid, so this is
+    //     a bounce, not a stack (the iterative solver a stack needs is deferred).
+    //     What stays EXACT is total linear momentum (the impulse is equal and
+    //     opposite) and, at frictionless restitution 1, total kinetic energy; an
+    //     aligned head-on hit makes no spin (the review-pass block pins that). ---
     {
         using malloy::math::from_axis_angle;
         using malloy::math::normalize;
@@ -5141,9 +5140,9 @@ int main()
         }
 
         // Frictionless restitution 1 conserves TOTAL kinetic energy (translation
-        // plus the spin the corner contact imparts); restitution below 1 strictly
-        // removes some. Kept short so the torque-free integrator's slow energy
-        // drift stays far under the tolerance.
+        // plus any rotation); restitution below 1 strictly removes some. Kept
+        // short so the torque-free integrator's slow energy drift stays far under
+        // the tolerance.
         {
             Rigid3DSettings elastic_st;
             elastic_st.restitution = 1.0;
@@ -5335,6 +5334,119 @@ int main()
             }
             MALLOY_CHECK_NEAR(malloy::math::length(world.bodies()[0].velocity), 0.0, 1e-12);
             MALLOY_CHECK_NEAR(malloy::math::length(world.bodies()[1].velocity), 0.0, 1e-12);
+        }
+    }
+
+    // --- Review pass after M37: box-box contact at the manifold CENTROID. Two
+    //     aligned boxes meeting face-on must give exactly the one-dimensional
+    //     answer, because the face contact's net impulse acts along the line of
+    //     centres. M33 and M36 pushed at a single face corner instead, which
+    //     invented a lever arm: this setup ended at kinetic energy 0.320 (3D) and
+    //     0.425 (2D) instead of 0.5, with energy leaking into spin that should
+    //     not exist. Masses 2 and 1 closing at +-1 with restitution 0.5 must
+    //     leave the heavy box at rest and the light one moving at +1. ---
+    {
+        using malloy::math::Quat;
+        using malloy::math::Vec2;
+        using malloy::math::Vec3;
+        using malloy::rigid::mass_properties_3d;
+        using malloy::rigid::rigid_body_from;
+        using malloy::rigid::RigidBody3D;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::SolidBox;
+
+        const auto square = [](Real mass, const Vec2& position, const Vec2& velocity) {
+            RigidBody2D b;
+            b.mass = mass;
+            b.inertia = mass * (0.25 + 0.25) / 3.0; // solid unit square
+            b.half_extents = Vec2{0.5, 0.5};
+            b.position = position;
+            b.velocity = velocity;
+            return b;
+        };
+        const auto cube = [](Real mass, const Vec3& position, const Vec3& velocity) {
+            const Vec3 half{0.5, 0.5, 0.5};
+            RigidBody3D b = rigid_body_from(
+                mass_properties_3d(SolidBox{Vec3{}, half, Quat{}, mass / 1.0}));
+            b.half_extents = half;
+            b.position = position;
+            b.velocity = velocity;
+            return b;
+        };
+
+        // 2D, aligned: the exact 1D outcome, with no spin at all.
+        {
+            RigidWorld w{SimulationSettings{0.002},
+                         {square(2.0, Vec2{0.0, 0.0}, Vec2{1.0, 0.0}),
+                          square(1.0, Vec2{0.9, 0.0}, Vec2{-1.0, 0.0})},
+                         RigidSettings{0.5}};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_VEC2_NEAR(w.bodies()[0].velocity, Vec2(0.0, 0.0), 1e-12);
+            MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(1.0, 0.0), 1e-12);
+            MALLOY_CHECK_NEAR(w.bodies()[0].angular_velocity, 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(w.bodies()[1].angular_velocity, 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(total_kinetic_energy(w.bodies()), 0.5, 1e-12);
+        }
+
+        // 2D, offset by 0.3 across the hit: the overlap is lopsided, so the
+        // centroid sits off the line of centres and the boxes MUST spin, while
+        // linear momentum stays exact. (A contact pinned to the line of centres
+        // would wrongly keep them still.)
+        {
+            const std::vector<RigidBody2D> start{
+                square(2.0, Vec2{0.0, 0.0}, Vec2{1.0, 0.0}),
+                square(1.0, Vec2{0.9, 0.3}, Vec2{-1.0, 0.0})};
+            const Vec2 p0 = total_linear_momentum(start);
+            RigidWorld w{SimulationSettings{0.002}, start, RigidSettings{0.5}};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_VEC2_NEAR(total_linear_momentum(w.bodies()), p0, 1e-10);
+            MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angular_velocity) > 1e-3);
+        }
+
+        // 3D, aligned: the same exact 1D outcome, with no spin on any axis.
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5;
+            Rigid3DWorld w{SimulationSettings{0.002},
+                           {cube(2.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}),
+                            cube(1.0, Vec3{0.9, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0})},
+                           st};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_TRUE(
+                malloy::math::approx_equal(w.bodies()[0].velocity, Vec3{0.0, 0.0, 0.0}, 1e-12));
+            MALLOY_CHECK_TRUE(
+                malloy::math::approx_equal(w.bodies()[1].velocity, Vec3{1.0, 0.0, 0.0}, 1e-12));
+            MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[0].angular_velocity), 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[1].angular_velocity), 0.0, 1e-12);
+            MALLOY_CHECK_NEAR(malloy::rigid::total_kinetic_energy3d(w.bodies()), 0.5, 1e-12);
+        }
+
+        // 3D, offset across the hit: the boxes must spin, momentum stays exact.
+        {
+            Rigid3DSettings st;
+            st.restitution = 0.5;
+            const std::vector<RigidBody3D> start{
+                cube(2.0, Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}),
+                cube(1.0, Vec3{0.9, 0.3, 0.0}, Vec3{-1.0, 0.0, 0.0})};
+            const Vec3 p0 = malloy::rigid::total_linear_momentum3d(start);
+            Rigid3DWorld w{SimulationSettings{0.002}, start, st};
+            for (int i = 0; i < 60; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                malloy::rigid::total_linear_momentum3d(w.bodies()), p0, 1e-10));
+            MALLOY_CHECK_TRUE(malloy::math::length(w.bodies()[0].angular_velocity) > 1e-3);
         }
     }
 

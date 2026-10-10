@@ -25,11 +25,14 @@ linking it) still compiles. The guard is real but it is link-time only.
 
 ## Test executable layout
 
-All eleven exist and pass (one per module):
+All fourteen exist and pass (one per module, plus `malloy_quat_tests` for the
+quaternion half of `malloy_math` and `malloy_layering_tests`, which checks the
+build graph against the module boundaries):
 
 ```text
 malloy_smoke_tests
 malloy_math_tests
+malloy_quat_tests
 malloy_time_tests
 malloy_sim_core_tests
 malloy_nbody_tests
@@ -39,6 +42,8 @@ malloy_collide_tests
 malloy_particles_tests
 malloy_rigid_tests
 malloy_springs_tests
+malloy_charges_tests
+malloy_layering_tests
 ```
 
 Each test executable should return 0 on success, return nonzero on failure, print useful failure messages, and link only the module it tests.

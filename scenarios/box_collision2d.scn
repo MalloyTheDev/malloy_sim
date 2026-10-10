@@ -9,10 +9,13 @@
 # the contact normal; the pair is resolved through the SAME impulse core the
 # discs and the ground use (ADR 0008).
 #
-# It is one contact point, not a manifold: enough for a correct bounce, not a
-# resting stack (that needs an iterative solver a later milestone owns). The
-# point sits on a face corner, a documented approximation, so even this head-on
-# hit imparts a little spin. What stays EXACT is total linear momentum.
+# The edge-on-edge touch is clipped to the overlap and reduced to ONE contact at
+# its centroid: enough for a correct bounce, not a resting stack (that needs an
+# iterative solver a later milestone owns). For two aligned squares that centroid
+# lies on the line of centres, so the impulse makes no torque and the result is
+# exactly the one-dimensional collision. (Until the review pass after M37 the
+# contact sat on a single corner, which invented a lever arm; this template then
+# ended at 0.425 instead of the correct 0.5.)
 #
 # A heavy box (mass 2) on the left moving right meets a light box (mass 1) on the
 # right moving left. They collide near the origin, bounce with restitution 0.5,
@@ -40,7 +43,7 @@ rigid_box 1.0  0.5 0.5   1.2 0.0  0.0  -1.0 0.0  0.0
 # Expected, from a real run of the shipped binary:
 #
 #   step      0   energy 1.50000000e+00   momentum_x 1.00000000e+00
-#   step   2000   energy 4.24713076e-01   momentum_x 1.00000000e+00
+#   step   2000   energy 5.00000000e-01   momentum_x 1.00000000e+00
 #
 # (`energy` is the rigid kinetic energy; with no gravity there is no potential
 # term, so it is the whole energy, translational plus rotational.)
@@ -54,9 +57,12 @@ rigid_box 1.0  0.5 0.5   1.2 0.0  0.0  -1.0 0.0  0.0
 #
 # 2. Kinetic energy starts at 0.5*2*1^2 + 0.5*1*1^2 = 1.5 (both squares at rest
 #    rotationally, moving at speed 1). After the restitution-0.5 bounce it is
-#    lower: the collision removed energy, so this is a real contact and not a
-#    fly-through. The remaining value is pinned below so the scenario test would
-#    catch a regression to a fly-through.
+#    exactly 0.5: masses 2 and 1 closing at 2 with restitution 0.5 leave the
+#    heavy square at rest and the light one moving at +1, so the energy is
+#    0.5*1*1^2. Neither square spins, because the contact acts along the line of
+#    centres. The value is pinned below, so the scenario test catches both a
+#    fly-through (which would keep 1.5) and a contact that invents torque (which
+#    would land lower, as the old corner contact did).
 #
 # On the ASCII view (an orthographic view of the plane): two points on the x
 # axis that approach, meet and separate.
@@ -66,4 +72,4 @@ rigid_box 1.0  0.5 0.5   1.2 0.0  0.0  -1.0 0.0  0.0
 # check step 0    energy      1.50000000e+00   tol 1e-9
 # check step 0    momentum_x  1.00000000e+00   tol 1e-12
 # check step 2000 momentum_x  1.00000000e+00   tol 1e-10
-# check step 2000 energy      4.24713076e-01   tol 1e-6
+# check step 2000 energy      5.00000000e-01   tol 1e-9

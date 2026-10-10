@@ -90,4 +90,26 @@ std::optional<Contact> contact(const Obb2& a, const Obb2& b);
 // so a run repeats (docs/04). Empty when the box is clear of the plane or either
 // shape is invalid; never throws.
 std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane);
+
+// The contact MANIFOLD of two oriented boxes: the points where they actually
+// touch, rather than the single representative vertex `contact(Obb2, Obb2)`
+// reports. The SAT picks the reference face (the separating face of whichever
+// box won the least-overlap axis); the face of the other box that points most
+// against it is the incident edge, which is clipped to the reference face's
+// extent and kept only where it lies inside the reference box. That gives up to
+// two points: two for a face resting on a face, one for a corner. Each has:
+//
+//   normal       the SAT normal, from `a` toward `b`, the same for every point.
+//   penetration  how far that point lies behind the reference face.
+//   point        that point, moved half its penetration toward the reference
+//                face, the midway convention of every pair.
+//
+// A rigid body that reduces this to its centroid gets a contact through the
+// middle of a face-on-face touch, so two aligned boxes meeting head-on exchange
+// momentum along the line of centres with no torque; the single vertex of
+// `contact` sits on a corner and would invent one. Never empty when the boxes
+// overlap (a bare touch that rounds every clipped point to the outside falls
+// back to the single-point contact), so `!contacts(a, b).empty()` agrees with
+// `overlaps(a, b)`. Empty when apart or either box is invalid; never throws.
+std::vector<Contact> contacts(const Obb2& a, const Obb2& b);
 } // namespace malloy::collide

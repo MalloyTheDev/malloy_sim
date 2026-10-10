@@ -84,6 +84,25 @@ std::vector<Contact3> contacts(const Box3& box, const Plane3& plane);
 // never throws (docs/04).
 std::optional<Contact3> contact(const Box3& a, const Box3& b);
 
+// The contact MANIFOLD of two oriented boxes, the 3D sibling of
+// `contacts(Obb2, Obb2)`. When a face axis wins the SAT, the face of the other
+// box that points most against the reference face is clipped (Sutherland-
+// Hodgman) to the reference face's four side planes and kept only where it lies
+// inside the reference box, giving up to eight points: four for a face resting
+// flat on a face, fewer for a tilted or overhanging one. When an edge-edge axis
+// wins, the contact genuinely is a point, so the manifold is the single contact
+// `contact(Box3, Box3)` reports. Each entry has the SAT normal (from `a` toward
+// `b`), its own penetration behind the reference face, and the midway point.
+//
+// A rigid body that reduces this to its centroid gets a contact through the
+// middle of a face-on-face touch, so two aligned boxes meeting head-on exchange
+// momentum along the line of centres with no torque, as M30 does for a box on a
+// plane. Never empty when the boxes overlap (a bare touch that rounds every
+// clipped point to the outside falls back to the single-point contact), so
+// `!contacts(a, b).empty()` agrees with `overlaps(a, b)`. Empty when apart or
+// either box is invalid; never throws.
+std::vector<Contact3> contacts(const Box3& a, const Box3& b);
+
 // An oriented box against a sphere (M34), the last movable pair in 3D. No SAT is
 // needed: the nearest point of the box to the sphere's centre is found by
 // clamping that centre into the box's local frame, and the two overlap when it

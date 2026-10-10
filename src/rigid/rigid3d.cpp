@@ -248,26 +248,39 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
 void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
                        const Rigid3DSettings& settings)
 {
-    // Two boxes resolve through the separating-axis contact (M33), reduced to a
-    // SINGLE contact point rather than a manifold: enough for a correct bounce,
-    // exchanging momentum and spinning about the true lever arm, but not for a
-    // stable stack, which needs the full manifold and an iterative solver a
-    // later milestone owns (the same boundary the ground box drew).
+    // Two boxes resolve through the separating-axis contact (M33). The clipped
+    // contact manifold is reduced to ONE contact at its centroid with the
+    // deepest penetration, exactly as M30 reduces a box on a plane: a face
+    // resting on a face pushes through the middle of the touch, so two aligned
+    // boxes meeting head-on trade momentum along the line of centres with no
+    // torque, while a corner, an edge or an offset overlap lands the centroid off
+    // the centre of mass and spins them as it should. (Until the review pass
+    // after M37 this used the single vertex `collide::contact` reports, which
+    // sits on a face corner and invented a lever arm for a head-on hit.) One
+    // contact, not a per-point solve: enough for a correct bounce, not for a
+    // stable stack, which needs an iterative solver a later milestone owns.
     if (body_is_box(a) && body_is_box(b))
     {
         const collide::Box3 shape_a{a.position, a.half_extents, a.orientation};
         const collide::Box3 shape_b{b.position, b.half_extents, b.orientation};
-        const std::optional<collide::Contact3> hit =
-            collide::contact(shape_a, shape_b);
-        if (!hit)
+        const std::vector<collide::Contact3> hits = collide::contacts(shape_a, shape_b);
+        if (hits.empty())
         {
             return;
         }
-        // The arm is the contact point relative to each centre of mass, so an
-        // off-centre hit generates torque exactly as the ground box does.
-        const Participant pa{&a, hit->point - a.position};
-        const Participant pb{&b, hit->point - b.position};
-        resolve_pair(pa, pb, hit->normal, hit->penetration, settings);
+        math::Vec3 centroid{};
+        math::Real deepest = math::Real{0};
+        for (const collide::Contact3& hit : hits)
+        {
+            centroid += hit.point;
+            deepest = std::fmax(deepest, hit.penetration);
+        }
+        centroid = centroid / static_cast<math::Real>(hits.size());
+        // The arm is the centroid relative to each centre of mass, so an
+        // off-centre touch generates torque exactly as the ground box does.
+        const Participant pa{&a, centroid - a.position};
+        const Participant pb{&b, centroid - b.position};
+        resolve_pair(pa, pb, hits.front().normal, deepest, settings);
         return;
     }
     // A box against a sphere (M34): exactly one body is a box. Find which, and

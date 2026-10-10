@@ -19,8 +19,12 @@
 # square up out of nothing; this one does not.
 #
 # The square's inertia is computed from the box and the mass, not typed in. It
-# falls, bounces with restitution 0.5 losing energy each time, and settles
-# resting on the floor with its centre at half a side height (y = 0.5).
+# falls, bounces with restitution 0.5 losing energy each time, and settles on
+# the floor with its centre at half a side height (y = 0.5). "Settles" is not
+# exact rest: the solver has no restitution threshold, so each step's one step of
+# gravity is bounced back at restitution 0.5 and the square keeps a steady
+# micro-bounce of vertical speed e*g*dt/(1+e) = 0.5*4*0.002/1.5 = 2.67e-3. It
+# never grows, and a threshold is deferred work.
 
 type rigid
 
