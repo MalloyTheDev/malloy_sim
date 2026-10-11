@@ -69,7 +69,7 @@ endif()
 # Libraries
 # ----------------------------------------------------------------------------
 
-# malloy_math (M2): header-only Real + Vec2 vocabulary.
+# malloy_math (M2): header-only Real, Vec2, Vec3, Quat and Mat3 vocabulary.
 add_library(malloy_math INTERFACE)
 add_library(malloy::math ALIAS malloy_math)
 target_include_directories(malloy_math INTERFACE include)
@@ -95,7 +95,7 @@ target_link_libraries(malloy_sim_core
         malloy::project_warnings
 )
 
-# malloy_nbody (M4): concrete 2D N-body gravity simulation (compiled STATIC).
+# malloy_nbody (M4): concrete N-body gravity, 2D and (M19) 3D (compiled STATIC).
 add_library(malloy_nbody STATIC
     src/nbody/nbody.cpp
     src/nbody/nbody3d.cpp
@@ -147,7 +147,7 @@ target_link_libraries(malloy_ascii
         malloy::project_warnings
 )
 
-# malloy_collide (M9): 2D collision primitives and contacts (compiled STATIC).
+# malloy_collide (M9): 2D and 3D collision primitives and contacts (STATIC).
 add_library(malloy_collide STATIC
     src/collide/collide.cpp
     src/collide/collide3d.cpp
@@ -181,7 +181,8 @@ target_link_libraries(malloy_particles
         malloy::project_warnings
 )
 
-# malloy_rigid (M11): 2D rigid bodies, pose and mass distribution (STATIC).
+# malloy_rigid (M11): 2D and (M20) 3D rigid bodies, contacts, mass properties
+# (STATIC).
 add_library(malloy_rigid STATIC
     src/rigid/rigid.cpp
     src/rigid/rigid3d.cpp
@@ -579,7 +580,7 @@ endif()
 # ----------------------------------------------------------------------------
 # Fuzzers (off by default; not registered as tests, so the count above is
 # unchanged). Coverage-guided robustness for the scenario file, the one
-# untrusted input (docs/09, security review): one target fuzzes the parser, the
+# untrusted input (docs/06, Fuzzing): one target fuzzes the parser, the
 # other the whole app behind it (issue #30). They need clang++, and the default
 # MSVC presets never build them. The recipe is in fuzz/parse_scenario_fuzzer.cpp.
 # ----------------------------------------------------------------------------

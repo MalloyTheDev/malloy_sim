@@ -30,7 +30,9 @@ struct WallImpulse3D
 
 // The total heat each of the six walls has delivered to the gas (M39), the 3D
 // sibling of WallHeat2D: kinetic energy after minus before, at every bounce off
-// a thermal wall, positive into the gas; a specular wall's entry stays 0.
+// a thermal wall, positive into the gas; a specular wall's entry stays 0 by
+// definition. The energy identity needs restitution 1, no friction and no
+// gravity, as in 2D.
 struct WallHeat3D
 {
     math::Real min_x{0.0};

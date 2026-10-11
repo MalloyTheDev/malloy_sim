@@ -95,6 +95,46 @@ All notable changes to MalloySim are recorded here. The format follows
   the parser alone) found nothing; with the #24 bug put back in a scratch copy
   it found the crash in 19 seconds.
 
+### Documentation
+
+- `README.md` brought up to M39. Its status section, module table and milestone
+  table had stopped at M32. It now:
+  - says the app runs all ten scenario types;
+  - lists the 30 templates by `type`;
+  - adds a Known limitations section linking the open defects a run can hit;
+  - separates what is planned, what waits for a need, and what is rejected,
+    which removes the package-manager contradiction (issue #59).
+- Every document under `docs/` updated to M39:
+  - the module boundaries of every domain, including the 3D worlds, box
+    contacts, thermo and thermal walls, and the missing `malloy_charges`
+    section;
+  - the integrators and contact conventions, with the open defects that
+    qualify them;
+  - mutation testing, `# check` lines and the M39 calibration;
+  - an accurate account of the fuzz targets and of the absence of CI;
+  - the milestone candidates (issues #73-#79, #48, #64) as what is next.
+  The ADRs gained dated notes only; no decision text was rewritten.
+- Issue #53: the thermal-wall energy identity now states all three conditions
+  (restitution 1, no friction, no gravity), and a specular wall's heat entry is
+  described as 0 by definition, since it records only thermal re-emission. The
+  fix covers the headers, docs/04, this changelog's M39 entry,
+  `heat_conduction.scn` and the app.
+- Issue #58: stale or false header comments corrected:
+  - `eigen_symmetric` reads both triangles;
+  - `rigid3d_world.hpp` no longer says friction and box contacts are still to
+    come;
+  - `rigid_world.hpp` mentions boxes and the missing box-against-disc pair;
+  - both rigid worlds list everything `validate()` checks.
+- Issue #59: `bouncing_sphere.scn` no longer calls friction a later milestone,
+  and the `lattice` key reference says the net momentum is zero only for an
+  even count.
+- Smaller fixes:
+  - the charge worlds' magnetic rotation preserves speed to rounding error,
+    not "to the last bit";
+  - stale module comments in `CMakeLists.txt` and the app's header comment are
+    corrected.
+- The GitHub repository description no longer calls the project an engine.
+
 ### Fixed
 
 - Issue #27: the `MALLOY_BUILD_FUZZERS` build instrumented only the fuzzer's
@@ -1119,8 +1159,8 @@ exit codes included.
 **Exact checks.**
 - The generator matches known answers, which agree with an independent
   implementation (Java's `SplittableRandom`).
-- With restitution 1, the gas's kinetic energy changes by exactly the summed
-  wall heat, to rounding.
+- With restitution 1, no friction and no gravity, the gas's kinetic energy
+  changes by exactly the summed wall heat, to rounding.
 - One bounce matches the public samplers drawn in the documented order, bit for
   bit, in 2D and 3D. Its impulse and heat are exactly `m (|v_in| + v_out)` and
   the change in kinetic energy.

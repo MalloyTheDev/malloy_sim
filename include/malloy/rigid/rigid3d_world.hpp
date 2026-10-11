@@ -96,22 +96,23 @@ struct Rigid3DSettings
 // and bounces it off immovable planes. It is deliberately the 3D echo of M10's
 // colliding particles, not M14's rigid contacts: a contact on a CENTRED sphere
 // passes through the centre of mass, so it imparts no spin, and the response is
-// a pure normal impulse. Spin from a contact needs a tangential component, and
-// that is friction, its own later milestone. So the rotation of M20/M21 and the
-// bouncing of M22 coexist without yet coupling: a sphere can spin under a torque
-// while it bounces, and neither touches the other.
+// a pure normal impulse. Spin from a contact needs a tangential component:
+// friction, which M23 added, so a sliding sphere now spins up and rolls. Box
+// contacts (M30 on the ground, M33 against a box, M34 against a sphere) have
+// lever arms of their own and impart spin through the principal moments.
 //
-// What is genuinely new is the 3D contact itself: the first collision query and
-// the first restitution response the project has in three dimensions. It needs
-// no inertia tensor (a normal impulse on a centred sphere never touches the
-// inertia) and no force (gravity is an acceleration, contacts are impulses).
+// The contacts are impulses and gravity is an acceleration, so the world still
+// needs no force accumulator; the applied force and torque (M28, M21) are
+// constant settings applied as forcing (CLAUDE.md rule 5).
 class Rigid3DWorld
 {
 public:
     Rigid3DWorld(sim_core::SimulationSettings simulation_settings,
                  std::vector<RigidBody3D> bodies, Rigid3DSettings settings = {});
 
-    // Ok, or InvalidSettings (dt or torque) / InvalidState (a body).
+    // Ok, or InvalidSettings (dt; torque, force or gravity not squarable;
+    // restitution outside [0, 1]; friction negative; a ground plane invalid) /
+    // InvalidState (a body).
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step:

@@ -4,6 +4,14 @@
 
 Accepted, and implemented as of M10.
 
+Note, 2026-10-11 (M39): two statements below are narrower than the code now
+is. Domains also link `malloy_time`, and the particle and rigid domains link the
+support library `malloy_collide`; neither is a domain, so no domain references
+another. And a header-only leak, which the Rationale says the link step cannot
+see, is now caught by `malloy_layering_tests` (issue #13): it fails if a library
+includes a module it does not link, or if one domain links or includes another.
+The `type` key now selects ten scenario types across five domains.
+
 ## Context
 
 MalloySim's goal is an all-in-one science physics simulation: many domains,

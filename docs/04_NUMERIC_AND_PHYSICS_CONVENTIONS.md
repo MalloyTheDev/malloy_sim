@@ -1,7 +1,9 @@
 # 04 - Numeric and Physics Conventions
 
-> These conventions are in force in the shipped M1-M5 code (the softening
-> formula and validation rules below are implemented in `malloy_nbody`).
+> These conventions are in force in every domain of the shipped code, through
+> M39. Where a rule belongs to one domain (the softening formula to
+> `malloy_nbody` and `malloy_charges`, the gas definitions to
+> `malloy_particles`), its section says so.
 
 Use:
 
@@ -21,13 +23,18 @@ Namespace:
 malloy::math::Real
 ```
 
-`Vec2` stores `Real`. Do not template `Vec2` in v1.
+`Vec2`, `Vec3`, `Quat` and `Mat3` all store `Real`. They are separate concrete
+types, not templates on dimension: `cross` is a scalar in two dimensions and a
+vector in three, so a template would need specializing exactly where it matters
+(ADR 0009, amendment at M19).
 
 ## Floating point rules
 
 - Use `double` for positions and velocities.
 - Do not use `float` for simulation state.
-- Do not enable fast-math.
+- Do not enable fast-math. MSVC builds use `/fp:precise`, and GCC and Clang
+  builds use `-ffp-contract=off`, so no compiler fuses `a*b+c` into an FMA and
+  changes a result (`CMakeLists.txt`).
 - Do not use `==` for floating-point simulation comparisons.
 - Use explicit tolerances.
 
@@ -37,9 +44,70 @@ Do not claim cross-platform bitwise determinism.
 
 V1 determinism means same binary, same platform, same initial state, same fixed timestep, same update order, same seed (M39, ADR 0010), and same result within expected tolerance.
 
+Update order is part of each world's documented step contract, because
+floating-point addition is not associative: particle and body pairs in
+ascending `(i, j)` order, springs in declaration order (ADR 0008), particle
+walls particle by particle with x before y (before z), contacts before ground
+planes, and random draws in a fixed order and count (ADR 0010). Changing any of
+them changes results and is a deliberate act.
+
 ## Units
 
-Use normalized demo units first. Do not use real astronomical SI units in the first demo.
+Every domain uses normalized units (ADR 0005), and Boltzmann's constant is 1
+(M38). There is no unit system and no SI conversion; do not introduce real
+astronomical or SI magnitudes into a template without a milestone that needs
+them.
+
+## Integration and contacts
+
+Every world advances with semi-implicit (symplectic) Euler: velocities first,
+then positions from the updated velocities. The specializations:
+
+- **Charges** (2D and 3D): the electric kick, then an EXACT rotation of the
+  velocity by the magnetic field, then the move. A magnetic field alone
+  preserves every speed to rounding error, with no error of any order in dt.
+  Known defect: this kick-then-rotate (Lie) splitting makes motion in crossed E
+  and B fields drift against the
+  electric force, gaining energy without bound at about `(qE)^2 dt / (2m)` per
+  unit time; no shipped template uses an electric field, so none shows it
+  ([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)).
+- **3D rigid bodies**: the angular velocity advances by FORWARD Euler on Euler's
+  equations in the body frame, the orientation from the updated angular
+  velocity, and the quaternion is renormalized every step.
+- **2D rigid bodies**: the angle accumulates by addition and is not wrapped;
+  its drift is bounded and pinned (ADR 0007).
+
+Gravity is an acceleration, not a force, so it does not scale with mass. The 3D
+rigid domain's applied force (M28) and torque (M21) are single constant
+settings applied as forcing, not force or torque accumulators (`CLAUDE.md`
+rule 5). Only `malloy_springs` accumulates forces, through its own network
+(ADR 0008).
+
+Contacts are impulses, resolved after the position update, in a fixed order and
+in ONE pass with no iteration: a positional correction along the normal, a
+normal impulse that reverses the closing speed scaled by the restitution, and
+then a Coulomb friction impulse computed from the velocity that remains,
+clamped to the friction coefficient times the normal impulse. A box contact
+manifold (box on ground, box against box) is reduced to one contact at its
+centroid with the deepest penetration.
+
+Three fixed-step consequences follow from that design. The first is derived and
+documented; the other two are open defects.
+
+- **Micro-bounce.** There is no restitution threshold, so a body resting on the
+  ground keeps a vertical speed of `e g dt / (1 + e)`: each step's gravity is
+  bounced back at restitution `e` (2.67e-3 in `box_drop.scn`).
+- **Static friction creeps.** Gravity moves a body before friction acts, so a
+  rigid body on a slope inside the friction cone still creeps down it, at a steady
+  `g sin(theta) dt` per unit time
+  ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
+- **Boxes do not settle.** The centroid reduction and a translation-only
+  positional correction together make a box that lands anything but flat rock
+  indefinitely and gain energy, even at restitution 0, in 2D and 3D
+  ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)). The symmetric
+  box-drop templates do not show it. The real fix is a per-point iterative
+  contact solver, a milestone candidate
+  ([#73](https://github.com/MalloyTheDev/malloy_sim/issues/73)).
 
 ## Kinetic theory (M38)
 
@@ -98,9 +166,12 @@ A wall at temperature `T_w > 0` is THERMAL; 0 is the ordinary specular wall.
   friction do not apply there.
 - **Tallies.** The impulse tally records the true normal momentum change,
   `m (|v_n,in| + v_n,out)`. The heat tally records the kinetic energy after
-  minus before, positive into the gas; a specular wall's heat stays 0. With
-  restitution 1 and no gravity, the gas's kinetic energy changes by exactly the
-  summed heat.
+  minus before, positive into the gas. It records only thermal re-emission, so
+  a specular wall's entry is 0 by definition, not because the wall exchanges no
+  energy: at restitution below 1 a specular wall absorbs energy that no tally
+  shows. With restitution 1, no friction and no gravity, the gas's kinetic
+  energy changes by exactly the summed heat; pair and wall friction dissipate
+  even at restitution 1, so the identity needs all three conditions.
 - **The generator.** SplitMix64 (`include/malloy/particles/splitmix64.hpp`),
   one stream per world, seeded from the `seed` setting. Deviates are strictly
   inside (0, 1), so no logarithm is ever infinite. A failed step restores the
@@ -211,8 +282,32 @@ Every body type now requires `math::is_squarable` on its position and velocity,
 so that window is closed. The same reasoning bounds `softening` in the N-body
 and charge domains, and the endpoint separation of a spring.
 
+Two neighbouring windows are still open. A rigid body's mass and inertia are
+not bounded the same way, so a huge one passes validation while every energy
+prints `inf` ([#51](https://github.com/MalloyTheDev/malloy_sim/issues/51)); and
+a particle world's wall tallies can overflow while its particles stay valid,
+so the step is not rolled back
+([#50](https://github.com/MalloyTheDev/malloy_sim/issues/50)).
+
 ## Validation rules
 
-Validate `dt > 0`, `G >= 0`, `softening >= 0`, `mass > 0`, finite position, and finite velocity.
+Every world has a `validate()` that returns a `sim_core::StepStatus`: `Ok`,
+`InvalidSettings` (a setting is unusable: `dt <= 0`, a restitution outside
+[0, 1], a negative friction, `G` or softening, a wall temperature that is
+negative or not finite, a timestep past a spring's stability limit) or
+`InvalidState` (a body is unusable: a non-positive mass, a position or velocity
+that is not squarable). Each world's header lists exactly what its
+`validate()` checks.
 
-Use status/result returns for normal validation failures. Do not throw for normal validation failures in M1-M5.
+`step()` validates before and after the update. On a failure it restores the
+pre-step state (in the particle worlds that includes the wall tallies and the
+random stream) and returns the failing status. Nothing throws for a normal
+validation failure, and the scenario parser returns a status rather than
+throwing too. The parser checks only syntax and resource caps; semantic rules
+live in exactly one place, the world's own `validate()`.
+
+Infinite mass and inertia are allowed in one place: a 2D rigid body, where
+they mean immovable, per quantity (`docs/03`, `malloy_rigid`). The 3D rigid
+domain has no
+immovable bodies, only ground planes
+([#74](https://github.com/MalloyTheDev/malloy_sim/issues/74)).

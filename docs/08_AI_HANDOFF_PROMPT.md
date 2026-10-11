@@ -24,25 +24,31 @@ Before doing anything, read:
 
 Current status:
 
-M1-M39 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
-dimensions (with ballistics as uniform
-gravity in that domain, Coulomb friction on their contacts since M35, and read as a gas since M38, with a temperature, a wall pressure and relaxation to Maxwell-Boltzmann, and since M39 heated and cooled through thermal walls that draw from a seeded generator), 2D rigid bodies with contact response (discs, and since M36 oriented boxes by the separating-axis test, resting on a ground plane since M37) and their own
-uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
-both torque-free and under a constant applied torque, a sphere bouncing on a 3D
-ground plane, rolling with friction, and colliding with another sphere, mass properties
-computed from 3D geometry (for spheres, boxes and arbitrary triangle meshes,
-assembled into compound bodies with combine), a constant applied force to go
-with the torque (the two halves of a wrench), an oriented box that rests and
-tumbles on a ground plane (M30, the first non-sphere 3D collision), box against
-box (M33, two oriented boxes by the separating-axis test, resolved as one
-contact at the centroid of their clipped manifold), a box against a sphere (M34, the box's nearest point to the
-sphere centre, the last movable pair in 3D), spring
-networks in two and (M31) three dimensions, and charged particles in electric
-and magnetic fields in two and
-(M29) three dimensions, where the field is a vector and a charge spirals along
-it, are the five finished domains, and the scenario format dispatches
-between them with a type key across ten scenario types. The classical mechanics track is complete
-(docs/07_POST_M5_ROADMAP.md), M38 opened thermodynamics, and M39 added thermal walls and the project's first, seeded, randomness (ADR 0010).
+M1-M39 are complete. Five finished domains sit behind one scenario `type` key,
+across ten scenario types, and every domain runs in two dimensions and three:
+
+- gravity (nbody, nbody3d);
+- colliding particles (particles, particles3d): uniform gravity (ballistics),
+  Coulomb friction on contacts (M35), read as a gas since M38 (temperature,
+  wall pressure, relaxation to Maxwell-Boltzmann, a deterministic lattice
+  start), and since M39 heated and cooled through thermal walls that draw from
+  a seeded SplitMix64 owned by the particle world (ADR 0010);
+- rigid bodies (rigid, rigid3d): in 2D, discs and (M36) oriented boxes with
+  contact response, gravity, halfplane ground, friction and immovable bodies;
+  in 3D, quaternion rotation, a constant applied torque and force (the force
+  has no scenario key yet, #47), spheres and
+  oriented boxes against ground planes and against each other (every movable
+  pair), and mass properties computed from spheres, boxes and triangle meshes;
+- spring networks (springs, springs3d);
+- charged particles in electric and magnetic fields (charges, charges3d).
+
+The classical mechanics track is complete, M38 opened thermodynamics, and
+nothing further is scheduled: the next milestones are chosen from open GitHub
+issues labelled "milestone candidate" (docs/07_POST_M5_ROADMAP.md). Known open
+defects are issues too; read the relevant ones before claiming a behaviour.
+In particular, a box that lands anything but flat never comes to rest (#41),
+static friction creeps on a slope (#44), and the charge integrator drifts in
+crossed electric and magnetic fields (#42).
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to
@@ -52,14 +58,19 @@ them.
 Architecture rule that matters most: every physics domain is its own library
 with its own concrete world type. There is no simulation base class, no virtual
 step(), no registry, and no engine kernel. Adding a domain must leave
-malloy_sim_core unchanged (ADR 0006).
+malloy_sim_core unchanged (ADR 0006); malloy_layering_tests enforces the module
+graph.
 
 Do not add rendering, ECS, quantum, package
 managers, Catch2, plugins, scripting, or editor systems unless the milestone I
 asked for explicitly requires it.
 
 A domain is not finished until it has validation, an invariant checked by tests,
-malformed-input tests, and at least one scenario template in scenarios/.
+malformed-input tests, and at least one scenario template in scenarios/, with a
+documented expected result and at least one "# check" line compared against a
+real run. A tolerance on a statistical or random quantity is derived and stated
+beside the check, never fitted to one run, and randomness is always seeded and
+owned by its domain (docs/05, ADR 0010).
 
 Use C++20, CMake, MSVC, VS Code CMake Tools, CTest, and tiny custom check macros.
 
@@ -68,6 +79,8 @@ The immediate build commands are:
 cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
+
+There is no CI, so run them yourself before calling anything done.
 
 Your task is to work only on the requested milestone.
 

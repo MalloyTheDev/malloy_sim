@@ -51,7 +51,7 @@ public:
     // In two dimensions the magnetic sub-problem has an exact solution, because
     // a uniform out-of-plane field rotates the velocity at a constant rate and
     // nothing else. So it is integrated exactly, and the speed is preserved to
-    // the last bit rather than to some order in dt. The cost is that this is
+    // rounding error (a few ulp per step) rather than to some order in dt. The cost is that this is
     // operator splitting: the electric and magnetic parts are applied in
     // sequence rather than together, which is first order in dt in their
     // interaction, exactly as the single kick in every other domain is.

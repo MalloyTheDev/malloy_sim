@@ -46,8 +46,8 @@ public:
     // constant rate, leaving the component along the field untouched, so the
     // exact update is a rotation about that axis. Implemented with a
     // quaternion, `rotate(from_axis_angle(B, -(q |B| / m) dt), v)`, so the
-    // speed is preserved to the last bit and the component along B is carried
-    // exactly: circular motion across the field, uniform drift along it, which
+    // speed is preserved to rounding error (a few ulp per step), and the
+    // component along B is carried exactly: circular motion across the field, uniform drift along it, which
     // together are a helix. This is the physics two dimensions cannot express.
     //
     // As in 2D this is operator splitting: the electric and magnetic parts are

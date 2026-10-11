@@ -135,8 +135,9 @@ struct SymmetricEigen
 // Classical cyclic Jacobi rotation, the standard method for a small symmetric
 // matrix: it repeatedly zeroes the largest off-diagonal entry with an orthogonal
 // rotation, and for a 3x3 converges to machine precision in a handful of sweeps.
-// The input is assumed symmetric; only its lower triangle would differ, and it
-// is not read.
+// The input is assumed symmetric. Both triangles are read, so a matrix whose
+// lower triangle differs from its upper one gives a wrong answer, not a quietly
+// symmetrised one.
 inline SymmetricEigen eigen_symmetric(const Mat3& matrix)
 {
     // Work in a plain array for the rotations; the result goes back into Mat3.

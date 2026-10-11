@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, recorded at M16, amended at M19, M20, M22, M23, M24 and M25.
+Accepted (M16); amended at M19, M20 and M22 to M25; dated note at the end.
 
 As of M20 the first two pieces of 3D have shipped: `math::Vec3` and
 `nbody::NBody3DWorld`, then `math::Quat` and `rigid::Rigid3DWorld`. Everything
@@ -269,3 +269,15 @@ worrying about the eventual transition.
 Nothing here licenses building ahead. Rules 6 and 7 stand, the milestone
 sequence is unchanged, and a scalar angle remains the correct representation
 for a 2D rigid body today.
+
+## Note, 2026-10-11 (M39)
+
+The Status paragraph above ("Everything else is still 2D") and the "still
+deferred" lists in the M24 and M25 amendments describe the state at those
+milestones. Since then M26 and M27 added box and mesh mass properties, M28 a
+constant applied force, M29, M31 and M32 the charge, spring and particle
+domains in 3D, and M30, M33 and M34 oriented boxes against planes, boxes and
+spheres. Every domain now has a 3D form, the 2D types are still supported, and
+`RigidBody3D` still stores three principal moments and an orientation, never a
+tensor. What remains of 3D is immovable 3D bodies, a per-point contact solver
+and rendering, each its own milestone (`docs/07_POST_M5_ROADMAP.md`).

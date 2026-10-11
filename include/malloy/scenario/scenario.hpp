@@ -249,7 +249,8 @@ struct ScenarioParseResult
 //
 //     A whole gas in one line (M38): nx by ny identical particles centred in
 //     the cells of a grid that tiles `bounds`, all at `speed`, in exactly
-//     opposite pairs so the net momentum is zero (particles::lattice_gas). It is
+//     opposite pairs, so the net momentum is zero for an even count; an odd
+//     count leaves one particle unpaired (particles::lattice_gas). It is
 //     expanded after the file is read, so `bounds` may come before or after it,
 //     and its particles follow any `particle` lines. At most one lattice line;
 //     counts must be at least 1, the total is capped at 100000 BEFORE anything

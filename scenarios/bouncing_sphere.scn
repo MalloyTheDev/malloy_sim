@@ -9,8 +9,9 @@
 # from its centre straight down to the floor, and its centre is its centre of
 # mass, so the impulse has no lever arm and imparts no spin. That is the 3D echo
 # of M10's colliding particles, not M14's rigid contacts: the sharp facts here
-# are translational. Spin from a contact needs a sideways (friction) force, and
-# that is a later milestone.
+# are translational. Spin from a contact needs a sideways (friction) force;
+# M23 added it, and rolling_sphere.scn shows it. This template keeps friction
+# at its default of 0, so the bounce stays purely translational.
 #
 # Two things are exact and worth watching. The bounce reverses the sphere's
 # speed along the floor normal and scales it by the restitution e, so a drop

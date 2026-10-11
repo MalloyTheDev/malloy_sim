@@ -14,7 +14,8 @@ A domain is finished when it has all four (`CLAUDE.md` rule 16):
 1. validation of its own settings and state, returning status rather than throwing;
 2. an invariant or conserved quantity checked by tests;
 3. malformed and boundary input tests;
-4. at least one scenario template in `scenarios/`.
+4. at least one scenario template in `scenarios/`, with a documented expected
+   result and at least one `# check` line (`docs/05`).
 
 ## Complete
 
@@ -55,10 +56,38 @@ M38 - a hard-disk gas (kinetic theory)      [done]
 M39 - thermal walls (heat flow)             [done]
 ```
 
-## Track 1: classical mechanics depth (active)
+## What is next: milestone candidates
 
-This is the committed next stretch. It turns one working domain into four and
-produces the first real template library.
+Nothing is scheduled. The candidates for the next milestones are open GitHub
+issues labelled `milestone candidate`, each with a scope sketch; none is
+started until it is explicitly asked for, and it gets a number only then.
+
+| Issue | Candidate | Track |
+|---|---|---|
+| [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73) | per-point iterative contact solver for box manifolds (resting and stacking) | 1, 4 |
+| [#74](https://github.com/MalloyTheDev/malloy_sim/issues/74) | immovable 3D bodies (parity with 2D `rigid_static`) | 4 |
+| [#48](https://github.com/MalloyTheDev/malloy_sim/issues/48) | box against disc in 2D (also an open bug: the pair passes through silently) | 1 |
+| [#75](https://github.com/MalloyTheDev/malloy_sim/issues/75) | a piston (moving wall) to do work on a gas | 3 |
+| [#76](https://github.com/MalloyTheDev/malloy_sim/issues/76) | per-wall accommodation coefficients (partially diffuse thermal walls) | 3 |
+| [#77](https://github.com/MalloyTheDev/malloy_sim/issues/77) | a local temperature and density profile measurement | 3 |
+| [#79](https://github.com/MalloyTheDev/malloy_sim/issues/79) | a uniform-grid broadphase for the particle domain | 3 |
+| [#78](https://github.com/MalloyTheDev/malloy_sim/issues/78) | uniform gravity for spring networks | 1 |
+| [#64](https://github.com/MalloyTheDev/malloy_sim/issues/64) | one shared `# check` evaluator for the tests and the app | 2 |
+
+Open bugs are issues too. The ones that qualify claims made in these documents
+are noted where the claim is made: boxes that never settle
+([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)), static friction
+that creeps ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)), and
+crossed-field drift in the charge integrator
+([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)). Fixing a bug is
+not a milestone, but a fix that changes an integrator or a template's numbers
+is a deliberate change recorded in `CHANGELOG.md`.
+
+## Track 1: classical mechanics depth (complete)
+
+This was the committed stretch after M5. It turned one working domain into
+five, produced the first real template library, and is now complete; its
+remaining depth is in the candidates above (#73, #48, #78).
 
 M9 shipped as a support library rather than a domain: `malloy_collide` works on
 shapes, not bodies, so it has no world and no scenario template, and rule 16
@@ -71,8 +100,8 @@ promised and left unnumbered. It became M14.
 M14 gave `RigidBody2D` a collision radius and made infinite mass and inertia
 mean immovable, which is the representation M11 deliberately deferred on the
 grounds that nothing needed statics until contact response did (ADR 0007).
-Contacts are disc against disc: oriented boxes and SAT would be their own
-milestone.
+Contacts were disc against disc: oriented boxes and SAT were left to their own
+milestones, which became M33 (3D) and M36 (2D).
 
 M15 added a uniform gravity field to the rigid domain, applied before the
 position update so the integration stays semi-implicit Euler. It is an
@@ -94,14 +123,20 @@ A tangential impulse clamped to the friction coefficient times the normal
 impulse gives rolling, spin-down, backspin reversal and static holding, none of
 which existed before, and it needs no new state on a body and no force
 accumulator: friction is computed and consumed inside a contact exactly as
-restitution is.
+restitution is. Static holding is not exact: because gravity moves a body
+before friction acts, a body inside the friction cone creeps down a slope at
+`g sin(theta) dt` per unit time
+([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
 
 What M17 makes visible is the next pressure point. Friction makes stacking look
 achievable, and the solver is a single pass with no iteration, so a stack will
 not stand. That is where sequential-impulse iteration and then a constraint
 solver start pulling, and a constraint solver is where a `Constraint` base class
 grows. Rule 12 exists to stop exactly that, so it is named here and deferred
-rather than left to drift in.
+rather than left to drift in. The box contacts of M30 to M37 sharpened it: even
+one box on a floor does not come to rest
+([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)). The per-point
+solver is candidate [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73).
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
 `ParticleWorld`, because a spring network is interaction topology rather than
@@ -118,10 +153,9 @@ changed and ADR 0006 is unaffected. It defaults to zero, so every earlier
 scenario runs bit-identically.
 
 M11 promised that rigid-body contact response would be "its own milestone", but
-no such milestone was ever numbered. It is the gap between M9 (collision
-geometry) and M11 (rigid bodies): the two exist and nothing connects them. It
-also needs static, infinite-mass bodies, which M11 deliberately left
-unrepresented.
+no such milestone was ever numbered until M14. It was the gap between M9
+(collision geometry) and M11 (rigid bodies), and it also needed static,
+infinite-mass bodies, which M11 deliberately left unrepresented.
 
 M11 shipped as free motion plus impulses: no persistent forces, no force or
 torque accumulators, and no rigid-body contact response. Forces belong with
@@ -132,29 +166,41 @@ M10 was re-scoped from rigid bodies to colliding particles, so that collision
 became demonstrable one milestone sooner and the project gained a second real
 domain. Rigid bodies (orientation, angular velocity, torque) moved to M11.
 
-M11's ownership boundary is settled in advance and recorded in
+M11's ownership boundary was settled in advance and recorded in
 `docs/decisions/0007-rigid-bodies-own-their-state.md`: a dedicated
 `RigidBody2D`, not a widened `Body2D`. 2D only, so scalar angle and scalar
-inertia; quaternions and inertia tensors stay with the 3D milestone.
+inertia; quaternions and inertia tensors stayed with the 3D milestones.
 
 ## Track 2: the multi-domain shell
 
 The scenario `type` key and the dispatch switch landed in M10, because that is
-when a genuine second world type first existed. What remains is hardening.
+when a genuine second world type first existed. It now selects between ten
+scenario types across the five domains. What remains is hardening, and it is
+deliberately not numbered: a number written down before the work is assigned is
+a number that collides with whatever actually ships. This block used to read
+`M14`, which M14 then became something else.
 
-Template library hardening is what remains, and it is deliberately not
-numbered: nothing here is scheduled, and a number written down before the
-work is assigned is a number that collides with whatever actually ships.
-This block used to read `M14`, which M14 then became something else.
+Since M14 the shell has gained, without a milestone number: `# check` lines
+compared against a real run, documentation counts derived from the code, the
+layering test, resource caps on the scenario file, escaped error messages, and
+two fuzz targets (`docs/05`, `docs/06`). The open hardening work is tracked as
+issues, among them one shared `# check` evaluator so a user's own scenario
+checks can run ([#64](https://github.com/MalloyTheDev/malloy_sim/issues/64)),
+checks that cannot detect the behaviour they document
+([#67](https://github.com/MalloyTheDev/malloy_sim/issues/67)), template
+coverage gaps ([#70](https://github.com/MalloyTheDev/malloy_sim/issues/70)),
+and continuous integration, of which there is none
+([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
 
 ## Track 3: wider domains (direction, not commitment)
 
 Candidates, roughly in order of how well they fit the existing foundation.
-None of these is scheduled; the order will be revisited after Track 2.
+None of these is scheduled.
 
 ```text
+thermodynamics, beyond M39: a piston (#75), accommodation coefficients (#76),
+    a temperature and density profile (#77), a particle broadphase (#79)
 fluids (SPH, 2D)
-thermodynamics, beyond M39: a piston (work), accommodation coefficients
 vehicles, as an application of rigid bodies
 ```
 
@@ -169,9 +215,12 @@ seeded SplitMix64 owned by the particle world, consumed in a fixed order and
 rolled back with a failed step (ADR 0010). A gas now relaxes to its walls'
 temperature and conducts heat between a hot and a cold wall, and the
 free-molecular heat flow between two thermal walls is tested against its
-closed form. What follows needs a moving wall: a piston, and with it work.
+closed form. What follows needs a moving wall: a piston, and with it work
+(#75). Accommodation coefficients (#76) would change the number of random draws
+per bounce, so they are an ADR-level change to the draw-order contract.
 Fluids (SPH) would be a genuinely new domain, with a neighbour search that the
-O(N^2) pair loop cannot afford.
+O(N^2) pair loop cannot afford; the particle broadphase (#79) is the first step
+in that direction.
 
 Unnumbered on purpose. These were once written as M15 to M18, and M15 then
 shipped as gravity for rigid bodies, so the labels pointed at the wrong
@@ -192,11 +241,13 @@ sphere against sphere                   [done, M24]
 a general inertia tensor               [done, M25: compound spheres, parallel axis, diagonalized]
 a box mass primitive, and combine      [done, M26: three moments, tilt, compound assembly]
 mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume integrals]
-a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator]
+a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator; no scenario key yet, #47]
 an oriented box against a plane        [done, M30: penetrating corners, one centroid contact]
-box against box (SAT, edge-edge)       [done, M33: the clipped manifold resolved as one centroid contact, a bounce; the per-point iterative solver a stack needs is still deferred]
+box against box (SAT, edge-edge)       [done, M33: the clipped manifold resolved as one centroid contact, a bounce]
 box against a sphere                    [done, M34: the box's nearest point to the sphere centre, the last movable pair in 3D]
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
+immovable 3D bodies                     [candidate, #74]
+a per-point iterative contact solver    [candidate, #73: resting boxes and stacks]
 rendering              (terminal-first holds until then, ADR 0002)
 ```
 
@@ -209,11 +260,9 @@ M20 scoped the same way and got the sharper physics for it. Torque-free
 rotation needs no contacts, no collision geometry, no forces and no solver, so
 none of those had to be built ahead of their milestone; what it does need is
 the one thing 3D has that 2D does not. `RigidBody3D` therefore stores three
-principal moments rather than a 3x3 matrix. A general tensor is needed once
-bodies are built from composed shapes and the parallel-axis step moves inertia
-off the principal axes, which arrives with 3D mass properties and 3D contacts.
-Until then it would be three extra zeros and a speculative abstraction
-(rule 11).
+principal moments rather than a 3x3 matrix, and still does: M25 to M27 brought
+the general tensor as a construction step, diagonalized before it reaches a
+body (ADR 0007).
 
 Unnumbered, like Tracks 2 and 3, for the same reason: a milestone gets a number
 when it starts. These were once M19 to M21, and other work has since shipped
@@ -221,24 +270,27 @@ into the numbers below them.
 
 **3D is the destination, not a possibility left open.**
 `docs/decisions/0009-three-dimensions-are-the-destination.md` records what that
-means for the code today: which 2D decisions are deliberate specializations of
-their 3D forms and which would have to be replaced. In short, the scalar angle
-and scalar inertia in `malloy_rigid` are the 2D cases of a quaternion and an
+means for the code: which 2D decisions are deliberate specializations of their
+3D forms and which would have to be replaced. In short, the scalar angle and
+scalar inertia in `malloy_rigid` are the 2D cases of a quaternion and an
 inertia tensor, and the integrator, the fixed timestep, the validation and
-status model, the scenario dispatch and the impulse formulas carry over almost
-unchanged. `malloy_ascii` and the disc-only collision geometry do not.
+status model, the scenario dispatch and the impulse formulas carried over
+almost unchanged, as the amendments to ADR 0009 record. `malloy_ascii`
+and the 2D area properties do not carry over; the app draws a 3D world as an
+orthographic flattening onto the xy plane until rendering has its milestone.
 
-It is still gated. Nothing 3D is added before its milestone, and the 2D
-mechanics it rests on are finished first (`CLAUDE.md` rule 6). Raylib remains
-the likely first visualization choice because it gets pixels on screen quickly
-without turning this into a graphics project.
+It is still gated. Nothing 3D is added before its milestone, and the 2D types
+stay supported (`CLAUDE.md` rule 6). Raylib remains the likely first
+visualization choice because it gets pixels on screen quickly without turning
+this into a graphics project.
 
 ## Track 5: separate
 
 ```text
-M22 - quantum
+quantum (unnumbered)
 ```
 
 Quantum should start as a separate repo or isolated prototype. Only merge it as
 a module if it develops clean boundaries and does not pollute classical
-simulation types.
+simulation types. This line once read `M22 - quantum`; M22 shipped as a sphere
+bouncing on a 3D ground plane, which is why nothing here carries a number.

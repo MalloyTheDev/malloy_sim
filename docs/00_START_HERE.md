@@ -9,33 +9,29 @@ M1-M39 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all ten scenario types. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and all five of
-them now run in three dimensions as well as two. See `README.md` and
-`CHANGELOG.md`.
+them run in three dimensions as well as two. Thirty templates in `scenarios/`
+cover all ten types. See `README.md` and `CHANGELOG.md`.
 
 ## Where this is going
 
-MalloySim is intended to become a 3D simulator, and it is under way. M19
-shipped `Vec3` and a 3D gravity world; M20 shipped `Quat` and torque-free
+MalloySim is intended to become a 3D simulator, and it is well under way.
+M19 shipped `Vec3` and a 3D gravity world; M20 `Quat` and torque-free
 rigid-body rotation, the first piece of 3D with no 2D form at all (a body with
-three distinct principal moments tumbles under no torque, and in two dimensions
-it cannot); M21 applied a constant torque to that rotation, so a gyroscope
-precesses instead of toppling; M22 gave a body a collision radius and bounced
-it off a ground plane under gravity, the project's first 3D contact; M23 added
-friction, so a sliding sphere spins up and rolls; M24 made two spheres collide
-and exchange momentum; M25 computes a body's mass and inertia from its geometry;
-M26 does the same for boxes and assembles compound bodies from primitives; and
-M27 does it for an arbitrary closed triangle mesh; M28 pushes a body with a
-constant applied force, the translational half of a wrench; and M29 takes
-charged particles into three dimensions, where the magnetic field is a vector
-and a charge spirals along it; M30 gives a rigid body a box collider, so an
-oriented box rests and tumbles on the ground, the first non-sphere 3D collision;
-M31 takes spring networks into three dimensions, so a structure can deform in
-space; M32 takes colliding particles into three dimensions, the last of the
-five domains to gain a 3D form; and M33 collides two oriented boxes by the
-separating-axis test, the first non-sphere 3D body-vs-body contact; and M34
-collides a box with a sphere, the last movable pair, by the box's nearest point
-to the sphere centre. All five run in space as well as the plane and any two 3D
-primitives collide; what remains of the 3D arc is rendering, its own milestone.
+three distinct principal moments tumbles under no torque); M21 a constant
+torque, so a gyroscope precesses; M22 to M24 a sphere bouncing on a ground
+plane, rolling with friction, and colliding with another sphere; M25 to M27 a
+body's mass and inertia computed from its geometry, for spheres, boxes and any
+closed triangle mesh; M28 a constant applied force; M29, M31 and M32 the charge,
+spring and particle domains in three dimensions; and M30, M33 and M34 the
+oriented box, resting on a plane and colliding with boxes and spheres. Every
+domain now runs in space as well as the plane, and any two 3D primitives
+collide. M36 and M37 brought the box back to the plane: 2D box against box, and
+a 2D box on the ground.
+
+What remains of the 3D arc is listed in `docs/07_POST_M5_ROADMAP.md`: immovable
+3D bodies, a per-point contact solver (a box that lands anything but flat does
+not yet come to rest, [#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)),
+and rendering, each its own milestone.
 
 That destination is why some of the current code looks the way it does: the
 scalar angle and scalar inertia in `RigidBody2D` are 2D specializations of the
@@ -59,6 +55,9 @@ alternative to them. See
 12. `docs/10_CHANGELOG_TEMPLATE.md`
 13. `docs/decisions/` (ADRs 0001-0010)
 
+`CHANGELOG.md` is the record of what each milestone actually shipped, and the
+open GitHub issues are the record of known defects and milestone candidates.
+
 ## Build and test
 
 ```powershell
@@ -69,35 +68,33 @@ ctest --preset windows-msvc-debug
 
 All 14 test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
-completion.
+completion. CTest runs 19 tests in all: the executables plus five checks that
+run the app itself. Nothing runs them automatically; there is no CI
+([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
+
+To run one template:
+
+```powershell
+out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe scenarios/heat_conduction.scn
+```
 
 ## What's next
 
 M1-M39 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
-M14, the uniform gravity field for that domain, which became M15, and the
-halfplane ground of M16 and the Coulomb friction of M17, and M18 added
-electromagnetism beside it. M19 took the first step off the plane, with Vec3
-and a 3D gravity world, M20 added quaternions and torque-free 3D rotation, M21
-put a constant torque on it, M22 bounced a sphere off a ground plane, M23
-added friction, M24 collided two spheres, M25 computes mass and inertia from
-geometry, M26 adds box mass properties and `combine` for compound bodies, M27
-computes them for an arbitrary triangle mesh, M28 adds a constant applied
-force to go with M21's torque, M29 takes charged particles into three
-dimensions, M30 lands an oriented box on a ground plane, M31 takes spring
-networks into three dimensions, M32 takes colliding particles into three
-dimensions, M33 collides two oriented boxes by the separating-axis test,
-M34 collides a box with a sphere, M35 gives particle contacts Coulomb
-friction, M36 collides two oriented boxes in the plane, and M37 rests a 2D box
-on a ground plane. M38 then opened thermodynamics, reading a box of colliding
-particles as a gas: its temperature, the pressure on its walls, and its
-relaxation to Maxwell-Boltzmann. M39 gave its walls a temperature, so heat
-flows through the gas, using the project's first random numbers: seeded,
-fully specified and owned by the particle domain (ADR 0010).
-Five finished domains sit behind multi-domain dispatch, across ten
-scenario types.
-Work stays gated one milestone at a time; see
-`docs/07_POST_M5_ROADMAP.md`.
+M14, and every domain has its 3D form. M38 then opened thermodynamics, reading a
+box of colliding particles as a gas: its temperature, the pressure on its walls,
+and its relaxation to Maxwell-Boltzmann. M39 gave its walls a temperature, so
+heat flows through the gas, using the project's first random numbers: seeded,
+fully specified and owned by the particle domain (ADR 0010). Five finished
+domains sit behind multi-domain dispatch, across ten scenario types.
+
+Nothing further is scheduled. The candidates for the next milestone are open
+issues labelled `milestone candidate`, listed in
+`docs/07_POST_M5_ROADMAP.md`: a per-point contact solver, immovable 3D bodies,
+box against disc in 2D, a piston, accommodation coefficients, a temperature
+profile, a particle broadphase, gravity for springs, and a shared `# check`
+evaluator. Work stays gated one milestone at a time, started only when asked.
 
 The all-in-one goal is not a license to build ahead. Breadth is earned by
 finishing domains, not by scaffolding for them

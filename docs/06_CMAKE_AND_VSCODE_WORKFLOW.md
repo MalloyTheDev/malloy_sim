@@ -13,14 +13,32 @@ VS Code extensions:
 - CMake Tools
 - C/C++
 
+Optional, only for the fuzz targets: LLVM (`clang++` with libFuzzer and the
+sanitizers) and Ninja.
+
 ## CMake strategy
 
 Use CMake 3.21+ for the project itself. The shipped presets additionally
 require CMake 4.2+, because the `Visual Studio 18 2026` generator was added in
-4.2; on an older CMake, configure without a preset or add one naming a
-generator your version has, one root `CMakeLists.txt` through M5, `CMakePresets.json` from M1, out-of-source build prevention, `target_compile_features(... cxx_std_20)`, `CMAKE_EXPORT_COMPILE_COMMANDS ON`, `/W4 /WX` on MSVC, and explicit `/fp:precise` on MSVC.
+4.2; on an older CMake, configure without a preset or add a
+`CMakeUserPresets.json` naming a generator your version has.
 
-Avoid package managers, install/export rules, complex CMake functions, source globbing, nested CMake files before M5, and dependency fetching before M5.
+What the build uses, all in force at M39:
+
+- one root `CMakeLists.txt` (still the only one; no nested CMake files);
+- `CMakePresets.json`, with `windows-msvc-debug` and `windows-msvc-release`
+  configure, build and test presets;
+- out-of-source build prevention (an in-source configure is a fatal error);
+- `target_compile_features(... cxx_std_20)` on `malloy_project_options`;
+- `CMAKE_EXPORT_COMPILE_COMMANDS ON`;
+- on MSVC, `/W4 /WX /permissive- /fp:precise` on `malloy_project_warnings`;
+- on GCC and Clang, `-Wall -Wextra -Wpedantic -ffp-contract=off` (warnings
+  are not errors there; [#66](https://github.com/MalloyTheDev/malloy_sim/issues/66));
+- three options: `MALLOY_BUILD_APPS` and `MALLOY_BUILD_TESTS` (both ON) and
+  `MALLOY_BUILD_FUZZERS` (OFF; see Fuzzing below).
+
+Avoid package managers, install/export rules, complex CMake functions, source
+globbing, and dependency fetching.
 
 ## Build commands
 
@@ -29,6 +47,16 @@ cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
+
+The same three commands with `windows-msvc-release` give the optimized build.
+CTest runs 19 tests: the 14 test executables, plus five checks that run the
+terminal app itself (four inputs it must refuse, and one scenario path outside
+the ANSI code page that it must open). The app checks are registered after the
+test-executable count is taken, so they do not change it (`docs/05`).
+
+Nothing runs these commands automatically. There is no CI: the tests, the
+template checks and the fuzzers are run by hand, and `main` is unprotected
+([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
 
 ## MSVC hardening
 
@@ -58,8 +86,9 @@ Release pair loop is what the simulator spends its time on. Release build,
 - `_MSVC_STL_HARDENING=1` turns a standard-library precondition violation
   (`front()` of an empty vector, an index past the end) into a fail-fast.
   Debug builds already make the same checks through iterator debugging, in
-  every test run; the parser is fuzzed under ASan and UBSan and bounds its
-  input.
+  every test run; the parser bounds its input, and the fuzz targets below run
+  the parser and the app under ASan and UBSan when someone builds and runs
+  them.
 - `/sdl` would add only runtime checks: every warning it promotes (C4146,
   C4996 and the rest) is already an error under `/W4 /WX`.
 
@@ -96,6 +125,68 @@ output code page is not 65001 shows non-ASCII characters there garbled; the
 run itself is unaffected. The `malloy_app_opens_unicode_path` test runs the app
 on such a path.
 
+## Fuzzing
+
+The scenario file is the one untrusted input, so two libFuzzer targets in
+`fuzz/` exercise it (issues #27 and #30):
+
+- `malloy_parse_scenario_fuzzer` (`fuzz/parse_scenario_fuzzer.cpp`) parses each
+  input and requires either a clean parse with no negative step or report count,
+  or a non-empty error in printable ASCII.
+- `malloy_app_fuzzer` (`fuzz/app_fuzzer.cpp`) compiles
+  `apps/nbody_terminal/main.cpp` into itself, answers its one file read from the
+  input in memory, and runs the whole app: refusals, dispatch, validation,
+  stepping, diagnostics and ASCII frames. Each run is cut to its first steps
+  (1e4 pair tests, 32 reports) and a scenario with more than 64 entities is
+  skipped, so every input finishes in milliseconds. It requires a return of 0 or
+  1, a message on stderr for every 1, and only printable ASCII on stderr.
+
+How they are built (`CMakeLists.txt`, the `MALLOY_BUILD_FUZZERS` block):
+
+- The option is OFF by default and the MSVC presets never set it.
+- It needs `clang++`, the GNU-style driver. Configuring it with MSVC or
+  `clang-cl` stops with an error.
+- It instruments EVERY target, not only the two harnesses, because libFuzzer
+  steers by coverage counters compiled into the code and the sanitizers see
+  only code built with them: `-g -O1 -fno-omit-frame-pointer
+  -fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=undefined`
+  on `malloy_project_options`. Only the two fuzzers link libFuzzer itself
+  (`-fsanitize=fuzzer`). UBSan does not recover, so undefined behaviour stops
+  the run with a reproducer.
+- On Windows (clang++ targeting the MSVC ABI) every target uses the static
+  release CRT and the MSVC STL's ASan container annotations are off, which
+  libFuzzer's prebuilt runtime requires. The cost: ASan cannot see a read past
+  `size()` but inside the capacity.
+- The fuzzers are not registered with CTest, so `ctest` never runs them and the
+  test count is unchanged.
+
+The recipe, from the header of `fuzz/parse_scenario_fuzzer.cpp` (the first
+command is one line):
+
+```text
+cmake -S . -B out/fuzz -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DMALLOY_BUILD_FUZZERS=ON -DMALLOY_BUILD_TESTS=OFF -DMALLOY_BUILD_APPS=OFF
+cmake --build out/fuzz
+cmake -E make_directory out/fuzz/parse_corpus out/fuzz/app_corpus
+out/fuzz/malloy_parse_scenario_fuzzer out/fuzz/parse_corpus scenarios -max_total_time=60 -artifact_prefix=out/fuzz/
+out/fuzz/malloy_app_fuzzer out/fuzz/app_corpus scenarios -max_total_time=60 -timeout=10 -artifact_prefix=out/fuzz/
+```
+
+- The FIRST directory is the corpus libFuzzer writes into; the ones after it
+  only seed it. Never put `scenarios` first, or the fuzzer writes into the
+  shipped templates.
+- On Windows, configure and build from a shell with the LLVM `bin` folder and
+  Ninja on `PATH`, and before running a fuzzer also put ASan's runtime folder,
+  `<clang resource dir>\lib\windows`, on `PATH`.
+- A finding is written as `out/fuzz/crash-<hash>`. Replay it by passing its
+  path instead of the corpus directories, with `UBSAN_OPTIONS=print_stacktrace=1`
+  set to see where undefined behaviour happened.
+
+Nothing runs the fuzzers automatically, and a fuzzer binary left in `out/fuzz`
+from an earlier build does not cover parsing added since, so rebuild from the
+current tree before a run. The parser fuzzer checks that counts are
+non-negative, not the documented resource caps
+([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
+
 ## VS Code workflow
 
 1. Open the repository root.
@@ -104,14 +195,19 @@ on such a path.
 4. Configure.
 5. Build.
 6. Run CTest.
-7. Run the terminal target.
+7. Run the terminal target, `malloy_nbody_terminal`. With no argument it runs
+   the built-in scenarios; with one positional path it runs that scenario file
+   (there are no flags and no CLI parser).
 
 ## Build directory
 
-The preset uses:
+The presets use:
 
 ```text
-out/build/windows-msvc-debug
+out/build/windows-msvc-debug     (app: Debug/malloy_nbody_terminal.exe)
+out/build/windows-msvc-release   (app: Release/malloy_nbody_terminal.exe)
 ```
+
+The fuzz recipe above uses `out/fuzz`. All of `out/` is ignored by git.
 
 Do not commit personal `.vscode` configuration or `CMakeUserPresets.json`.

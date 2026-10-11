@@ -4,84 +4,141 @@
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
-> type, one settings type, one test executable, depending only on
-> `malloy_math` and `malloy_sim_core`. No domain depends on another and none
-> derives from a shared base (`docs/decisions/0006-multi-domain-dispatch.md`).
+> type per dimension, its own settings type, one test executable. A domain
+> depends on `malloy_math`, `malloy_sim_core` and `malloy_time`, plus a support
+> library such as `malloy_collide` where it needs geometry. No domain depends on
+> another and none derives from a shared base
+> (`docs/decisions/0006-multi-domain-dispatch.md`). `malloy_layering_tests`
+> enforces this from the build files and the sources (`docs/05`).
+
+The module graph at M39 (an arrow means "links"):
+
+```text
+malloy_nbody_terminal (app)
+  -> malloy_scenario, malloy_ascii, malloy_nbody, malloy_charges
+malloy_scenario
+  -> every domain, malloy_collide, malloy_sim_core, malloy_math
+malloy_particles, malloy_rigid
+  -> malloy_collide, malloy_sim_core, malloy_time, malloy_math
+malloy_nbody, malloy_springs, malloy_charges
+  -> malloy_sim_core, malloy_time, malloy_math
+malloy_collide, malloy_ascii, malloy_time, malloy_sim_core
+  -> malloy_math
+```
 
 ## `malloy_math`
 
-Responsible for `Real`, `Vec2`, scalar/vector helpers, approximate equality, and finite checks.
+Responsible for `Real`, `Vec2`, `Vec3` (M19), `Quat` (M20), `Mat3` with a
+symmetric eigensolver (`eigen_symmetric`), the conversions `to_quat` and
+`to_mat3`, `outer` and `trace` (M25 to M27), scalar/vector helpers, approximate
+equality, and finite and squarable checks (`is_squarable`, which rejects a
+vector whose square would overflow).
 
-Not responsible for mass, force, velocity semantics, acceleration semantics, time, gravity, collision, or rendering.
+Not responsible for mass, force, velocity semantics, acceleration semantics, time, gravity, collision, rendering, or random numbers (the one generator lives in `malloy_particles` until a second domain needs randomness; ADR 0010).
 
 ## `malloy_time`
 
 Responsible for fixed timestep representation, tick count, elapsed simulation time, and positive dt validation.
 
-Used by every world: `NBodyWorld` and `ParticleWorld` each hold a `FixedStep` for tick counting and elapsed time rather than reimplementing a counter per domain. `SimulationSettings` remains the public place `dt` is configured; `FixedStep` is the runtime counter built from it.
+Used by every world: all ten (`NBodyWorld`, `NBody3DWorld`, `ParticleWorld`, `ParticleWorld3D`, `RigidWorld`, `Rigid3DWorld`, `SpringWorld`, `SpringWorld3D`, `ChargeWorld`, `Charge3DWorld`) hold a `FixedStep` for tick counting and elapsed time rather than reimplementing a counter per domain. `SimulationSettings` remains the public place `dt` is configured; `FixedStep` is the runtime counter built from it.
 
 Not responsible for wall-clock time, frame pacing, sleeping, render interpolation, or physics formulas.
 
 ## `malloy_sim_core`
 
-Responsible for tiny shared simulation vocabulary: `SimulationSettings`, `StepResult`, and `StepStatus`.
+Responsible for tiny shared simulation vocabulary: `SimulationSettings`, `StepResult`, and `StepStatus`. It depends on `malloy_math` and nothing else, and `malloy_layering_tests` fails if that changes.
 
 Not responsible for polymorphic simulation interfaces, generic world base classes, entity systems, schedulers, event buses, service locators, plugin systems, scene graphs, or engine kernels.
 
 ## `malloy_nbody`
 
-Responsible for `Body2D`, `NBodySettings`, `NBodyWorld`, pairwise gravity, softening, semi-implicit Euler integration, deterministic update order, and N-body-specific validation.
+Responsible for `Body2D`, `NBodySettings`, `NBodyWorld`, pairwise gravity, softening, semi-implicit Euler integration, deterministic update order, N-body-specific validation, and the system diagnostics (energy, momentum, angular momentum). Since M19 it also owns `Body3D` and `NBody3DWorld`, the same physics in three dimensions with the same `NBodySettings`: the dimension is not a domain (ADR 0009).
 
 Not responsible for printing, rendering, app loop policy, config files, input, or GUI.
 
 ## `malloy_scenario`
 
-Responsible for parsing a scenario/config text file into a `Scenario` for whichever domain its `type` key names, and for reporting syntax errors with a line number. It knows every domain's key set, which is the price of a plain dispatch switch and is cheaper than the abstraction it replaces. Since M38 one key pair, `lattice`/`lattice3`, turns a single line into many particles: it is capped against the entity limit before anything is allocated, and expanded only after the whole file is read, so the result does not depend on whether `bounds` comes first.
+Responsible for parsing a scenario/config text file into a `Scenario` for whichever domain its `type` key names (ten types), and for reporting syntax errors with a line number. It knows every domain's key set, which is the price of a plain dispatch switch and is cheaper than the abstraction it replaces. Since M38 one key pair, `lattice`/`lattice3`, turns a single line into many particles: it is capped against the entity limit before anything is allocated, and expanded only after the whole file is read, so the result does not depend on whether `bounds` comes first. Since M39 it also reads `wall_temperature` and `seed` for both particle types.
 
-Not responsible for semantic validation (that stays in each domain's own `World::validate()`), physics, printing, rendering, or CLI argument handling.
+It also bounds what a file may ask for, because the scenario file is the one untrusted input: steps, entities, ground planes, total work (steps and reports times the pair tests a step does), reports, and line length are all capped, each refusal naming the line where it can (the limits are listed in `scenario.hpp`). Its error messages are printable ASCII, with any token it repeats escaped (issue #28); a UTF-8 byte-order mark is skipped and UTF-16 is refused (issue #32). `entity_count` tells the app whether a parsed file defines anything to simulate. It never throws.
+
+Not responsible for semantic validation (that stays in each domain's own `World::validate()`), physics, printing, rendering, or CLI argument handling. Lines beginning `# check` are comments to the parser; only the scenario tests evaluate them (`docs/05`).
 
 ## `malloy_ascii`
 
 Responsible for turning 2D points into a character grid: viewport fitting (`fit_viewport`) and framed grid rendering (`render`).
 
-Not responsible for physics, body types, simulation state, terminal control sequences, color, animation, or any graphics API.
+Not responsible for physics, body types, simulation state, terminal control sequences, color, animation, or any graphics API. It never sees a third dimension: the app flattens 3D positions onto the xy plane before calling it.
 
 ## `malloy_collide`
 
-Responsible for 2D collision primitives (`Circle`, `Aabb`, and since M36 the oriented `Obb2`, whose separating-axis contact with another `Obb2` is the 2D sibling of the `Box3` pair, with `contacts(Obb2, Obb2)` giving the clipped manifold of up to two points), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid. Since M22 it also carries the 3D primitives `Sphere` and `Plane3`, since M30 the oriented `Box3`, whose contact with a plane is the manifold of its penetrating corners (a list, not a single point), since M32 the axis-aligned `Aabb3` (the walls a 3D particle box confines to), since M33 the separating-axis contact between two oriented boxes (`overlaps`/`contact(Box3, Box3)`), plus `contacts(Box3, Box3)`, the clipped contact manifold (the incident face clipped to the reference face, up to eight points; a single point for edge against edge), and since M34 the box-against-sphere contact (`contact(Box3, Sphere)` and its reverse), by the box's nearest point to the sphere centre.
+Responsible for 2D collision primitives (`Circle`, `Aabb`, since M16 the `Halfplane`, and since M36 the oriented `Obb2`, whose separating-axis contact with another `Obb2` is the 2D sibling of the `Box3` pair, with `contacts(Obb2, Obb2)` giving the clipped manifold of up to two points and, since M37, `contacts(Obb2, Halfplane)` the corners of a box inside a ground plane), overlap tests, contact data (normal, penetration depth, contact point) with a documented deterministic answer wherever the contact normal is geometrically undefined, and the area properties of a shape: area, centroid, and polar second moment of area about the centroid. Since M22 it also carries the 3D primitives `Sphere` and `Plane3`, since M30 the oriented `Box3`, whose contact with a plane is the manifold of its penetrating corners (a list, not a single point), since M32 the axis-aligned `Aabb3` (the walls a 3D particle box confines to), since M33 the separating-axis contact between two oriented boxes (`overlaps`/`contact(Box3, Box3)`), plus `contacts(Box3, Box3)`, the clipped contact manifold (the incident face clipped to the reference face, up to eight points; a single point for edge against edge), and since M34 the box-against-sphere contact (`contact(Box3, Sphere)` and its reverse), by the box's nearest point to the sphere centre. There is no box-against-circle contact in 2D ([#48](https://github.com/MalloyTheDev/malloy_sim/issues/48)).
 
 Not responsible for density, mass, inertia, bodies, velocity, contact response, integration, broadphase acceleration, or scenario loading. The area properties stop at geometry: turning them into mass properties belongs to whichever domain owns bodies (ADR 0007). Like `malloy_ascii` it works on shapes, not on simulation types, so it never sees a `Body2D`.
 
 ## `malloy_particles`
 
-Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form. Since M38 it also reads a box of particles as a gas (`thermo.hpp`): each world keeps a per-wall tally of the normal impulse its walls have delivered (`wall_impulse()`, bookkeeping that changes no trajectory and is rolled back with a rolled-back step), and pure functions turn the state and that tally into a temperature, a wall pressure and two relaxation statistics, plus `lattice_gas`/`lattice_gas3d`, a deterministic grid start with no random numbers. Since M39 its walls can be THERMAL (`wall_temperature` in the settings): a thermal wall re-emits a particle from its temperature's distribution, drawing from the world's own seeded `SplitMix64` (`splitmix64.hpp`, ADR 0010), and a per-wall heat tally (`wall_heat()`) records what each wall gave the gas; the generator is rolled back with a rolled-back step, and a box without a thermal wall never draws.
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity (M12, ballistics), and its own validation and diagnostics including potential and total energy and angular momentum. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form.
 
-Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, any random numbers but its own seeded generator (no `<random>` engines or distributions, no global or time-seeded generator; ADR 0010), broadphase acceleration, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
+Since M38 it also reads a box of particles as a gas (`thermo.hpp`): each world keeps a per-wall tally of the normal impulse its walls have delivered (`wall_impulse()`, bookkeeping that changes no trajectory and is rolled back with a rolled-back step), and pure functions turn the state and that tally into a temperature, a wall pressure and two relaxation statistics, plus `lattice_gas`/`lattice_gas3d`, a deterministic grid start with no random numbers.
+
+Since M39 its walls can be THERMAL (`wall_temperature` in the settings): a thermal wall re-emits a particle from its temperature's distribution (`emission_normal_speed`, `emission_tangent`), drawing from the world's own seeded `SplitMix64` (`splitmix64.hpp`, ADR 0010), and a per-wall heat tally (`wall_heat()`) records the kinetic energy each thermal wall gave the gas; a specular wall's entry is 0 by definition. The generator is rolled back with a rolled-back step, and a box without a thermal wall never draws.
+
+Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, any random numbers but its own seeded generator (no `<random>` engines or distributions, no global or time-seeded generator; ADR 0010), broadphase acceleration (every pair is visited; a uniform grid is a milestone candidate, [#79](https://github.com/MalloyTheDev/malloy_sim/issues/79)), or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 
 ## `malloy_rigid`
 
 Responsible for `RigidBody2D` (pose plus mass distribution), mass-property construction from a shape and a density, the parallel-axis theorem, world/local conversions, pose integration, impulse application at a point, and rigid-body diagnostics.
 
-Also responsible for rigid contact response since M14: disc against disc contacts (and, since M36, box against box, when a `RigidBody2D` carries a `half_extents` box collider and collides through `collide::Obb2`, and since M37 box against a `Halfplane` ground, the corner manifold reduced to one centroid contact as M30 does in 3D; box against disc is deferred), impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both.
+Also responsible for rigid contact response since M14: disc against disc contacts (and, since M36, box against box, when a `RigidBody2D` carries a `half_extents` box collider and collides through `collide::Obb2`, and since M37 box against a `Halfplane` ground, the corner manifold reduced to one centroid contact as M30 does in 3D), impulses that generate torque because they act away from the centre of mass, and immovable bodies represented as infinite mass and inertia. Infinity is per quantity: infinite mass alone is a body that can spin but not translate, infinite inertia alone one that can translate but not spin, and `is_static()` means both. Box against disc is not built: a scenario that mixes them runs, and the pair passes through without a contact ([#48](https://github.com/MalloyTheDev/malloy_sim/issues/48)).
 
 Since M16 a world also owns immovable ground planes, carried in `RigidSettings`. They are `collide::Halfplane` values, so the geometry stays in `malloy_collide` and `malloy_rigid` only resolves against it.
 
-Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to the friction coefficient times the normal impulse. It is a contact impulse rather than a persistent force, so it needs no force accumulator and rule 5 is untouched. `malloy_particles` gained the same clamp in M35, on its particle and wall contacts, with no lever arm since a particle has no orientation.
+Since M17 contacts also carry Coulomb friction: a tangential impulse clamped to the friction coefficient times the normal impulse. It is a contact impulse rather than a persistent force, so it needs no force accumulator and rule 5 is untouched. `malloy_particles` gained the same clamp in M35, on its particle and wall contacts, with no lever arm since a particle has no orientation. Static friction does not truly hold: a body inside the friction cone creeps down a slope ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44), `docs/04`).
 
 Since M15 it also owns a uniform gravity field, carried in `RigidSettings` and applied as an acceleration before the position update. Static bodies are skipped, and gravitational potential energy is reported alongside kinetic.
 
-Not responsible for shape geometry (that is `malloy_collide`, which since M22 also has `Sphere` and `Plane3`), persistent forces, force or torque accumulators, an iterative or per-point contact solver, or scenario loading. In `RigidBody2D` the inertia is a scalar and the orientation is a scalar angle; those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+Not responsible for shape geometry (that is `malloy_collide`), persistent forces, force or torque accumulators, an iterative or per-point contact solver, or scenario loading. In `RigidBody2D` the inertia is a scalar and the orientation is a scalar angle; those are the 2D CASES of an inertia tensor and a quaternion, not alternatives to them (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
 
-Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: rotation in three dimensions, with a quaternion orientation and three principal moments of inertia. It lives here rather than in a library of its own because rigid-body dynamics is one domain and the dimension is not a domain, the same reasoning M19 used for 3D gravity. M20 was torque-free; M21 added a constant world-frame torque as a setting (the M15 pattern, applied as Euler forcing rather than through a force/torque accumulator), which is what makes a gyroscope precess; M22 added gravity (an acceleration) and restitution contacts against immovable ground planes, resolved with a normal impulse; M23 added Coulomb friction, a tangential impulse clamped to the normal one, which DOES have a lever arm and so spins a sliding sphere up until it rolls without slipping (at 5/7 of its sliding speed). M24 added sphere-against-sphere collisions: two movable bodies exchanging momentum through the SAME impulse core the ground uses, with the plane expressed as a zero-inverse-mass participant so the formula is written once (ADR 0008). M25 added 3D mass properties: `mass_properties_3d` computes a compound body's mass, centre of mass and principal moments from solid spheres and density, via the parallel-axis theorem and the diagonalization of the resulting inertia tensor (`math::Mat3` and a symmetric eigensolver, new in `malloy_math`). It is a construction layer, the 3D sibling of the 2D `mass_properties`, not a domain: no world, no template, the same standing M9's collision primitives had. The inertia is still a diagonal rather than a general 3x3 tensor. M26 added `SolidBox` as a second mass primitive (three distinct moments and a real orientation, so a single tilted box already has a non-diagonal lab-frame tensor) and `combine`, which assembles a compound body from mass-property sets of any kind by reconstructing each tensor (`math::to_mat3`, the inverse of M25's `to_quat`), shifting it by parallel-axis and diagonalizing the sum. M27 added `SolidMesh`, the general primitive: the mass properties of a solid bounded by a closed triangle mesh, computed as signed-tetrahedron volume integrals (the divergence theorem, `math::trace` turning the covariance into an inertia tensor), so an axis-aligned box mesh reproduces the M26 box exactly and any closed shape now has mass properties. M28 added a constant applied FORCE to `Rigid3DSettings`, the translational half of a wrench whose rotational half is M21's torque: it enters as the acceleration F/m before the position update (so it scales with mass, unlike gravity) and acts through the centre of mass (so it makes no torque), and like the torque it is a single constant setting applied as forcing, not a force accumulator (rule 5). M30 gave `RigidBody3D` a box collider (`half_extents`, zero meaning the sphere `radius` is used instead) and resolves it against a ground plane as the manifold of its penetrating corners reduced to one centroid contact, so an oriented box rests and tumbles without a spurious torque on a symmetric landing. M33 added box against box, resolved through the same impulse core (ADR 0008) as one contact at the centroid of the clipped manifold (since the review pass after M37; before it, a single face-corner contact that invented torque on head-on hits): a bounce, not a stack, so the full contact manifold and an iterative stacking solver stay deferred (rule 12). M34 added box against sphere through the same core (the box's nearest point to the sphere centre), so every 3D movable pair now collides. `malloy_rigid` gained a link on `malloy_collide` for the sphere, plane and box primitives, the same as the 2D path.
+### The 3D rigid world
+
+Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: rotation in three dimensions, with a quaternion orientation and three principal moments of inertia. It lives here rather than in a library of its own because rigid-body dynamics is one domain and the dimension is not a domain, the same reasoning M19 used for 3D gravity. `malloy_rigid` links `malloy_collide` for the sphere, plane and box primitives, the same as the 2D path. Milestone by milestone:
+
+- **M20**: torque-free rotation (Euler's equations, so a body with three distinct moments tumbles).
+- **M21**: a constant world-frame TORQUE as a setting (the M15 pattern, applied as Euler forcing rather than through a force/torque accumulator), which makes a gyroscope precess.
+- **M22**: gravity (an acceleration) and restitution contacts against immovable ground planes, resolved with a normal impulse.
+- **M23**: Coulomb friction, a tangential impulse clamped to the normal one, which DOES have a lever arm and so spins a sliding sphere up until it rolls without slipping (at 5/7 of its sliding speed).
+- **M24**: sphere-against-sphere collisions, two movable bodies exchanging momentum through the SAME impulse core the ground uses, with the plane expressed as a zero-inverse-mass participant so the formula is written once (ADR 0008).
+- **M25**: 3D mass properties. `mass_properties_3d` computes a compound body's mass, centre of mass and principal moments from solid spheres and density, via the parallel-axis theorem and the diagonalization of the resulting inertia tensor. It is a construction layer, the 3D sibling of the 2D `mass_properties`, not a domain: no world, no template.
+- **M26**: `SolidBox` as a second mass primitive (three distinct moments and a real orientation, so a single tilted box already has a non-diagonal lab-frame tensor) and `combine`, which assembles a compound body from mass-property sets of any kind by reconstructing each tensor (`math::to_mat3`), shifting it by parallel axis and diagonalizing the sum. `box_inertia` gives a box's moments in its own axis order (issue #21).
+- **M27**: `SolidMesh`, the general primitive: the mass properties of a solid bounded by a closed, consistently wound triangle mesh (checked exactly, issue #34), computed as signed-tetrahedron volume integrals, so an axis-aligned box mesh reproduces the M26 box exactly. Its precision falls away for a mesh far from the origin ([#45](https://github.com/MalloyTheDev/malloy_sim/issues/45)).
+- **M28**: a constant applied FORCE in `Rigid3DSettings`, the translational half of a wrench whose rotational half is M21's torque. It enters as the acceleration F/m before the position update and acts through the centre of mass, so it makes no torque; like the torque it is a single constant setting, not a force accumulator (rule 5). A scenario file cannot set it yet: there is no `force` key ([#47](https://github.com/MalloyTheDev/malloy_sim/issues/47)).
+- **M30**: a box collider (`half_extents`, zero meaning the sphere `radius` is used instead), resolved against a ground plane as the manifold of its penetrating corners reduced to one centroid contact, so a flat, symmetric landing makes no spurious torque.
+- **M33**: box against box, through the same impulse core (ADR 0008), as one contact at the centroid of the clipped manifold (since the review pass after M37; before it, a single face-corner contact that invented torque on head-on hits): a bounce, not a stack.
+- **M34**: box against sphere through the same core (the box's nearest point to the sphere centre), so every 3D movable pair now collides.
+
+`RigidBody3D` still stores three principal moments and an orientation, never a 3x3 tensor: M25 to M27 diagonalize the tensor at construction (ADR 0007). Every `RigidBody3D` is movable; the only fixed 3D geometry is a ground plane ([#74](https://github.com/MalloyTheDev/malloy_sim/issues/74)). The box manifolds exist, but each is reduced to one centroid contact and resolved in a single pass, so a box that lands anything but flat does not come to rest and stacking is not possible ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)); a per-point iterative solver is its own milestone ([#73](https://github.com/MalloyTheDev/malloy_sim/issues/73), rule 12).
 
 ## `malloy_springs`
 
-Responsible for `Spring`, `SpringNetwork`, `SpringBody2D`, the pure `accumulate_spring_forces` kernel, and `SpringWorld`, which composes that kernel with the minimal translational integration needed to make the domain runnable. Since M31 it also has the 3D siblings `SpringBody3D` and `SpringWorld3D` (and a `Vec3` overload of the kernel); `Spring` and `SpringNetwork` are dimension-agnostic (ids and scalars) and are shared unchanged, since the dimension is not a domain (ADR 0009).
+Responsible for `Spring`, `SpringNetwork`, `SpringBody2D`, the pure `accumulate_spring_forces` kernel, and `SpringWorld`, which composes that kernel with the minimal translational integration needed to make the domain runnable, including a per-spring timestep stability check in `validate()`. Since M31 it also has the 3D siblings `SpringBody3D` and `SpringWorld3D` (and a `Vec3` overload of the kernel); `Spring` and `SpringNetwork` are dimension-agnostic (ids and scalars) and are shared unchanged, since the dimension is not a domain (ADR 0009).
 
-Not responsible for rigid-body attachment points or torque, collision, gravity, or a generic engine-wide force-provider API. `accumulate_spring_forces` neither integrates nor mutates a body, so a later force producer can reuse the pipeline (ADR 0008).
+Not responsible for rigid-body attachment points or torque, collision, gravity (a milestone candidate, [#78](https://github.com/MalloyTheDev/malloy_sim/issues/78)), or a generic engine-wide force-provider API. `accumulate_spring_forces` neither integrates nor mutates a body, so a later force producer can reuse the pipeline (ADR 0008).
+
+## `malloy_charges`
+
+Responsible for `ChargedParticle2D`, `ChargeSettings` and `ChargeWorld` (M18): charged particles under the pairwise Coulomb interaction (signed charges, with the same squared softening as gravity), a uniform electric field, and a uniform magnetic field, out of plane and so a scalar in 2D. Since M29 it also has `ChargedParticle3D`, `Charge3DSettings` and `Charge3DWorld`, where the magnetic field is a vector and a charge spirals along it. It owns its validation and diagnostics: momentum, kinetic energy, and the Coulomb and field potential energy (a magnetic field does no work, so it has none).
+
+The step is an electric kick, then an exact rotation of each velocity by the magnetic field, then the move (`docs/04`). The rotation preserves speed exactly, but the kick-then-rotate order drifts and gains energy in crossed electric and magnetic fields ([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)).
+
+Not responsible for collisions, induced or time-varying fields, radiation, or scenario loading. Like every domain it knows no other domain exists (ADR 0006).
 
 ## `malloy_nbody_terminal`
 
-Responsible for hardcoded demo setup, reading a single positional scenario path from argv and choosing between a file and the built-in scenarios, calling library APIs, fixed number of steps, formatted terminal output, view framing policy (which viewport each frame shows), and returning nonzero on validation or step failure.
+Responsible for hardcoded demo setup (the built-in scenarios it runs with no argument), reading a single positional scenario path from argv, refusing a file that fails to parse or defines nothing to simulate, dispatching to one concrete runner per scenario type with a plain switch, calling library APIs, fixed number of steps, formatted terminal output (one diagnostics line per report, with the seed in the run header when a wall is thermal), view framing policy (which viewport each frame shows, and the orthographic flattening of 3D positions onto the xy plane), and returning nonzero on a parse, validation or step failure.
 
-Not responsible for reusable physics logic.
+Not responsible for reusable physics logic, flags or a CLI parser, or evaluating `# check` lines ([#64](https://github.com/MalloyTheDev/malloy_sim/issues/64)).
+
+## Fuzz targets
+
+`fuzz/` holds two libFuzzer harnesses, `malloy_parse_scenario_fuzzer` and `malloy_app_fuzzer`. They are not modules: they are built only with `MALLOY_BUILD_FUZZERS=ON` and clang, link the scenario loader (and, for the app fuzzer, the app's own `main.cpp` and `malloy_ascii`), and add nothing to any library (`docs/06`).

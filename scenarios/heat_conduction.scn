@@ -10,8 +10,9 @@
 #
 # The heat tallies. Each wall's `heat_*` is the kinetic energy it has given the
 # gas: positive at the hot wall, negative at the cold one, and exactly 0 at a
-# specular wall, which exchanges none. With restitution 1 the gas's kinetic
-# energy changes by exactly their sum.
+# specular wall, whose entry records only thermal re-emission (at restitution
+# 1 it exchanges no energy either). With restitution 1, no friction and no
+# gravity, as here, the gas's kinetic energy changes by exactly their sum.
 #
 # How much. There is no exact formula in this collisional regime, so the centre
 # comes from a model: Fourier conduction with the Enskog conductivity of hard

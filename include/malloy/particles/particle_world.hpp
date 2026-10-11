@@ -36,9 +36,11 @@ struct WallImpulse2D
 // The total heat each wall has delivered to the gas since the run began (M39):
 // at every bounce off a THERMAL wall, the particle's kinetic energy after the
 // re-emission minus its kinetic energy before. Positive into the gas, so a hot
-// wall's entry grows and a cold wall's falls. A specular wall exchanges no
-// heat and its entry stays exactly 0. With restitution 1 and no gravity the
-// gas's kinetic energy changes by exactly the sum of these, to rounding. Like
+// wall's entry grows and a cold wall's falls. A specular wall's entry stays
+// exactly 0 by definition: the tally records only thermal re-emission, so the
+// energy a specular wall absorbs at restitution below 1 does not appear here.
+// With restitution 1, no friction and no gravity the gas's kinetic energy
+// changes by exactly the sum of these, to rounding. Like
 // the impulse tally it is a running sum and is never reset, so a very long run
 // loses precision in it before it could overflow.
 struct WallHeat2D

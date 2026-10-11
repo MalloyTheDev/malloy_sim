@@ -16,11 +16,11 @@
 #include <utility>
 #include <vector>
 
-// M8 terminal demo: runs an N-body scenario and reports the conserved system
-// diagnostics (separation, total energy, total angular momentum) together with
-// an ASCII view of the body positions. The scenario is either loaded from a
-// file given as the single argument, or one of the built-in scenarios when no
-// argument is given. The app stays dumb -- it owns no physics, no rendering
+// The terminal app (M5, M8): runs a scenario of any of the ten `type`s and
+// reports that domain's diagnostics together with an ASCII view of the body
+// positions (a 3D run is drawn as its projection onto the xy plane). The
+// scenario is loaded from a file given as the single argument, or, with no
+// argument, the built-in N-body scenarios run. The app stays dumb -- it owns no physics, no rendering
 // math, and has no CLI parser (docs/03, rules 14-15).
 
 using malloy::ascii::fit_viewport;
@@ -198,8 +198,9 @@ void print_pressure(const std::optional<malloy::math::Real>& pressure)
 }
 
 // One wall's heat column (M39): the heat a THERMAL wall has delivered to the
-// gas, labelled with the wall. A specular wall exchanges none and prints
-// nothing, so a box without a thermal wall prints exactly what it did before.
+// gas, labelled with the wall. A specular wall's heat is 0 by definition and
+// prints nothing, so a box without a thermal wall prints exactly what it did
+// before.
 void print_heat(const char* wall, malloy::math::Real temperature, malloy::math::Real heat)
 {
     if (temperature > malloy::math::Real{0})

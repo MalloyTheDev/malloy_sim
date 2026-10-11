@@ -8,50 +8,44 @@ immediately. It is terminal-first, and it is built as many concrete domain
 simulations behind a thin shared shell rather than as one generic engine
 (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-It is not a Unity, Godot, Unreal, editor, rendering, plugin, or scripting
-project, and it is not trying to become one.
+It is not a game engine, a Unity, Godot or Unreal replacement, a render-first
+project, an editor, or a plugin or scripting framework, and it is not trying to
+become one.
 
 **It is intended to become a 3D simulator, and it has started.** M19 added
 `Vec3` and gravity in three dimensions; M20 added quaternions and torque-free
 rigid-body rotation, the part of 3D that has no 2D form at all; M21 put a
 constant torque on that rotation, so a gyroscope precesses; M22 gave a body a
 collision radius and bounced it off a ground plane, the project's first 3D
-contact; M23 added friction, so a sliding sphere rolls; M24 made two spheres collide,
-conserving momentum; M25 computes a body's mass and inertia from its geometry,
-M26 does the same for boxes and assembles compound bodies from primitives, and
-M27 does it for an arbitrary triangle mesh; M28 pushes a body with a constant
-applied force, the translational half of a wrench to go with M21's torque; and
-M29 takes charged particles into three dimensions, where the magnetic field
-becomes a vector and a charge spirals along it; and M30 gives a rigid body a box
-collider, so an oriented box rests and tumbles on the ground, the first
-non-sphere 3D collision; M31 takes spring networks into three dimensions, so a
-structure can deform in space; and M32 takes colliding particles into three
-dimensions, the last of the five domains to gain a 3D form; M33 collides two
-oriented boxes by the separating-axis test, the first non-sphere 3D body-vs-body
-contact; and M34 collides a box with a sphere, the last movable pair. All five
-domains now run in space as well as the plane, and any two 3D primitives
-collide; what is left of the 3D arc is rendering. 3D is the destination rather than a
-possibility left open, and each remaining piece is its own milestone: see
-`docs/decisions/0009-three-dimensions-are-the-destination.md`.
+contact; M23 added friction, so a sliding sphere rolls; M24 made two spheres
+collide, conserving momentum; M25 computes a body's mass and inertia from its
+geometry, M26 does the same for boxes and assembles compound bodies from
+primitives, and M27 does it for an arbitrary closed triangle mesh; M28 pushes a
+body with a constant applied force, the translational half of a wrench to go
+with M21's torque; M29 takes charged particles into three dimensions, where the
+magnetic field becomes a vector and a charge spirals along it; M30 gives a rigid
+body a box collider, so an oriented box rests and tumbles on the ground; M31
+takes spring networks into three dimensions, so a structure can deform in
+space; M32 takes colliding particles into three dimensions, the last of the five
+domains to gain a 3D form; M33 collides two oriented boxes by the
+separating-axis test; and M34 collides a box with a sphere, the last movable
+pair. All five domains now run in space as well as the plane, and any two 3D
+primitives collide; what is left of the 3D arc is rendering. 3D is the
+destination rather than a possibility left open, and each remaining piece is its
+own milestone: see `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
-Its first domain, a deterministic terminal 2D N-body gravity simulation, is
-complete and shipping, along with colliding particles, ballistics, 2D rigid
-bodies, spring networks, rigid-body contact response and gravity for rigid
-bodies, flat ground, Coulomb friction and charged particles in electric and
-magnetic fields, gravity in three dimensions, 3D rigid-body rotation both free
-and under an applied torque, a sphere bouncing on a 3D ground plane, friction
-that makes a sliding sphere roll, sphere-against-sphere collisions, mass
-properties computed from 3D geometry, box mass properties with compound
-assembly, mass properties of an arbitrary triangle mesh, a constant applied
-force on a 3D body, charged particles in three dimensions with helical
-motion, an oriented box resting and tumbling on a ground plane, spring
-networks in three dimensions, colliding particles in three dimensions,
-box-against-box collision, box-against-sphere collision, Coulomb friction
-for particle contacts, box-against-box collision in two dimensions, a 2D box
-resting on a ground plane, the kinetic theory of a hard-disk gas (its
-temperature, wall pressure and relaxation to Maxwell-Boltzmann), and thermal
-walls that conduct heat through it, drawing from a seeded generator
-(milestones M1-M39).
+Five physics domains are complete and shipping, each in two dimensions and in
+three: gravity (N-body), colliding particles, rigid bodies, spring networks, and
+charged particles in electric and magnetic fields. Along the way came
+ballistics; rigid-body contacts with flat ground and between bodies (every
+sphere and box pair in 3D, disc against disc and box against box in 2D); Coulomb
+friction for rigid bodies and for particles; a constant applied torque on a 3D
+body and, through the library, a constant applied force; mass properties
+computed from geometry (spheres, boxes, compound bodies and arbitrary closed
+triangle meshes); and the start of thermodynamics: the kinetic theory of a
+hard-disk gas (its temperature, wall pressure and relaxation to
+Maxwell-Boltzmann) and thermal walls that conduct heat through it, drawing from
+a seeded generator (milestones M1-M39).
 
 ## Locked baseline
 
@@ -63,51 +57,53 @@ walls that conduct heat through it, drawing from a seeded generator
 - Package manager: none until a milestone needs one
 - Graphics: none until the rendering milestone
 - Simulation timestep: fixed timestep only
-- Numeric type: `double`
-- Domain model: one concrete world per domain, no engine kernel
+- Numeric type: `double`, and no fast-math
+- Determinism: the same binary, platform, initial state, fixed timestep, update
+  order and seed repeat a run exactly; there is no cross-platform bitwise claim
+- Domain model: one concrete world per domain and dimension, no engine kernel
 
 ## Status
 
-The locked **M1-M5 roadmap is complete**, plus the first post-M5 milestones
-(**M6: N-body diagnostics**, **M7: scenario loading**, **M8: ASCII debug view**,
-**M9: collision primitives**, **M10: colliding particles**, **M11: 2D rigid
-bodies**, **M12: ballistics**, **M13: spring networks**, **M14: rigid contact
-response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
-**M17: friction**, **M18: charged particles**, **M19: 3D gravity**,
-**M20: 3D rotation**, **M21: 3D torque**, **M22: 3D contact**,
-**M23: 3D friction**, **M24: 3D sphere pairs**, **M25: 3D mass properties**,
-**M26: box mass properties**, **M27: mesh mass properties**,
-**M28: applied force**, **M29: 3D charged particles**,
-**M30: box on a plane**, **M31: 3D springs**, **M32: 3D particles**).
-The project builds clean under
-MSVC (`/W4 /WX /permissive-`), and all 14 test executables pass via CTest. The
-terminal app runs N-body scenarios -- built-in, or loaded from a text file --
-reporting conserved system diagnostics alongside an ASCII view of the bodies.
+All milestones M1-M39 are complete. After the locked M1-M5 roadmap came N-body
+diagnostics, scenario loading and the ASCII view (M6-M8); the classical
+mechanics track (M9-M37), which took in charged particles (M18), a 3D form for
+every domain and collisions between any two 3D primitives (M19-M34), particle
+friction (M35) and 2D boxes (M36-M37); and the first two milestones of
+thermodynamics (M38-M39). The table under "Milestones complete" lists each one.
+
+The project builds clean under MSVC (`/W4 /WX /permissive-`, with Control Flow
+Guard and CET shadow-stack compatibility on every target), and all
+14 test executables pass via CTest, along with five checks that run the terminal
+app itself (19 CTest tests in all). The terminal app runs any of the ten scenario
+types from a text file, or two built-in N-body scenarios when given no argument,
+and reports each domain's diagnostics alongside an ASCII view of the bodies.
 
 | Module | Type | Provides |
 |---|---|---|
 | `malloy_math` | INTERFACE | `Real = double`, `Vec2`, `Vec3`, `Quat`, `Mat3` + symmetric eigensolver, vector/scalar helpers |
 | `malloy_time` | INTERFACE | `FixedStep` (fixed timestep, tick count, elapsed time) |
 | `malloy_sim_core` | STATIC | `SimulationSettings`, `StepStatus`, `StepResult` |
-| `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics |
-| `malloy_scenario` | STATIC | parse a scenario/config text file into bodies + settings |
+| `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics; `Body3D` and `NBody3DWorld` |
+| `malloy_scenario` | STATIC | parse a scenario text file of any of the ten `type`s into settings and initial state, within caps on steps, entities, ground planes, total work and reports |
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
-| `malloy_collide` | STATIC | `Circle`, `Aabb`, `Halfplane`, `Sphere`, `Plane3`, overlap tests, contact normal/depth/point (sphere-sphere and sphere-plane in 3D) |
-| `malloy_particles` | STATIC | `Particle2D`, `ParticleWorld`, contact response, walls, gravity |
-| `malloy_rigid` | STATIC | `RigidBody2D`, mass properties, pose integration, impulses, contact response, uniform gravity, friction; `RigidBody3D` and `Rigid3DWorld`, rotation free/torqued, sphere-plane and sphere-sphere contacts, and 3D mass properties from geometry |
-| `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, force accumulation, `SpringWorld` |
-| `malloy_charges` | STATIC | `ChargedParticle2D`, signed Coulomb, uniform E and B fields |
-| `malloy_nbody_terminal` | EXECUTABLE | the terminal N-body demo |
+| `malloy_collide` | STATIC | 2D `Circle`, `Aabb`, `Obb2`, `Halfplane`; 3D `Sphere`, `Plane3`, `Aabb3`, `Box3`; overlap tests and contacts (normal, depth, point), separating-axis tests for box pairs, and clipped contact manifolds for a box on a plane or on another box |
+| `malloy_particles` | STATIC | `Particle2D`/`ParticleWorld` and `Particle3D`/`ParticleWorld3D`: contacts with restitution and Coulomb friction, box walls, gravity, per-wall impulse and heat tallies, thermal walls drawing from a seeded `SplitMix64`; gas statistics (`temperature`, `pressure`, `speed_ratio`, `slow_fraction`) and the `lattice_gas` start in `thermo.hpp` |
+| `malloy_rigid` | STATIC | `RigidBody2D`/`RigidWorld`: mass properties, pose integration, impulses, disc-disc and box-box contacts, disc and box contacts with ground halfplanes, uniform gravity, friction; `RigidBody3D`/`Rigid3DWorld`: rotation free or under a constant torque, a constant applied force, sphere and box contacts with ground planes and with each other, and 3D mass properties from geometry (spheres, boxes, meshes, `combine`) |
+| `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, deterministic force accumulation, `SpringWorld` and `SpringWorld3D` |
+| `malloy_charges` | STATIC | `ChargedParticle2D`/`ChargeWorld` and `ChargedParticle3D`/`Charge3DWorld`: signed Coulomb pairs, uniform E and B fields (B a scalar out of the plane in 2D, a vector in 3D) |
+| `malloy_nbody_terminal` | EXECUTABLE | the terminal app: runs any scenario file, or the built-in N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
 
 ## Domains and templates
 
 MalloySim grows one finished physics domain at a time. Each domain is its own
-library with its own concrete world type, its own settings, and its own test
-executable. Domains share only `malloy_math` and the tiny `malloy_sim_core`
-vocabulary; none of them knows the others exist. There is no simulation base
-class and no engine kernel, by design.
+library with its own concrete world types (one per dimension), its own settings,
+and its own test executable. Domains rest only on the shared support libraries
+(`malloy_math`, `malloy_time`, and `malloy_collide` for the two that collide) and
+the tiny `malloy_sim_core` vocabulary; none of them knows the others exist, and
+`malloy_layering_tests` checks that. There is no simulation base class and no
+engine kernel, by design.
 
 A domain counts as finished only when it has all four of:
 
@@ -117,12 +113,32 @@ A domain counts as finished only when it has all four of:
 4. at least one scenario template in `scenarios/`.
 
 Templates in `scenarios/` are a first-class deliverable: plain text, documented,
-and runnable with the shipped binary. 30 templates ship across 10 domains, and
-every one is parsed, validated and stepped by the test suite. Both numbers are
-checked against the directory by the scenario tests, so neither can go stale.
+and runnable with the shipped binary. Each states what it demonstrates and its
+expected result, and carries at least one `# check` line that the scenario tests
+compare against a real run (the app reads it as a comment).
+
+The five physics domains each run in two dimensions and in three, and each of
+those worlds has its own scenario `type`, so the dispatch has ten.
+30 templates ship across those ten types, which the dispatch treats as
+10 domains, and every template is parsed, validated and stepped by the test
+suite. Both numbers are checked against the directory by the scenario tests, so
+neither can go stale.
+
+| `type` | Templates (`scenarios/<name>.scn`) |
+|---|---|
+| `nbody` (the default) | `two_body`, `three_body_triangle` |
+| `nbody3d` | `inclined_orbits` |
+| `particles` | `bouncing_particles`, `projectile_arc`, `sliding_friction`, `hard_disk_gas`, `thermal_relaxation`, `heat_conduction` |
+| `particles3d` | `particle_collision3d`, `hard_sphere_gas` |
+| `rigid` | `spinning_bodies`, `tumbling_impact`, `dropped_bodies`, `flat_ground`, `rolling_and_slipping`, `box_collision2d`, `box_drop2d` |
+| `rigid3d` | `intermediate_axis`, `gyroscope`, `bouncing_sphere`, `rolling_sphere`, `sphere_collision`, `box_drop`, `box_collision`, `box_sphere_collision` |
+| `springs` | `spring_chain` |
+| `springs3d` | `spring_tetrahedron` |
+| `charges` | `cyclotron` |
+| `charges3d` | `magnetic_helix` |
 
 A scenario names its domain with a `type` key, dispatched by a plain switch to
-one concrete world per domain. There is no simulation base class:
+one concrete world per `type`. There is no simulation base class:
 
 ```text
 type particles
@@ -136,11 +152,14 @@ particle 1.0  0.30  -2.0 -2.0   1.30 0.90
 `type` defaults to `nbody` when absent, so scenarios written before it existed
 keep working unchanged.
 
-Electromagnetism joined the classical mechanics track in M18. That track is
-complete: collision geometry, colliding
-particles, rigid bodies, ballistics, spring networks, rigid-body contact
-response and gravity for rigid bodies have all shipped. Work is gated one milestone at a time; see
-`docs/07_POST_M5_ROADMAP.md`.
+The classical mechanics track is complete, and electromagnetism joined it in
+M18. Thermodynamics opened in M38 the way ballistics arrived in M12, as
+measurement on an existing domain rather than a new one: a box of colliding
+particles read as a gas, with no new `type` key. M39 gave its walls a
+temperature, which needed the project's first random numbers, seeded and owned
+by the particle world
+(`docs/decisions/0010-randomness-is-seeded-and-owned-by-its-domain.md`). Work is
+gated one milestone at a time; see `docs/07_POST_M5_ROADMAP.md`.
 
 ## Build
 
@@ -151,6 +170,12 @@ cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
+
+The presets use the Visual Studio 2026 generator (x64), so they need CMake 4.2
+or newer (`docs/06_CMAKE_AND_VSCODE_WORKFLOW.md`). A `windows-msvc-release`
+preset builds the same targets optimised. Two libFuzzer targets, one for the
+scenario parser and one for the whole app, build only with clang++ and
+`-DMALLOY_BUILD_FUZZERS=ON`; the recipe is in `fuzz/parse_scenario_fuzzer.cpp`.
 
 ## Run the demo
 
@@ -228,17 +253,21 @@ way round:
 
 The view is fitted to the bodies at the start of a run and afterwards only
 grows, so frames share a scale, a near-stationary body keeps its cell, and no
-body is ever silently clipped. The printed extents show when it has grown.
+body is ever silently clipped. The printed extents show when it has grown. A 3D
+run is drawn as its orthographic projection onto the xy plane, so motion along z
+does not show and bodies at different depths can overlap; drawing a 3D scene
+properly waits for the rendering milestone.
 
 ### Load a scenario from a file
 
-Pass a scenario file as the single argument:
+Pass a scenario file as the single argument (the app has no flags):
 
 ```powershell
 .\out\build\windows-msvc-debug\Debug\malloy_nbody_terminal.exe scenarios\two_body.scn
 ```
 
-Scenario files are plain text (`#` starts a comment):
+Scenario files are plain text, and `#` starts a comment. This is
+`scenarios/two_body.scn` without its comments:
 
 ```text
 g 1.0
@@ -246,12 +275,64 @@ softening 0.000001
 dt 0.001
 steps 10000
 output_every 1000
-body 1.0       0.0 0.0   0.0 0.0
-body 0.000001  1.0 0.0   0.0 1.0
+
+body 1.0       0.0  0.0   0.0  0.0
+body 0.000001  1.0  0.0   0.0  1.0
 ```
 
-Example scenarios live in `scenarios/`. With no argument, the app runs the
-built-in scenarios shown above.
+Every template runs the same way. The keys each `type` accepts, and the limits
+the parser enforces (a scenario file is the one untrusted input), are documented
+in `include/malloy/scenario/scenario.hpp`. A file that does not parse, defines
+nothing to simulate, or fails validation is refused with a message on stderr and
+exit code 1. With no argument, the app runs the built-in scenarios shown above.
+
+## Known limitations
+
+Open defects that a run of the shipped binary can hit. Each is tracked on
+GitHub, and this list shrinks as they close.
+
+- **A box on the ground never settles.** Unless it lands perfectly flat, a box
+  resting on a ground plane keeps rocking and gains energy, even at restitution
+  0 and in both 2D and 3D. `box_drop.scn` and `box_drop2d.scn` avoid it only
+  because their drops are symmetric
+  ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)).
+- **Crossed E and B fields drift and gain energy.** In uniform electric and
+  magnetic fields together, a charge's guiding centre drifts against the
+  electric force and its energy grows without bound, in 2D and 3D. Runs with no
+  electric force, including `cyclotron.scn` and `magnetic_helix.scn`, are
+  unaffected ([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)).
+- **A pure spring damper is not stability-checked.** A spring with stiffness 0
+  and damping above 0 skips the timestep stability check, so a `dt` that is too
+  large diverges while every step reports success
+  ([#43](https://github.com/MalloyTheDev/malloy_sim/issues/43)).
+- **Static friction creeps on slopes.** A rigid body inside the friction cone on
+  an incline still slides down it at a steady speed of g sin(theta) dt, because
+  contacts are resolved after the position update
+  ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
+- **The work budget undercounts box pairs.** The parser bounds a scenario's work
+  by counting pair tests, but charges every pair the same, and a 3D box pair
+  costs 10 to 40 times a cheap one, so a small `rigid3d` file of boxes inside
+  the budget can still run for hours
+  ([#46](https://github.com/MalloyTheDev/malloy_sim/issues/46)).
+- **No `force` scenario key.** M28's constant applied force is reachable only
+  through the library API (`Rigid3DSettings::force`): no key, no template, and
+  the app's `rigid3d` energy column leaves out its potential
+  ([#47](https://github.com/MalloyTheDev/malloy_sim/issues/47)).
+- **2D box against disc is not implemented.** In a `rigid` scenario, a box
+  (`rigid_box`) and a disc (`rigid_body` or `rigid_static`) pass through each
+  other silently, with no error or warning
+  ([#48](https://github.com/MalloyTheDev/malloy_sim/issues/48)).
+- **Small header values print as zero.** Run headers and view extents use eight
+  fixed decimals, so a value below 5e-9 (for example `dt 1e-9`) prints as 0
+  ([#61](https://github.com/MalloyTheDev/malloy_sim/issues/61)).
+- **Long paths do not open.** A scenario file whose full path is over 260
+  characters (MAX_PATH) cannot be opened, even with long paths enabled in
+  Windows
+  ([#62](https://github.com/MalloyTheDev/malloy_sim/issues/62)).
+
+Lower-severity defects, including some malformed inputs that load instead of
+being refused, are on the
+[issue tracker](https://github.com/MalloyTheDev/malloy_sim/issues).
 
 ## Milestones complete
 
@@ -289,70 +370,70 @@ built-in scenarios shown above.
 | M30 | an oriented box resting and tumbling on a ground plane | ✅ Done |
 | M31 | spring networks in three dimensions: deformable structures | ✅ Done |
 | M32 | colliding particles in three dimensions: a box of bouncing spheres | ✅ Done |
+| M33 | box against box in 3D: the separating-axis test | ✅ Done |
+| M34 | box against a sphere: the last movable pair in 3D | ✅ Done |
+| M35 | Coulomb friction for particle contacts, in 2D and 3D | ✅ Done |
+| M36 | 2D oriented boxes: box against box by the separating-axis test | ✅ Done |
+| M37 | a 2D box resting on a ground plane | ✅ Done |
+| M38 | a hard-disk gas: temperature, wall pressure, relaxation | ✅ Done |
+| M39 | thermal walls: heat flow through a gas, seeded randomness | ✅ Done |
 
 ## What is planned, and what is not
 
-Two different kinds of "not here yet" are separated below, because a reader has
-no way to tell them apart otherwise. The first list is a roadmap. The second is
-a set of decisions.
+Three different kinds of "not here yet" are separated below, because a reader
+has no way to tell them apart otherwise. The first list is a roadmap, the second
+waits for a need, and the third is a set of decisions.
 
 ### Planned, and gated behind its own milestone
 
 Intended, not yet built, and never added speculatively
 (`docs/07_POST_M5_ROADMAP.md`):
 
-- **the rest of 3D**. M19 shipped `Vec3` and 3D gravity, M20 quaternions and
-  torque-free rotation, M21 a constant applied torque, M22 the first 3D contact
-  (a sphere on a ground plane), M23 friction for it, and M24 sphere-against-
-  sphere collisions, M25 mass properties from geometry (with `Mat3` and a
-  symmetric eigensolver), M26 box mass properties with `combine` (compound
-  bodies assembled from primitives), M27 mass properties of an arbitrary
-  triangle mesh (signed-tetrahedron volume integrals), M28 a constant applied
-  force (the translational half of a wrench), M29 charged particles in three
-  dimensions (the vector Lorentz force, helical motion), M30 an oriented box
-  resting and tumbling on a ground plane, M31 spring networks in three
-  dimensions, M32 colliding particles in three dimensions (all five domains
-  now have a 3D form), M33 box against box by the separating-axis test, M34
-  box against a sphere (the last movable pair), M35 Coulomb friction for
-  particle contacts, M36 box against box in the 2D rigid domain, and M37 a 2D
-  box resting on a ground plane; rendering is the remaining piece of the 3D arc,
-  its own milestone
-  (`docs/decisions/0009-three-dimensions-are-the-destination.md`)
-- **quantum**, further out still
-- graphical rendering, and the library that would carry it (the M8 debug view is
-  ASCII text only, and terminal-first holds until then)
-- persistent per-particle forces or springs on particles (particles carry
-  gravity, contact impulses and, since M35, contact friction, but no force
-  accumulator; springs are their own domain)
-- an iterative, per-point contact solver for stacking (M33 and M36 added
-  box-against-box in 3D and 2D by the separating-axis test, and the clipped
-  contact manifold is resolved as one contact at its centroid: a bounce, not a
-  stack); box against disc
-  in 2D is also not built yet (M34 added box-against-sphere and M30/M37 put a
-  box on the ground in both dimensions, so the rest of the collision matrix is
-  filled)
-- persistent forces and force/torque accumulators (gravity is a setting applied
-  as an acceleration, not a registered force producer)
-- vehicles, fluids, and the rest of thermodynamics: work done by a moving
-  piston (the kinetic theory of a hard-disk gas shipped in M38 and thermal walls
-  with heat flow in M39; electromagnetism came off this list when charged
-  particles shipped in M18)
+- **rendering**, and the library that would carry it: the remaining piece of
+  the 3D arc. M19 to M34 built the rest:
+  `Vec3`, `Quat` and `Mat3`, a 3D form of every domain, mass properties from
+  geometry, a constant torque and force, and collisions between any two 3D
+  primitives (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+  Terminal-first holds until then, and the M8 debug view stays ASCII text
+- **quantum**, further out still, and meant to start as a separate repository
+  or an isolated prototype
+- an iterative, per-point contact solver, which a resting box or a stack needs
+  (box contacts are resolved today as one contact at the centroid of the
+  manifold: a bounce, not a stack), and box against disc in 2D
+- persistent forces and force/torque accumulators (gravity, the 3D torque and
+  the 3D force are each a single constant setting, not a registered force
+  producer), including persistent per-particle forces or springs on particles
+  (springs are their own domain)
+- the rest of thermodynamics: work done by a moving piston, and partially
+  diffuse walls (M38 shipped the kinetic theory of a hard-disk gas and M39
+  thermal walls with heat flow)
+- vehicles and fluids, which are candidates rather than commitments
+
+### Not until a milestone needs it
+
+Neither on the roadmap nor rejected: each waits for a milestone that genuinely
+needs it (`docs/09_MISTAKES_TO_AVOID.md`):
+
+- a package manager (`CLAUDE.md` rule 8)
+- threading
+- an asset manager, serialization, or a logging framework
+- a CLI parser (the app takes one positional path)
+- ECS, which is not rejected but is not adopted until real access-pattern
+  pressure exists rather than an expectation of it (rule 3)
 
 ### Not planned at all
 
 Rejected rather than deferred, because adopting them would change what the
 project is:
 
-- plugins, an editor, a scripting layer
+- a game engine clone, or a Unity, Godot or Unreal replacement
+- a render-first project (rendering has its own milestone, but the simulation
+  comes first)
+- an editor
+- a plugin framework or a scripting framework
 - a simulation base class, engine kernel, scheduler, event bus or service
-  locator (rule 12)
-
-ECS sits between the two: not rejected, but not adopted until real
-access-pattern pressure exists rather than an expectation of it.
-- asset manager
-- threading
-- package manager
-- CLI parser
+  locator (rule 12: all-in-one is reached with concrete worlds and a dispatch
+  key)
 
 ## Before committing
 
@@ -371,3 +452,4 @@ For the full plan and history, read:
 - `docs/00_START_HERE.md`
 - `docs/02_MILESTONE_ROADMAP_M1_M5.md`
 - `docs/07_POST_M5_ROADMAP.md`
+- `docs/decisions/` (the architecture decision records)

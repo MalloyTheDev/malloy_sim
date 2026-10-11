@@ -23,10 +23,12 @@ MalloySim is an all-in-one science physics simulation in C++, built
 simulation-first and terminal-first.
 
 It started as a terminal 2D N-body gravity simulation. It grows one finished
-physics domain at a time: collision, 2D rigid bodies, ballistics, springs and
-oscillators, then fluids, 3D, and quantum. Each domain is a concrete library
-with its own world type, settings type, and tests, selected by a scenario
-`type` key rather than through a generic engine interface
+physics domain at a time. By M39 that has meant collision, colliding particles,
+2D rigid bodies, ballistics, springs and oscillators, charged particles, three
+dimensions for all five domains, and the first thermodynamics (a gas with
+thermal walls); fluids, rendering and quantum are still ahead. Each domain is a
+concrete library with its own world type, settings type, and tests, selected by
+a scenario `type` key rather than through a generic engine interface
 (`docs/decisions/0006-multi-domain-dispatch.md`).
 
 The measure of the project is depth, not coverage: a domain counts when it
@@ -87,10 +89,18 @@ foundation
 
 No dependency may point upward.
 
+The direction has held through M39, with more libraries on each level: five
+domain libraries (`malloy_nbody`, `malloy_particles`, `malloy_rigid`,
+`malloy_springs`, `malloy_charges`) sit where `malloy_nbody` sat, the support
+libraries `malloy_collide` and `malloy_ascii` sit beside the foundation, and
+`malloy_scenario` sits between the app and the domains. No domain links
+another. `docs/03_MODULE_BOUNDARIES.md` has the current graph, and
+`malloy_layering_tests` checks it against the build files and the sources.
+
 `malloy_time` was linked by nothing but its own test until the worlds adopted
-`FixedStep` for tick counting and elapsed time. Both `NBodyWorld` and
-`ParticleWorld` now hold one instead of reimplementing a counter each, which is
-also what gave them `elapsed_time()`.
+`FixedStep` for tick counting and elapsed time. All ten worlds now hold one
+instead of reimplementing a counter each, which is also what gives them
+`elapsed_time()`.
 
 ## Biggest risk
 
@@ -102,9 +112,10 @@ It must not contain `ISimulation`, `virtual step()`, `WorldBase`, `Engine`, `Ent
 
 `NBodyWorld` remains concrete and owns its own `step()` behavior.
 
-As of M8 this holds: `malloy_sim_core` contains only `SimulationSettings`,
-`StepStatus`, and `StepResult`, and `NBodyWorld` is a concrete class. Keep it
-that way.
+As of M39 this still holds: `malloy_sim_core` contains only
+`SimulationSettings`, `StepStatus`, and `StepResult`, depends on `malloy_math`
+alone (a rule `malloy_layering_tests` enforces), and all ten worlds are concrete
+classes. Keep it that way.
 
 The all-in-one goal raises this risk rather than retiring it, because "support
 every domain" is the exact argument that produces an engine kernel. ADR 0006 is

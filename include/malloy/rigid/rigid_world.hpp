@@ -21,7 +21,10 @@ namespace malloy::rigid
 //
 // M11 gave it free motion plus impulses. M14 added contact response: bodies
 // with a nonzero radius collide as discs and the resulting impulse generates
-// torque, so they tumble rather than merely bouncing.
+// torque, so they tumble rather than merely bouncing. M36 added boxes (bodies
+// with half extents), which collide with each other by the separating-axis
+// test, and M37 put them on halfplane ground. A box against a disc is not
+// implemented yet: the pair is skipped (issue #48).
 //
 // Still no persistent forces and no force or torque accumulators. A body with
 // no contacts translates and spins forever, which remains the cleanest
@@ -34,7 +37,9 @@ public:
 
     const RigidSettings& settings() const { return settings_; }
 
-    // Ok, or InvalidSettings (dt, restitution, gravity) / InvalidState (a body).
+    // Ok, or InvalidSettings (dt; restitution outside [0, 1]; gravity not
+    // finite; friction negative; a ground halfplane invalid) / InvalidState (a
+    // body).
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step:
