@@ -160,7 +160,8 @@ struct ScenarioParseResult
 // type rigid3d:
 //
 //   Rigid bodies in three dimensions: free rotation (M20), a constant torque
-//   (M21), gravity and restitution contacts against ground planes (M22),
+//   (M21) and a constant force (M28), gravity and restitution contacts against
+//   ground planes (M22),
 //   Coulomb friction (M23, the `friction` key below), and collisions between
 //   bodies: spheres (M24), oriented boxes (M33) and a box against a sphere
 //   (M34). A normal contact on a centred sphere imparts no spin; friction and
@@ -213,6 +214,18 @@ struct ScenarioParseResult
 //     it each body's world-frame angular momentum grows along the straight line
 //     L(t) = L(0) + torque t. There is one torque for the whole world, the way
 //     there is one gravity in the 2D rigid domain.
+//
+//   force <fx> <fy> <fz>    a constant WORLD-frame force on every body
+//                           (default 0 0 0, no force)
+//
+//     The translational half of the wrench whose rotational half is `torque`
+//     (M28), read exactly as `torque` is: one force for the whole world, every
+//     body feeling all of it, and a later line replacing an earlier one. It
+//     acts through each centre of mass, so it turns nothing, and it is applied
+//     as the acceleration F/m, so unlike `gravity3` a heavier body speeds up
+//     less: each body's momentum grows along the straight line p(t) = p(0) +
+//     force t, whatever its mass. Its potential, the sum of -(force . r), is
+//     part of the energy the app prints.
 //
 //   gravity3 <gx> <gy> <gz>   a uniform gravitational ACCELERATION
 //                             (default 0 0 0)
@@ -314,7 +327,12 @@ struct ScenarioParseResult
 //     which is also its centre of mass. Its inertia is COMPUTED from the box
 //     and mass, m ((2 hx)^2 + (2 hy)^2) / 12, not given, so shape and inertia
 //     always agree. A box collides with other boxes (M36) and rests on the
-//     ground planes (M37); box against a disc is not built yet.
+//     ground planes (M37). Box against a disc is not built yet, so a file that
+//     declares both a `rigid_box` and a disc that collides (a `rigid_body` or
+//     `rigid_static` with a radius above 0) is refused, naming the line where
+//     the second kind first appears, rather than letting the two pass through
+//     each other unseen (issue #48). A body of radius 0 collides with nothing
+//     and may share a file with boxes.
 //
 // type charges:
 //
@@ -408,10 +426,19 @@ struct ScenarioParseResult
 //   entities             at most 1e5 bodies, particles, charges, spring bodies
 //                        and springs in total, checked as each line is read
 //   ground planes        at most 1000 `ground` or `plane3` lines
-//   work                 steps plus reports, times the pair tests a step does
-//                        (a report's diagnostics cost about a step), at most 1e11:
-//                        N(N-1)/2 pairs plus N per body and N per ground plane
-//                        for the pairwise domains, N + springs for springs
+//   work                 steps plus reports, times the work a step does (a
+//                        report's diagnostics cost about a step), at most 1e11
+//                        units of about 10 ns of Release time (under 20 minutes
+//                        there; up to about three hours in Debug). A step
+//                        is N units for its N bodies, N + springs for springs,
+//                        plus its pair tests: N(N-1) for nbody, which evaluates
+//                        every ordered pair, N(N-1)/2 for the other pairwise
+//                        domains, and in the rigid domains each pair and each
+//                        body-plane test weighted by kind, as measured (issue
+//                        #46): rigid3d box-box 250, box-sphere 25, sphere pair
+//                        10, box-plane 40, sphere-plane 4; rigid box-box 40,
+//                        any other pair 5, box-ground 20, disc-ground 4. A body
+//                        is a box when all its half-extents are positive
 //   reports              at most 1e5 (steps / output_every + 1); output_every
 //                        0 prints only the step-0 report
 //   line length          at most 4096 characters, comments included; the

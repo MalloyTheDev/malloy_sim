@@ -704,15 +704,16 @@ int main()
                     if (q == "velocity_x") return b.front().velocity.x;
                     if (q == "velocity_y") return b.front().velocity.y;
                     if (q == "velocity_z") return b.front().velocity.z;
-                    // Gravitational potential and the total mechanical energy,
-                    // which trade off during a fall and a bounce.
-                    if (q == "potential")
-                        return malloy::rigid::total_potential_energy3d(
-                            b, world.settings().gravity);
+                    // The potential energy, of gravity and of the applied force
+                    // (M28, issue #47), and the total mechanical energy, which
+                    // trade off during a fall, a push and a bounce. The total
+                    // is what the app's E column prints.
+                    const Real potential =
+                        malloy::rigid::total_potential_energy3d(b, world.settings().gravity) +
+                        malloy::rigid::total_force_potential3d(b, world.settings().force);
+                    if (q == "potential") return potential;
                     if (q == "total_energy")
-                        return malloy::rigid::total_kinetic_energy3d(b) +
-                               malloy::rigid::total_potential_energy3d(
-                                   b, world.settings().gravity);
+                        return malloy::rigid::total_kinetic_energy3d(b) + potential;
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -1471,6 +1472,86 @@ int main()
         std::istringstream in("type particles\nrigid_static 1.0 0 0 0\n");
         MALLOY_CHECK_FALSE(parse_scenario(in).ok);
     }
+
+    // --- Issue #48: in 2D, box against disc is not built yet, so a box and a
+    //     disc used to pass through each other without a word. Until that pair
+    //     has its milestone, a `type rigid` file holding a rigid_box and a disc
+    //     that collides (rigid_body or rigid_static, radius above 0) is refused,
+    //     on the line where the second kind first appears. ---
+    {
+        const auto parse_text = [](const std::string& text) {
+            std::istringstream in(text);
+            return parse_scenario(in);
+        };
+        const std::string box = "rigid_box 2.0 0.5 0.5 -1.2 0.0 0.0 1.0 0.0 0.0\n";
+        const std::string body = "rigid_body 1.0 0.125 0.5 0 0 1.2 0.0 0.0 -1.0 0.0 0.0\n";
+        const std::string fixed = "rigid_static 0.5 1.2 0.0 0.0\n";
+        const std::string body0 = "rigid_body 1.0 0.125 0 0 0 1.2 0.0 0.0 -1.0 0.0 0.0\n";
+        const std::string fixed0 = "rigid_static 0 1.2 0.0 0.0\n";
+
+        // The issue's reproduction, then every ordering of each disc kind. The
+        // error names the line that brought in the second kind, says why, and
+        // points back at the first.
+        const struct
+        {
+            std::string text;
+            std::string where;
+            std::string names;
+        } mixes[] = {
+            {"type rigid\n" + box + body, "line 3:", "rigid_box on line 2"},
+            {"type rigid\n" + body + box, "line 3:", "rigid_body on line 2"},
+            {"type rigid\n" + box + fixed, "line 3:", "rigid_box on line 2"},
+            {"type rigid\n" + fixed + box, "line 3:", "rigid_static on line 2"},
+            // Comments and blank lines count as lines, and the error is on the
+            // FIRST line that mixes the kinds, not a later one.
+            {"type rigid\n# a box\n" + box + box + "\n" + body + body, "line 6:",
+             "rigid_box on line 3"},
+            {"type rigid\n" + fixed + body + "# and now\n" + box + box, "line 5:",
+             "rigid_static on line 2"},
+        };
+        for (const auto& mix : mixes)
+        {
+            const ScenarioParseResult r = parse_text(mix.text);
+            MALLOY_CHECK_FALSE(r.ok);
+            if (r.error.rfind(mix.where, 0) != 0 ||
+                r.error.find("box against disc is not supported yet") == std::string::npos ||
+                r.error.find(mix.names) == std::string::npos)
+            {
+                std::cerr << "unexpected box/disc error: " << r.error << '\n';
+                return 1;
+            }
+        }
+        {
+            const ScenarioParseResult r = parse_text("type rigid\n" + box + body);
+            MALLOY_CHECK_EQ(r.error, std::string("line 3: box against disc is not supported "
+                                                 "yet: this rigid_body would pass through the "
+                                                 "rigid_box on line 2 (a disc with a radius "
+                                                 "above 0 cannot share a scenario with a box)"));
+        }
+
+        // A body of radius 0 collides with nothing, so it may share a file with
+        // boxes, before or after them, and so may boxes and discs on their own.
+        for (const std::string& text :
+             {"type rigid\n" + box + body0 + fixed0, "type rigid\n" + body0 + fixed0 + box,
+              "type rigid\n" + box + box, "type rigid\n" + body + fixed})
+        {
+            const ScenarioParseResult r = parse_text(text);
+            if (!r.ok)
+            {
+                std::cerr << "refused a file that does not mix box and disc: " << r.error
+                          << '\n';
+                return 1;
+            }
+        }
+        // The refusal is the parser's, so a line's own syntax error still comes
+        // first: a trailing token on the mixing line is reported as such.
+        {
+            const ScenarioParseResult r =
+                parse_text("type rigid\n" + box + "rigid_static 0.5 1.2 0.0 0.0 junk\n");
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("junk") != std::string::npos);
+        }
+    }
     {
         // restitution now serves two domains, but not a third.
         std::istringstream in("type springs\nrestitution 0.5\n");
@@ -2026,6 +2107,109 @@ int main()
                                           r.scenario.rigid3d_settings};
         MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidSettings);
     }
+    // --- Issue #47: the force key, M28's constant applied force, read exactly
+    //     as torque is. Distinct values per axis, so a transposed or dropped
+    //     component shows, and the torque is checked to stay untouched. ---
+    {
+        std::istringstream in("type rigid3d\n"
+                              "force 0.5 -1.5 2.5\n"
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.force.x, 0.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.force.y, -1.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.force.z, 2.5, eps);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.y, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.z, 0.0, 0.0);
+        MALLOY_CHECK_TRUE(r.scenario.rigid3d_settings.is_valid());
+
+        // Absent, it is zero: a pre-M28 file is unchanged.
+        std::istringstream none("type rigid3d\n"
+                                "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r2 = parse_scenario(none);
+        MALLOY_CHECK_TRUE(r2.ok);
+        MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.force.x, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.force.y, 0.0, 0.0);
+        MALLOY_CHECK_NEAR(r2.scenario.rigid3d_settings.force.z, 0.0, 0.0);
+    }
+    {
+        // The parsed force reaches the world, as the acceleration F/m: one step
+        // of a body of mass 4 under (2, -6, 8) changes its velocity by
+        // (F/m) dt = (0.5, -1.5, 2) * 0.001, and its momentum by F dt.
+        std::istringstream in("type rigid3d\ndt 0.001\n"
+                              "force 2 -6 8\n"
+                              "rigid_body3d 4  1 1 1  0.5  0 0 0  0 0 1 0  0 0 0  0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        malloy::rigid::Rigid3DWorld world{r.scenario.simulation, r.scenario.rigid_bodies3d,
+                                          r.scenario.rigid3d_settings};
+        MALLOY_CHECK_TRUE(world.step().ok());
+        const auto& v = world.bodies().front().velocity;
+        MALLOY_CHECK_NEAR(v.x, 0.0005, 1e-18);
+        MALLOY_CHECK_NEAR(v.y, -0.0015, 1e-18);
+        MALLOY_CHECK_NEAR(v.z, 0.002, 1e-18);
+    }
+    {
+        // Malformed: two fields, four, a word, none. Each is refused on its
+        // line, with the message torque's would have.
+        const struct
+        {
+            const char* text;
+            const char* message;
+        } bad[] = {
+            {"type rigid3d\nforce 1 2\n", "line 2: force requires: fx fy fz"},
+            {"type rigid3d\nforce 1 two 3\n", "line 2: force requires: fx fy fz"},
+            {"type rigid3d\nforce\n", "line 2: force requires: fx fy fz"},
+            {"type rigid3d\nforce 1 2 3 4\n", "line 2: unexpected extra token '4'"},
+        };
+        for (const auto& b : bad)
+        {
+            std::istringstream in(b.text);
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_EQ(r.error, std::string(b.message));
+        }
+    }
+    {
+        // force belongs to rigid3d and to no other domain, including the
+        // default nbody a file gets when its `type` line is missing or late.
+        for (const char* head : {"", "type nbody\n", "type rigid\n", "type nbody3d\n",
+                                 "type particles3d\n", "type springs3d\n", "type charges3d\n"})
+        {
+            std::istringstream in(std::string(head) + "force 1 2 3\n");
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("force belongs to type rigid3d") != std::string::npos);
+        }
+    }
+    {
+        // A second force line replaces the first, exactly as a second torque
+        // line does: both are single world settings, not accumulators.
+        std::istringstream in("type rigid3d\nforce 1 2 3\nforce 4 5 6\n"
+                              "torque 1 2 3\ntorque 7 8 9\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.force.x, 4.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.force.y, 5.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.force.z, 6.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.x, 7.0, 0.0);
+        MALLOY_CHECK_NEAR(r.scenario.rigid3d_settings.torque.z, 9.0, 0.0);
+    }
+    {
+        // A force whose square overflows parses, and is refused by the
+        // settings, so that rule lives in one place (as for torque).
+        std::istringstream in("type rigid3d\n"
+                              "force 0 1e200 0\n"
+                              "rigid_body3d 1  1 2 3  0.5  0 0 0  0 0 1 0  0 0 0  1 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        MALLOY_CHECK_FALSE(r.scenario.rigid3d_settings.is_valid());
+        malloy::rigid::Rigid3DWorld world{r.scenario.simulation,
+                                          r.scenario.rigid_bodies3d,
+                                          r.scenario.rigid3d_settings};
+        MALLOY_CHECK_TRUE(world.validate() == StepStatus::InvalidSettings);
+    }
     // --- M22: the contact keys for type rigid3d: gravity3, plane3, and
     //     restitution. Distinct nonzero values, so a dropped axis shows. ---
     {
@@ -2216,30 +2400,129 @@ int main()
             MALLOY_CHECK_TRUE(r.error.find("plane") != std::string::npos);
         }
 
-        // Issue #25: the WORK budget, steps plus reports, times pair tests per
-        // step, at most 1e11 (a report's diagnostics cost about a step). 1000
-        // bodies make 499500 pairs plus 1000 bodies, 500500 per step. With
-        // output_every 0 there is one report, so 199799 steps is 199800 x 500500
-        // = 9.99999e10, inside; 199800 is just over.
+        // Issue #25: the WORK budget, steps plus reports, times the work a step
+        // does, at most 1e11 units (a report's diagnostics cost about a step).
+        // Issue #46 weighted it: a step costs a unit per body plus its tests,
+        // nbody counts every ORDERED pair, as its world evaluates them, and the
+        // rigid domains weight each pair and plane test by kind (box-box 250,
+        // box-sphere 25, sphere pair 10, box-plane 40, sphere-plane 4 in 3D;
+        // box-box 40, any other pair 5, box-ground 20, disc-ground 4 in 2D).
+        //
+        // Each case below states its work per step W by hand. With output_every
+        // 0 there is one report, so s steps do (s + 1) W: the most steps inside
+        // 1e11 is floor(1e11 / W) - 1, and one more is refused. Both sides of
+        // that edge are checked, so a weight that drifts either way fails.
         {
-            std::ostringstream bodies;
-            for (int i = 0; i < 1000; ++i)
-            {
-                bodies << "body 1 " << i << " 0 0 0\n";
-            }
-            std::istringstream inside("type nbody\noutput_every 0\nsteps 199799\n" + bodies.str());
-            MALLOY_CHECK_TRUE(parse_scenario(inside).ok);
-            std::istringstream over("type nbody\noutput_every 0\nsteps 199800\n" + bodies.str());
-            const ScenarioParseResult r = parse_scenario(over);
-            MALLOY_CHECK_FALSE(r.ok);
-            MALLOY_CHECK_TRUE(r.error.find("work budget") != std::string::npos);
+            const auto at_budget_edge = [](const std::string& head, const std::string& lines,
+                                           long long per_step) {
+                const long long inside = 100000000000LL / per_step - 1;
+                const auto parse_steps = [&](long long steps) {
+                    std::istringstream in(head + "output_every 0\nsteps " +
+                                          std::to_string(steps) + "\n" + lines);
+                    return parse_scenario(in);
+                };
+                const ScenarioParseResult in_budget = parse_steps(inside);
+                const ScenarioParseResult over_budget = parse_steps(inside + 1);
+                if (!in_budget.ok || over_budget.ok ||
+                    over_budget.error !=
+                        "scenario exceeds the work budget: steps plus reports, times pair "
+                        "tests per step, must be at most 1e11 (fewer steps or fewer bodies)")
+                {
+                    std::cerr << head << "work budget edge at " << inside
+                              << " steps: inside ok=" << in_budget.ok << " (" << in_budget.error
+                              << "), one over ok=" << over_budget.ok << " ("
+                              << over_budget.error << ")\n";
+                    return false;
+                }
+                return true;
+            };
+            const auto repeat = [](int count, const auto& line_for) {
+                std::ostringstream lines;
+                for (int i = 0; i < count; ++i)
+                {
+                    lines << line_for(i);
+                }
+                return lines.str();
+            };
+            const auto nbody_line = [](int i) { return "body 1 " + std::to_string(i) + " 0 0 0\n"; };
+            const auto body3_line = [](int i) {
+                return "body3 1 " + std::to_string(i) + " 0 0 0 0 0\n";
+            };
+            const auto box3_line = [](int i) {
+                return "rigid_box3d 1 1 1 1 " + std::to_string(10 * (i % 10)) + " " +
+                       std::to_string(10 * (i / 10)) + " 0 0 0 1 0 0 0 0 0 0 0\n";
+            };
+            const auto sphere3_line = [](int i) {
+                return "rigid_body3d 1 1 1 1 0.5 " + std::to_string(10 * i) +
+                       " 50 0 0 0 1 0 0 0 0 0 0 0\n";
+            };
+            const auto box2_line = [](int i) {
+                return "rigid_box 1 0.5 0.5 " + std::to_string(2 * i) + " 0 0 0 0 0\n";
+            };
+            const auto disc2_line = [](int i) {
+                return "rigid_body 1 0.125 0.5 0 0 " + std::to_string(2 * i) + " 9 0 0 0 0\n";
+            };
+            const auto point2_line = [](int i) {
+                return i % 2 ? "rigid_static 0 " + std::to_string(2 * i) + " 9 0\n"
+                             : "rigid_body 1 0.125 0 0 0 " + std::to_string(2 * i) + " 9 0 0 0 0\n";
+            };
 
-            // The reports count: 99999 steps alone are 5.005e10, inside, but a
-            // report every step adds 100000 reports (the most allowed), and
-            // their diagnostics bring the work to 1.001e11, over. Counted by
-            // steps alone, this used to pass.
-            std::istringstream reporting("type nbody\noutput_every 1\nsteps 99999\n" +
-                                         bodies.str());
+            // nbody: 1000 bodies, 1000 x 999 ordered pairs + 1000 = 1e6 per
+            // step, so 99999 steps (1e5 x 1e6 = 1e11) are inside and 100000
+            // over. Counted as unordered pairs, as before issue #46, it ran
+            // twice what it was charged.
+            const std::string bodies = repeat(1000, nbody_line);
+            MALLOY_CHECK_TRUE(at_budget_edge("type nbody\n", bodies, 1000000));
+            // nbody3d tests each pair once: 499500 + 1000 = 500500.
+            MALLOY_CHECK_TRUE(at_budget_edge("type nbody3d\n", repeat(1000, body3_line), 500500));
+            // rigid3d, 100 boxes: 250 x 4950 + 100 = 1237600.
+            const std::string boxes = repeat(100, box3_line);
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", boxes, 1237600));
+            // rigid3d, 100 spheres: 10 x 4950 + 100 = 49600.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", repeat(100, sphere3_line), 49600));
+            // rigid3d, 10 boxes, 10 spheres and a plane: 250 x 45 + 25 x 100 +
+            // 10 x 45 pairs, 40 x 10 + 4 x 10 plane tests, 20 bodies: 14660.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid3d\nplane3 0 0 1 -100\n",
+                repeat(10, box3_line) + repeat(10, sphere3_line), 14660));
+            // rigid3d, a box and a sphere under 1000 planes, where the plane
+            // tests dominate: 25 + 1000 x (40 + 4) + 2 = 44027.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid3d\n" + repeat(1000, [](int) { return "plane3 0 0 1 -100\n"; }),
+                repeat(1, box3_line) + repeat(1, sphere3_line), 44027));
+            // rigid, 100 boxes: 40 x 4950 + 100 = 198100.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid\n", repeat(100, box2_line), 198100));
+            // rigid, 100 discs and 10 grounds: 5 x 4950 + 10 x 4 x 100 + 100 = 28850.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid\n" + repeat(10, [](int) { return "ground 0 1 -100\n"; }),
+                repeat(100, disc2_line), 28850));
+            // rigid, 10 boxes, 10 bodies of radius 0 and a ground: 40 x 45 +
+            // 5 x (100 + 45) pairs, 20 x 10 + 4 x 10 ground tests, 20 bodies: 2785.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid\nground 0 1 -100\n", repeat(10, box2_line) + repeat(10, point2_line),
+                2785));
+            // rigid, a box and a body of radius 0 under 1000 grounds: 5 +
+            // 1000 x (20 + 4) + 2 = 24007.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid\n" + repeat(1000, [](int) { return "ground 0 1 -100\n"; }),
+                repeat(1, box2_line) + repeat(1, point2_line), 24007));
+
+            // Issue #46's file: 100 separated boxes for 19799000 steps, 4828
+            // bytes, inside the old budget at 5050 pair tests a step and about
+            // 2.35 hours in Release. Now 1237600 units a step, far over.
+            {
+                std::istringstream issue("type rigid3d\nsteps 19799000\noutput_every 100000\n" +
+                                         boxes);
+                const ScenarioParseResult r = parse_scenario(issue);
+                MALLOY_CHECK_FALSE(r.ok);
+                MALLOY_CHECK_TRUE(r.error.find("work budget") != std::string::npos);
+            }
+
+            // The reports count: 60000 steps alone are 6e10, inside, but a
+            // report every step adds 60001 reports, and their diagnostics bring
+            // the work to 1.2e11, over. Counted by steps alone, this used to
+            // pass.
+            std::istringstream reporting("type nbody\noutput_every 1\nsteps 60000\n" + bodies);
             const ScenarioParseResult rr = parse_scenario(reporting);
             MALLOY_CHECK_FALSE(rr.ok);
             MALLOY_CHECK_TRUE(rr.error.find("work budget") != std::string::npos);
@@ -2250,8 +2533,9 @@ int main()
             MALLOY_CHECK_FALSE(parse_scenario(tiny).ok);
 
             // A ground plane costs a test per body per step in the rigid
-            // domains: 1000 planes and 100 static bodies for 1e6 steps is 1e11
-            // plus the pairs, over.
+            // domains: 1000 planes and 100 static discs for 1e6 steps is 4 x
+            // 1000 x 100 plane tests plus 5 x 4950 pairs and 100 bodies a
+            // step, 4.2e11, over.
             std::ostringstream planes;
             planes << "type rigid\noutput_every 0\nsteps 1000000\n";
             for (int i = 0; i < 1000; ++i)

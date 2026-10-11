@@ -1,0 +1,118 @@
+# MalloySim scenario: a constant applied force, the translational half of a
+# wrench (M28), set from a scenario with the `force` key.
+#
+# A force is not an acceleration. Gravity gives every body the same
+# acceleration whatever its mass; a force F gives a body of mass m the
+# acceleration F/m, so a heavier body speeds up less. What every body gains at
+# the same rate is MOMENTUM: under a constant force each body's momentum grows
+# along the straight line
+#
+#   p(t) = p(0) + F t,
+#
+# exactly, whatever its mass. That is the law this scenario shows.
+#
+# Two bodies, no ground and nothing to hit: a cube of mass 1 at the origin,
+# spinning about its z axis, and a ball of mass 4 at rest ten units away along
+# y. The force (3, 0, 4), of magnitude 5, acts on each of them through its
+# centre of mass. Both move in the x-z plane, along the force, so they never
+# meet, and the run is pure free flight under the force.
+#
+# The force acts through the centre of mass, so it turns nothing: the cube's
+# spin stays exactly what it was. And it does work F . dr, stored as the
+# potential -(F . r), so kinetic energy plus that potential is the quantity the
+# force conserves. The app's E column prints exactly that sum.
+
+type rigid3d
+
+dt 0.001
+steps 2000
+output_every 500
+
+# force <fx> <fy> <fz>, one constant world-frame force on every body.
+force 3.0 0.0 4.0
+
+# rigid_box3d <mass> <hx> <hy> <hz> <px> <py> <pz>
+#             <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# A unit cube (half-width 0.5) of mass 1, so its three principal moments are
+# equal, 1/6, and a spin of 2 about z carries rotational energy 1/3.
+rigid_box3d 1.0   0.5 0.5 0.5   0.0 0.0 0.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0 0.0 2.0
+
+# rigid_body3d <mass> <Ix> <Iy> <Iz> <radius> <px> <py> <pz>
+#              <axisx> <axisy> <axisz> <angle> <vx> <vy> <vz> <wx> <wy> <wz>
+#
+# A solid ball of mass 4 and radius 0.5 (moments 2/5 m r^2 = 0.4), at rest at
+# y = 10, where it is never near the cube.
+rigid_body3d 4.0   0.4 0.4 0.4   0.5   0.0 10.0 0.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0 0.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   3.33333333e-01   |L|   3.33333333e-01   |p|   0.00000000e+00
+#   step    500   E   3.25520833e-01   |L|   2.48014337e+01   |p|   5.00000000e+00
+#   step   1000   E   3.17708333e-01   |L|   4.98007140e+01   |p|   1.00000000e+01
+#   step   1500   E   3.09895833e-01   |L|   7.48004753e+01   |p|   1.50000000e+01
+#   step   2000   E   3.02083333e-01   |L|   9.98003563e+01   |p|   2.00000000e+01
+#
+# 1. |p| grows by exactly 10 per unit time: each body gains F t, momentum 5 t
+#    along (3, 0, 4)/5, whatever its mass. At t = 2 the cube moves at
+#    F t / m = (6, 0, 8) and the ball, four times as heavy, at a quarter of
+#    that, (1.5, 0, 2); each carries momentum (6, 0, 8), so the total is
+#    (12, 0, 16), of magnitude 20.
+#
+# 2. The cube's position follows the discrete law of this integrator exactly:
+#    semi-implicit Euler moves by the UPDATED velocity, so after n steps
+#    x = a dt^2 n (n + 1) / 2, which is 6.003 at n = 2000 for a = 3, not the
+#    continuum (1/2) a t^2 = 6. The extra a dt t / 2 is first order in dt.
+#
+# 3. E is kinetic energy plus the force's potential -(F . r). The force has
+#    put 62.5 into translation by t = 2, all of it drawn from the potential, and
+#    E stays within 0.032 of its starting 1/3, the cube's spin energy. What it
+#    does lose is the integrator's own drift, exact and derived, not a leak:
+#    semi-implicit Euler sheds (1/2) (|F|^2 / m) dt^2 per body per step, here
+#    (1/2) 25 (1/1 + 1/4) 1e-6 = 1.5625e-5 per step, 0.0078125 per report and
+#    0.03125 over the run. Halve dt and the loss halves.
+#
+# 4. |L| grows although nothing turns either body. It is the angular momentum
+#    about the ORIGIN, and the force on the ball, ten units off the line of
+#    the push, has a moment r x F = (40, 0, -30) there, so L moves along
+#    (40, 0, -30) t from the cube's spin (0, 0, 1/3). The cube's own spin stays
+#    at exactly 2: a force through the centre of mass has no lever arm.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step. momentum_* is the total over
+# both bodies; position_*, velocity_* and spin_* are the cube's, the first body.
+# total_energy is the E column (kinetic plus potential, the force's included),
+# and potential is the sum of -(F . r). Tolerances are absolute and derived from
+# rounding, not fitted: a velocity takes 2000 additions of F dt / m, each
+# rounded by at most half an ulp of a value below 8, 4.4e-16, so it is within
+# 8.9e-13 of the law; the errors below follow from that one bound.
+#
+# Exact at the start: the cube's spin energy 1/3, the force potential 0.
+# check step 0    total_energy   3.333333333333333e-01   tol 1e-15
+# check step 0    momentum_x     0.0                     tol 0
+# p = F t per body, two bodies: 6 t along x. Velocity error 8.9e-13 times the
+# masses 1 and 4 is 4.4e-12 at most; tolerance 1e-11.
+# check step 1000 momentum_x     6.0                     tol 1e-11
+# check step 2000 momentum_x     12.0                    tol 1e-11
+# check step 2000 momentum_z     16.0                    tol 1e-11
+# Exactly zero: no force along y, so every increment there is 0.
+# check step 2000 momentum_y     0.0                     tol 0
+# The cube's velocity F t / m with m = 1: the 8.9e-13 bound; tolerance 2e-12.
+# check step 2000 velocity_x     6.0                     tol 2e-12
+# x = 3 dt^2 n (n + 1) / 2: 2000 position additions, each rounded by at most
+# half an ulp of 6, 4.4e-16, plus the velocity error times t, 1.8e-12 in all;
+# tolerance 1e-11.
+# check step 2000 position_x     6.003                   tol 1e-11
+# Exactly 2: no torque reaches the spin, and a cube has no gyroscopic term.
+# check step 2000 spin_z         2.0                     tol 0
+# E = 1/3 - n 1.5625e-5, exact but for rounding: the velocity bound times the
+# momenta (10 and 10) and the position bound times |F| = 5, under 3e-11 in
+# all; tolerance 1e-10.
+# check step 1000 total_energy   3.177083333333333e-01   tol 1e-10
+# check step 2000 total_energy   3.020833333333333e-01   tol 1e-10
+# The potential -(F . r), -(50.025 + 12.50625): the position bound times |F|
+# for two bodies, 2e-11; tolerance 1e-10.
+# check step 2000 potential      -62.53125               tol 1e-10
+# L_x = 40 t from the ball's moment: 4 x 10 times its z velocity, 40 times
+# that velocity's 4.4e-13 bound, 1.8e-11; tolerance 1e-10.
+# check step 2000 angular_x      80.0                    tol 1e-10

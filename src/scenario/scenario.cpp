@@ -57,11 +57,56 @@ constexpr std::size_t max_entities = 100000; // total bodies plus springs
 // The caps above bound steps and entities SEPARATELY, but a step of the
 // pairwise domains costs O(N^2), so together they still allowed about 1e8 x 5e9
 // pair tests: a 41-byte `lattice` file ran for hours (issue #25). This bounds
-// their product, the work a run will do, counted in pair tests (plus a body
-// against each ground plane, and a body or spring per step in the linear
-// springs domain). At the roughly 7 ns a pair test costs in Release, 1e11 is
-// about a quarter of an hour; the largest shipped template uses 3e7.
+// their product, the work a run will do, counted in WORK UNITS of about 10 ns of
+// Release time each: one cheap pair test (an nbody or particle pair), plus one
+// per body per step. Since issue #46 the costlier tests are weighted by what
+// they cost (see the weights below), so 1e11 units is at most about 20 minutes
+// in Release whatever the file holds (caged piles at the limit, the worst case
+// below, ran 5 to 17 minutes), and up to about three hours in Debug, where a
+// unit costs up to about 100 ns (the same piles: 38 minutes to 2 hours). The
+// largest shipped template uses 3e7 (a lattice gas), and the largest rigid one
+// 5e6.
 constexpr double max_work = 1e11;
+
+// Issue #46: what each test costs, in work units, for the domains where tests
+// differ in kind. Every pair once cost one unit, but a 3D box pair runs the
+// separating-axis test and clips a contact manifold, allocating as it goes, and
+// costs over a hundred cheap pairs, so a 5 KB file of boxes inside the old
+// budget ran for hours. Each weight is the slowest Release cost measured for
+// its kind, in units of 10 ns, rounded. Measured with EVERY pair overlapping
+// on every step, the worst case and one a file can hold: bodies larger than a
+// cage of ground planes stay piled together. Per test, in Release:
+//
+//   3D box-box      about 1.1 us in a caged pile; the clipping alone takes up
+//                   to about 2.5 us for the slowest configurations (99th
+//                   percentile of 300 random overlaps)                  250
+//   3D box-sphere   0.17 to 0.22 us                                      25
+//   3D sphere pair  0.03 to 0.09 us (the friction path, spinning)        10
+//   3D box-plane    0.37 us (the corner manifold allocates)              40
+//   3D sphere-plane 0.03 us                                               4
+//   2D box-box      0.12 to 0.14 us in a pile; the clipping alone up to
+//                   0.36 us (99th percentile)                            40
+//   2D disc pair    0.02 to 0.04 us, and a box with a body that is not   5
+//                   a box (radius 0: a box cannot hold a colliding disc,
+//                   see the box-against-disc refusal below)
+//   2D box-ground   0.18 us                                              20
+//   2D disc-ground  0.03 us                                               4
+//
+// For comparison, one unit: an nbody pair 0.004 us (2D, per ordered pair) or
+// 0.008 us (3D), a packed particle pair 0.008 to 0.012 us. Debug is about ten
+// times slower throughout (a caged 3D box pair 11 us). A body is classified as
+// its world classifies it: a box when every half-extent is positive. These are
+// the costs of the contact code as it stands; a change to it (a per-point
+// solve, a cheap bounding-sphere reject) should be measured again here.
+constexpr double box3_box3_work = 250.0;
+constexpr double box3_sphere3_work = 25.0;
+constexpr double sphere3_sphere3_work = 10.0;
+constexpr double box3_plane_work = 40.0;
+constexpr double sphere3_plane_work = 4.0;
+constexpr double box2_box2_work = 40.0;
+constexpr double disc2_pair_work = 5.0;
+constexpr double box2_ground_work = 20.0;
+constexpr double disc2_ground_work = 4.0;
 
 // How many diagnostic reports a run may print. Output volume is bounded only by
 // this, and a report with its ASCII frame is about 2 KB, so 1e5 reports is about
@@ -158,9 +203,12 @@ std::string quoted(const std::string& token)
     return out;
 }
 
-// The work one step of this scenario does, in pair tests. Every pairwise domain
-// tests each pair of bodies once; the rigid domains also test each body against
-// each ground plane; springs is linear, a body and a spring at a time.
+// The work one step of this scenario does, in work units (see max_work): a unit
+// per body, plus its tests. Springs is linear, a body and a spring at a time.
+// The 2D nbody world evaluates every ORDERED pair, N(N-1) force terms
+// (src/nbody/nbody.cpp), and was counted as N(N-1)/2, half its cost (issue
+// #46); every other pairwise domain tests each pair once. The rigid domains
+// weight each pair, and each body's test against each ground plane, by its kind.
 double step_work(const Scenario& scenario, std::size_t bodies, std::size_t springs)
 {
     const double n = static_cast<double>(bodies);
@@ -168,9 +216,45 @@ double step_work(const Scenario& scenario, std::size_t bodies, std::size_t sprin
     {
         return n + static_cast<double>(springs);
     }
-    const double planes = static_cast<double>(scenario.rigid_settings.ground.size() +
-                                              scenario.rigid3d_settings.ground.size());
-    return n * (n - 1.0) / 2.0 + n * planes + n;
+    if (scenario.type == ScenarioType::NBody)
+    {
+        return n * (n - 1.0) + n;
+    }
+    if (scenario.type == ScenarioType::Rigid3D)
+    {
+        double boxes = 0.0;
+        for (const rigid::RigidBody3D& body : scenario.rigid_bodies3d)
+        {
+            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0} &&
+                body.half_extents.z > math::Real{0})
+            {
+                boxes += 1.0;
+            }
+        }
+        const double spheres = n - boxes;
+        const double planes = static_cast<double>(scenario.rigid3d_settings.ground.size());
+        return box3_box3_work * boxes * (boxes - 1.0) / 2.0 +
+               box3_sphere3_work * boxes * spheres +
+               sphere3_sphere3_work * spheres * (spheres - 1.0) / 2.0 +
+               planes * (box3_plane_work * boxes + sphere3_plane_work * spheres) + n;
+    }
+    if (scenario.type == ScenarioType::Rigid)
+    {
+        double boxes = 0.0;
+        for (const rigid::RigidBody2D& body : scenario.rigid_bodies)
+        {
+            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0})
+            {
+                boxes += 1.0;
+            }
+        }
+        const double discs = n - boxes;
+        const double planes = static_cast<double>(scenario.rigid_settings.ground.size());
+        return box2_box2_work * boxes * (boxes - 1.0) / 2.0 +
+               disc2_pair_work * (boxes * discs + discs * (discs - 1.0) / 2.0) +
+               planes * (box2_ground_work * boxes + disc2_ground_work * discs) + n;
+    }
+    return n * (n - 1.0) / 2.0 + n;
 }
 
 // A `lattice` or `lattice3` line (M38), held until the whole file has been read
@@ -201,6 +285,14 @@ ScenarioParseResult parse_scenario(std::istream& input)
     // wall, so naming one twice (most likely a typo for its opposite) is an
     // error rather than a silent overwrite.
     unsigned named_walls = 0;
+    // Issue #48: the first `rigid_box` line, and the first disc that collides
+    // (a `rigid_body` or `rigid_static` with a radius above 0), with the key
+    // that declared it. A 2D box and disc pass through each other, because box
+    // against disc is not built yet, so a file that holds both is refused on
+    // the line where the second kind first appears.
+    std::size_t first_box_line = 0;
+    std::size_t first_disc_line = 0;
+    const char* first_disc_key = "";
 
     for (;;)
     {
@@ -603,6 +695,27 @@ ScenarioParseResult parse_scenario(std::istream& input)
                 return make_error(line_number, "torque requires: tx ty tz");
             }
             scenario.rigid3d_settings.torque = math::Vec3{tx, ty, tz};
+        }
+        else if (key == "force")
+        {
+            // M28's constant applied force, the translational half of the
+            // wrench whose rotational half is `torque`, and read exactly as
+            // torque is (issue #47): one world-frame vector for every body, a
+            // later line replacing an earlier one, and a value whose square
+            // overflows left for Rigid3DSettings::is_valid to refuse.
+            if (scenario.type != ScenarioType::Rigid3D)
+            {
+                return make_error(line_number, "force belongs to type rigid3d");
+            }
+            saw_domain_key = true;
+            math::Real fx{};
+            math::Real fy{};
+            math::Real fz{};
+            if (!(tokens >> fx >> fy >> fz))
+            {
+                return make_error(line_number, "force requires: fx fy fz");
+            }
+            scenario.rigid3d_settings.force = math::Vec3{fx, fy, fz};
         }
         else if (key == "gravity3")
         {
@@ -1102,6 +1215,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.position = math::Vec2{px, py};
             body.velocity = math::Vec2{vx, vy};
             scenario.rigid_bodies.push_back(body);
+            if (body.radius > math::Real{0} && first_disc_line == 0)
+            {
+                first_disc_line = line_number;
+                first_disc_key = "rigid_body";
+            }
         }
         else if (key == "rigid_static")
         {
@@ -1125,6 +1243,11 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.inertia = std::numeric_limits<math::Real>::infinity();
             body.position = math::Vec2{px, py};
             scenario.rigid_bodies.push_back(body);
+            if (body.radius > math::Real{0} && first_disc_line == 0)
+            {
+                first_disc_line = line_number;
+                first_disc_key = "rigid_static";
+            }
         }
         else if (key == "rigid_box")
         {
@@ -1157,6 +1280,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
             body.position = math::Vec2{px, py};
             body.velocity = math::Vec2{vx, vy};
             scenario.rigid_bodies.push_back(body);
+            if (first_box_line == 0)
+            {
+                first_box_line = line_number;
+            }
         }
         else if (key == "spring_body")
         {
@@ -1239,6 +1366,24 @@ ScenarioParseResult parse_scenario(std::istream& input)
             std::string extra;
             tokens >> extra;
             return make_error(line_number, "unexpected extra token " + quoted(extra));
+        }
+
+        // Issue #48: both kinds are now present, and this line brought in the
+        // second, so it is the line where the mix first occurs. An interim
+        // refusal until box against disc has its own milestone. A body of
+        // radius 0 collides with nothing, so it does not count. Only `type
+        // rigid` reads these keys, so only it can get here.
+        if (first_box_line != 0 && first_disc_line != 0)
+        {
+            const bool disc_here = first_disc_line == line_number;
+            return make_error(
+                line_number,
+                "box against disc is not supported yet: this " +
+                    std::string(disc_here ? first_disc_key : "rigid_box") +
+                    " would pass through the " +
+                    std::string(disc_here ? "rigid_box" : first_disc_key) + " on line " +
+                    std::to_string(disc_here ? first_box_line : first_disc_line) +
+                    " (a disc with a radius above 0 cannot share a scenario with a box)");
         }
 
         // The entity cap is checked as each line is read, so an oversized file
