@@ -114,16 +114,41 @@ void resolve_pair(Particle3D& a, Particle3D& b, math::Real restitution,
     b.velocity -= tangent * (tangent_impulse * inverse_b);
 }
 
+// Re-emit a particle from a THERMAL wall (M39), the 3D sibling of the 2D
+// thermal_bounce: the normal component redrawn as a flux-weighted speed
+// pointing `into` the box, then the two tangential components, which go to the
+// wall's tangent axes in ascending order (`t1` before `t2`), three draws in all.
+// The impulse tally gets m (|v_n,in| + v_n,out) and the heat tally the change in
+// kinetic energy, written as total_kinetic_energy3d writes it.
+void thermal_bounce(Particle3D& p, math::Real& normal, math::Real& t1, math::Real& t2,
+                    math::Real into, math::Real temperature, SplitMix64& random,
+                    math::Real& impulse, math::Real& heat)
+{
+    const math::Real before = math::Real{0.5} * p.mass * math::dot(p.velocity, p.velocity);
+    const math::Real speed_in = std::abs(normal);
+    const math::Real speed_out = emission_normal_speed(random, temperature, p.mass);
+    const math::Vec2 sideways = emission_tangent(random, temperature, p.mass);
+    normal = into * speed_out;
+    t1 = sideways.x;
+    t2 = sideways.y;
+    impulse += p.mass * (speed_in + speed_out);
+    heat += math::Real{0.5} * p.mass * math::dot(p.velocity, p.velocity) - before;
+}
+
 // Keep one particle inside the box. Walls are immovable, so this is a clamp plus
 // a damped reflection rather than an exchange of momentum. On a real bounce the
 // two tangential axes of the wall are also damped, clamped Coulomb-style to
 // `friction` times the normal impulse per unit mass, which is `(1 + restitution)`
 // times the incoming normal speed. Friction 0 is exactly the old reflect. Per
 // axis, the 3D copy of the 2D resolver with a third axis added, including the
-// tally of each bounce's normal impulse against the wall it hit.
+// tally of each bounce's normal impulse against the wall it hit. A wall with a
+// temperature above 0 is thermal instead (M39): clamped as before, re-emitted
+// by thermal_bounce, with no restitution or friction there; a specular wall's
+// statements are unchanged, so a box without a thermal wall never draws.
 void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
                    math::Real restitution, math::Real friction,
-                   WallImpulse3D& impulse)
+                   const WallTemperature3D& walls, SplitMix64& random,
+                   WallImpulse3D& impulse, WallHeat3D& heat)
 {
     const math::Real kick = p.mass * (math::Real{1} + restitution);
     if (p.position.x - p.radius < bounds.min.x)
@@ -131,11 +156,20 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         p.position.x = bounds.min.x + p.radius;
         if (p.velocity.x < math::Real{0})
         {
-            const math::Real normal_speed = -p.velocity.x;
-            p.velocity.x = -p.velocity.x * restitution;
-            damp_tangential(p.velocity.y, p.velocity.z,
-                            friction * (math::Real{1} + restitution) * normal_speed);
-            impulse.min_x += kick * normal_speed;
+            if (walls.min_x > math::Real{0})
+            {
+                thermal_bounce(p, p.velocity.x, p.velocity.y, p.velocity.z,
+                               math::Real{1}, walls.min_x, random,
+                               impulse.min_x, heat.min_x);
+            }
+            else
+            {
+                const math::Real normal_speed = -p.velocity.x;
+                p.velocity.x = -p.velocity.x * restitution;
+                damp_tangential(p.velocity.y, p.velocity.z,
+                                friction * (math::Real{1} + restitution) * normal_speed);
+                impulse.min_x += kick * normal_speed;
+            }
         }
     }
     else if (p.position.x + p.radius > bounds.max.x)
@@ -143,11 +177,20 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         p.position.x = bounds.max.x - p.radius;
         if (p.velocity.x > math::Real{0})
         {
-            const math::Real normal_speed = p.velocity.x;
-            p.velocity.x = -p.velocity.x * restitution;
-            damp_tangential(p.velocity.y, p.velocity.z,
-                            friction * (math::Real{1} + restitution) * normal_speed);
-            impulse.max_x += kick * normal_speed;
+            if (walls.max_x > math::Real{0})
+            {
+                thermal_bounce(p, p.velocity.x, p.velocity.y, p.velocity.z,
+                               math::Real{-1}, walls.max_x, random,
+                               impulse.max_x, heat.max_x);
+            }
+            else
+            {
+                const math::Real normal_speed = p.velocity.x;
+                p.velocity.x = -p.velocity.x * restitution;
+                damp_tangential(p.velocity.y, p.velocity.z,
+                                friction * (math::Real{1} + restitution) * normal_speed);
+                impulse.max_x += kick * normal_speed;
+            }
         }
     }
 
@@ -156,11 +199,20 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         p.position.y = bounds.min.y + p.radius;
         if (p.velocity.y < math::Real{0})
         {
-            const math::Real normal_speed = -p.velocity.y;
-            p.velocity.y = -p.velocity.y * restitution;
-            damp_tangential(p.velocity.x, p.velocity.z,
-                            friction * (math::Real{1} + restitution) * normal_speed);
-            impulse.min_y += kick * normal_speed;
+            if (walls.min_y > math::Real{0})
+            {
+                thermal_bounce(p, p.velocity.y, p.velocity.x, p.velocity.z,
+                               math::Real{1}, walls.min_y, random,
+                               impulse.min_y, heat.min_y);
+            }
+            else
+            {
+                const math::Real normal_speed = -p.velocity.y;
+                p.velocity.y = -p.velocity.y * restitution;
+                damp_tangential(p.velocity.x, p.velocity.z,
+                                friction * (math::Real{1} + restitution) * normal_speed);
+                impulse.min_y += kick * normal_speed;
+            }
         }
     }
     else if (p.position.y + p.radius > bounds.max.y)
@@ -168,11 +220,20 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         p.position.y = bounds.max.y - p.radius;
         if (p.velocity.y > math::Real{0})
         {
-            const math::Real normal_speed = p.velocity.y;
-            p.velocity.y = -p.velocity.y * restitution;
-            damp_tangential(p.velocity.x, p.velocity.z,
-                            friction * (math::Real{1} + restitution) * normal_speed);
-            impulse.max_y += kick * normal_speed;
+            if (walls.max_y > math::Real{0})
+            {
+                thermal_bounce(p, p.velocity.y, p.velocity.x, p.velocity.z,
+                               math::Real{-1}, walls.max_y, random,
+                               impulse.max_y, heat.max_y);
+            }
+            else
+            {
+                const math::Real normal_speed = p.velocity.y;
+                p.velocity.y = -p.velocity.y * restitution;
+                damp_tangential(p.velocity.x, p.velocity.z,
+                                friction * (math::Real{1} + restitution) * normal_speed);
+                impulse.max_y += kick * normal_speed;
+            }
         }
     }
 
@@ -181,11 +242,20 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         p.position.z = bounds.min.z + p.radius;
         if (p.velocity.z < math::Real{0})
         {
-            const math::Real normal_speed = -p.velocity.z;
-            p.velocity.z = -p.velocity.z * restitution;
-            damp_tangential(p.velocity.x, p.velocity.y,
-                            friction * (math::Real{1} + restitution) * normal_speed);
-            impulse.min_z += kick * normal_speed;
+            if (walls.min_z > math::Real{0})
+            {
+                thermal_bounce(p, p.velocity.z, p.velocity.x, p.velocity.y,
+                               math::Real{1}, walls.min_z, random,
+                               impulse.min_z, heat.min_z);
+            }
+            else
+            {
+                const math::Real normal_speed = -p.velocity.z;
+                p.velocity.z = -p.velocity.z * restitution;
+                damp_tangential(p.velocity.x, p.velocity.y,
+                                friction * (math::Real{1} + restitution) * normal_speed);
+                impulse.min_z += kick * normal_speed;
+            }
         }
     }
     else if (p.position.z + p.radius > bounds.max.z)
@@ -193,11 +263,20 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         p.position.z = bounds.max.z - p.radius;
         if (p.velocity.z > math::Real{0})
         {
-            const math::Real normal_speed = p.velocity.z;
-            p.velocity.z = -p.velocity.z * restitution;
-            damp_tangential(p.velocity.x, p.velocity.y,
-                            friction * (math::Real{1} + restitution) * normal_speed);
-            impulse.max_z += kick * normal_speed;
+            if (walls.max_z > math::Real{0})
+            {
+                thermal_bounce(p, p.velocity.z, p.velocity.x, p.velocity.y,
+                               math::Real{-1}, walls.max_z, random,
+                               impulse.max_z, heat.max_z);
+            }
+            else
+            {
+                const math::Real normal_speed = p.velocity.z;
+                p.velocity.z = -p.velocity.z * restitution;
+                damp_tangential(p.velocity.x, p.velocity.y,
+                                friction * (math::Real{1} + restitution) * normal_speed);
+                impulse.max_z += kick * normal_speed;
+            }
         }
     }
 }
@@ -210,12 +289,20 @@ bool Particle3D::is_valid() const
            math::is_squarable(position) && math::is_squarable(velocity);
 }
 
+bool WallTemperature3D::is_valid() const
+{
+    // t >= 0 refuses a NaN as well as a negative; -0.0 is the specular wall.
+    const auto usable = [](math::Real t) { return t >= math::Real{0} && math::is_finite(t); };
+    return usable(min_x) && usable(max_x) && usable(min_y) && usable(max_y) &&
+           usable(min_z) && usable(max_z);
+}
+
 bool ParticleSettings3D::is_valid() const
 {
     return restitution >= math::Real{0} && restitution <= math::Real{1} &&
            math::is_finite(restitution) && friction >= math::Real{0} &&
            math::is_finite(friction) && math::is_finite(gravity) &&
-           bounds.is_valid();
+           bounds.is_valid() && wall_temperature.is_valid();
 }
 
 ParticleWorld3D::ParticleWorld3D(sim_core::SimulationSettings simulation_settings,
@@ -224,6 +311,7 @@ ParticleWorld3D::ParticleWorld3D(sim_core::SimulationSettings simulation_setting
     : simulation_settings_{simulation_settings},
       particle_settings_{particle_settings},
       particles_{std::move(particles)},
+      random_{particle_settings.seed},
       step_{time::FixedStep::create(simulation_settings.dt)}
 {
 }
@@ -271,6 +359,8 @@ sim_core::StepResult ParticleWorld3D::step()
 
     previous_ = particles_;
     const WallImpulse3D previous_impulse = wall_impulse_;
+    const WallHeat3D previous_heat = wall_heat_;
+    const SplitMix64 previous_random = random_;
 
     const math::Real dt = simulation_settings_.dt;
     const math::Real restitution = particle_settings_.restitution;
@@ -302,7 +392,8 @@ sim_core::StepResult ParticleWorld3D::step()
     for (std::size_t i = 0; i < count; ++i)
     {
         resolve_walls(particles_[i], particle_settings_.bounds, restitution, friction,
-                      wall_impulse_);
+                      particle_settings_.wall_temperature, random_, wall_impulse_,
+                      wall_heat_);
     }
 
     for (const Particle3D& p : particles_)
@@ -311,6 +402,8 @@ sim_core::StepResult ParticleWorld3D::step()
         {
             particles_.swap(previous_);
             wall_impulse_ = previous_impulse;
+            wall_heat_ = previous_heat;
+            random_ = previous_random; // a failed step leaves no trace in the stream
             return sim_core::StepResult{sim_core::StepStatus::InvalidState};
         }
     }

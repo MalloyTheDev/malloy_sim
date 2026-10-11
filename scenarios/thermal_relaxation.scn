@@ -1,0 +1,89 @@
+# MalloySim scenario: a gas relaxing to the temperature of its walls (M39).
+#
+# M38 read a box of colliding particles as a gas. M39 gives its walls a
+# temperature: a THERMAL wall forgets how a particle arrived and re-emits it as
+# a wall at temperature T_w would, its normal speed flux-weighted (a Rayleigh
+# law) and its tangential component Gaussian with variance T_w / m, drawn from
+# the world's seeded generator (docs/04, ADR 0010). Heat then flows between the
+# walls and the gas until the gas is at T_w.
+#
+# The hard_disk_gas.scn geometry: 100 disks of mass 1 and radius 0.2 on a 10 by
+# 10 lattice in a box of side 10, every one at speed 1, so the gas starts at
+# T = 0.5. All four walls are thermal at T_w = 2.
+#
+# Temperature. The diffuse wall's stationary state is the canonical
+# Maxwell-Boltzmann distribution at T_w (Cercignani 1988), for colliding disks
+# as for points, so the gas heats from 0.5 to 2. A snapshot of 100 disks
+# scatters about T_w by T_w sqrt(2 / (d N)) = 0.2, so each temperature check
+# allows three of those plus 1 per cent: 0.62. Measured across 1000 seeds:
+# 2.001 +- 0.201 at step 2000 and 1.999 +- 0.203 at step 4000. These snapshots
+# alone are weak against one wrong design, a wall that
+# emits a half-Gaussian normal speed, which leaves the gas at T_w d/(d+1) =
+# 1.33: inside the band one time in three. The pressure check below is the
+# decisive one.
+#
+# Relaxation. At equilibrium the speeds are Maxwell-Boltzmann, so the fraction
+# slower than the mean is 1 - 1/e = 0.632, within three binomial standard
+# deviations for 100 disks, 0.145 (as in hard_disk_gas.scn).
+#
+# Pressure. Hard disks are athermal: at a given density the pressure scales with
+# T, so hard_disk_gas.scn's 0.683 at T = 0.5 becomes 4 x 0.683 = 2.732 at
+# T_w = 2 (measured 2.744 +- 0.005 over 300 seeds, started at T_w). But
+# `pressure` is a time average from step 0, and the gas spends its first steps
+# colder, which costs it about 6.6 per cent. A well-mixed model of the heating,
+# dT/dt = k sqrt(T) (T_w - T), predicts only 4 to 6 per cent, so the centre is
+# the measured ensemble mean instead: 2.561 +- 0.085 across 1000 seeds, so 2.56.
+# The tolerance, 0.31, is three times that spread plus the M38 2 per cent model
+# budget. It excludes the half-Gaussian emitter (1.72), the ideal gas at T_w
+# (2.0) and the unrelaxed start (0.683).
+
+type particles
+
+dt 0.01
+steps 4000
+output_every 1000
+
+restitution 1.0
+bounds -5.0 -5.0 5.0 5.0
+
+# wall_temperature <wall> <T>: every wall thermal at T_w = 2.
+wall_temperature min_x 2.0
+wall_temperature max_x 2.0
+wall_temperature min_y 2.0
+wall_temperature max_y 2.0
+
+# The seed of the generator the walls draw from. The same seed gives the same
+# run; another seed gives another run, within the tolerances below.
+seed 1
+
+# lattice <nx> <ny> <mass> <radius> <speed>
+lattice 10 10  1.0 0.2 1.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   T 5.00000000e-01   P -              (no heat exchanged yet)
+#   step   2000   T 2.26603865e+00   P 2.50015008e+00
+#   step   4000   T 2.17262523e+00   P 2.61463672e+00
+#
+# The walls' heats at step 4000 (23.3, 34.0, 47.2 and 62.8) add up to 167.26,
+# exactly the rise in kinetic energy from 50 to 217.26.
+#
+# The invariants:
+#
+# 1. The gas starts at exactly T = 0.5 with zero momentum and no heat exchanged.
+# 2. It heats to the walls' temperature, 2, and stays there.
+# 3. Its speeds relax to Maxwell-Boltzmann (slow_fraction 0.632).
+# 4. Its pressure is the hard-disk value at T_w, less the cold start's share.
+#
+# On the ASCII view: a regular grid of points that dissolves into a gas.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    temperature    5.00000000e-01   tol 1e-12
+# check step 0    speed_ratio    1.00000000e+00   tol 1e-12
+# check step 0    momentum_x     0.00000000e+00   tol 1e-12
+# check step 0    heat_min_x     0.00000000e+00   tol 0
+# check step 2000 temperature    2.00000000e+00   tol 0.62
+# check step 4000 temperature    2.00000000e+00   tol 0.62
+# check step 4000 slow_fraction  6.32000000e-01   tol 0.145
+# check step 4000 pressure       2.56000000e+00   tol 0.31

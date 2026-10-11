@@ -8,4 +8,5 @@
 #include <malloy/particles/particle3d_world.hpp>
 #include <malloy/particles/particle_settings.hpp>
 #include <malloy/particles/particle_world.hpp>
+#include <malloy/particles/splitmix64.hpp>
 #include <malloy/particles/thermo.hpp>

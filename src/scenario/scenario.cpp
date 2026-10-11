@@ -1,13 +1,18 @@
 #include <malloy/scenario/scenario.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 #include <istream>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
+#include <utility>
 
 #include <malloy/collide/shapes.hpp>
 #include <malloy/collide/shapes3d.hpp>
@@ -192,6 +197,10 @@ ScenarioParseResult parse_scenario(std::istream& input)
     // before any of them appear.
     bool saw_domain_key = false;
     std::optional<LatticeRequest> lattice;
+    // M39: which walls a `wall_temperature` line has already named, one bit per
+    // wall, so naming one twice (most likely a typo for its opposite) is an
+    // error rather than a silent overwrite.
+    unsigned named_walls = 0;
 
     for (;;)
     {
@@ -809,6 +818,105 @@ ScenarioParseResult parse_scenario(std::istream& input)
             {
                 scenario.rigid_settings.friction = value;
             }
+        }
+        else if (key == "seed")
+        {
+            if (scenario.type != ScenarioType::Particles &&
+                scenario.type != ScenarioType::Particles3D)
+            {
+                return make_error(line_number, "seed belongs to type particles or particles3d");
+            }
+            saw_domain_key = true;
+            std::string text;
+            if (!(tokens >> text))
+            {
+                return make_error(line_number, "seed requires a whole number");
+            }
+            // from_chars, not >>: stream extraction into an unsigned type reads
+            // "-1" as 18446744073709551615. from_chars takes plain decimal digits
+            // only, refusing a sign, a fraction, an exponent, a hex prefix and
+            // anything out of range, and the whole token must be consumed.
+            std::uint64_t value{};
+            const char* const first = text.data();
+            const char* const last = first + text.size();
+            const std::from_chars_result digits = std::from_chars(first, last, value);
+            if (digits.ec != std::errc{} || digits.ptr != last)
+            {
+                return make_error(line_number,
+                                  "seed must be a whole number from 0 to "
+                                  "18446744073709551615, not " + quoted(text));
+            }
+            if (scenario.type == ScenarioType::Particles3D)
+            {
+                scenario.particle3d_settings.seed = value;
+            }
+            else
+            {
+                scenario.particle_settings.seed = value;
+            }
+        }
+        else if (key == "wall_temperature")
+        {
+            if (scenario.type != ScenarioType::Particles &&
+                scenario.type != ScenarioType::Particles3D)
+            {
+                return make_error(line_number,
+                                  "wall_temperature belongs to type particles or particles3d");
+            }
+            saw_domain_key = true;
+            std::string wall;
+            if (!(tokens >> wall))
+            {
+                return make_error(line_number, "wall_temperature requires: wall temperature");
+            }
+            // The wall names are the impulse tally's. The name is resolved
+            // before the temperature is read, so a bad name is reported as such
+            // whatever follows it.
+            const bool three = scenario.type == ScenarioType::Particles3D;
+            particles::WallTemperature2D& w2 = scenario.particle_settings.wall_temperature;
+            particles::WallTemperature3D& w3 = scenario.particle3d_settings.wall_temperature;
+            const std::pair<const char*, math::Real*> walls[] = {
+                {"min_x", three ? &w3.min_x : &w2.min_x},
+                {"max_x", three ? &w3.max_x : &w2.max_x},
+                {"min_y", three ? &w3.min_y : &w2.min_y},
+                {"max_y", three ? &w3.max_y : &w2.max_y},
+                {"min_z", three ? &w3.min_z : nullptr},
+                {"max_z", three ? &w3.max_z : nullptr},
+            };
+            math::Real* slot = nullptr;
+            unsigned bit = 0;
+            for (std::size_t i = 0; i < std::size(walls); ++i)
+            {
+                if (walls[i].second != nullptr && wall == walls[i].first)
+                {
+                    slot = walls[i].second;
+                    bit = 1u << i;
+                }
+            }
+            if (slot == nullptr)
+            {
+                return make_error(line_number,
+                                  "unknown wall " + quoted(wall) +
+                                      (three ? " (walls are min_x, max_x, min_y, max_y, "
+                                               "min_z and max_z)"
+                                             : " (walls are min_x, max_x, min_y and max_y)"));
+            }
+            if ((named_walls & bit) != 0u)
+            {
+                // `wall` is one of the known names here, so it is safe to echo.
+                return make_error(line_number, "wall_temperature names " + wall + " twice");
+            }
+            // A negative temperature parses and is left for validate() to
+            // refuse, so that rule lives in one place. A value that is not a
+            // finite number (nan, inf, or one too large for a double) does not
+            // parse at all.
+            math::Real temperature{};
+            if (!(tokens >> temperature))
+            {
+                return make_error(line_number, "wall_temperature requires: wall temperature");
+            }
+            named_walls |= bit;
+            *slot = temperature;
         }
         else if (key == "ground")
         {

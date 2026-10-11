@@ -864,6 +864,14 @@ int main()
                     if (q == "pressure")
                         return malloy::particles::pressure3d(
                             world.wall_impulse(), settings.bounds, world.elapsed_time());
+                    // M39: the heat each wall has delivered to the gas.
+                    const auto& heat = world.wall_heat();
+                    if (q == "heat_min_x") return heat.min_x;
+                    if (q == "heat_max_x") return heat.max_x;
+                    if (q == "heat_min_y") return heat.min_y;
+                    if (q == "heat_max_y") return heat.max_y;
+                    if (q == "heat_min_z") return heat.min_z;
+                    if (q == "heat_max_z") return heat.max_z;
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -892,6 +900,13 @@ int main()
                     if (q == "pressure")
                         return malloy::particles::pressure(
                             world.wall_impulse(), settings.bounds, world.elapsed_time());
+                    // M39: the heat each wall has delivered to the gas. A 2D
+                    // world has no z walls, so heat_min_z FAILS here.
+                    const auto& heat = world.wall_heat();
+                    if (q == "heat_min_x") return heat.min_x;
+                    if (q == "heat_max_x") return heat.max_x;
+                    if (q == "heat_min_y") return heat.min_y;
+                    if (q == "heat_max_y") return heat.max_y;
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
@@ -980,6 +995,114 @@ int main()
             r.scenario.particle_list3d[0].position, malloy::math::Vec3{1.0, 2.0, 3.0}, eps));
         MALLOY_CHECK_TRUE(malloy::math::approx_equal(
             r.scenario.particle_list3d[0].velocity, malloy::math::Vec3{-4.0, -5.0, -6.0}, eps));
+    }
+
+    // --- M39: thermal walls and the seed. Every wall name lands in its own
+    //     field (distinct temperatures, so a swapped pair shows), in 2D and in
+    //     3D; the seed takes plain decimal digits across the whole 64-bit range
+    //     and nothing else. ---
+    {
+        std::istringstream in("type particles\n"
+                              "wall_temperature min_x 1.5\n"
+                              "wall_temperature max_x 2.5\n"
+                              "wall_temperature min_y 3.5\n"
+                              "wall_temperature max_y 4.5\n"
+                              "seed 18446744073709551615\n"
+                              "particle 1 0.1 0 0 0 0\n");
+        const ScenarioParseResult r = parse_scenario(in);
+        MALLOY_CHECK_TRUE(r.ok);
+        const auto& w = r.scenario.particle_settings.wall_temperature;
+        MALLOY_CHECK_TRUE(w.min_x == 1.5 && w.max_x == 2.5 && w.min_y == 3.5 && w.max_y == 4.5);
+        MALLOY_CHECK_TRUE(r.scenario.particle_settings.seed == 18446744073709551615ULL);
+        // 3D writes the 3D settings, z walls included, and leaves 2D's alone.
+        std::istringstream in3("type particles3d\n"
+                               "wall_temperature max_z 6.5\n"
+                               "wall_temperature min_z 5.5\n"
+                               "wall_temperature min_x 1.5\n"
+                               "seed 0\n"
+                               "seed 42\n"); // a scalar key: the last one wins
+        const ScenarioParseResult r3 = parse_scenario(in3);
+        MALLOY_CHECK_TRUE(r3.ok);
+        const auto& w3 = r3.scenario.particle3d_settings.wall_temperature;
+        MALLOY_CHECK_TRUE(w3.min_x == 1.5 && w3.max_x == 0.0 && w3.min_z == 5.5 &&
+                          w3.max_z == 6.5);
+        MALLOY_CHECK_TRUE(r3.scenario.particle3d_settings.seed == 42);
+        MALLOY_CHECK_TRUE(r3.scenario.particle_settings.seed == 0);
+        MALLOY_CHECK_TRUE(r3.scenario.particle_settings.wall_temperature.min_x == 0.0);
+        // A negative temperature parses, and validate() refuses it, so each rule
+        // lives in one place.
+        std::istringstream cold("type particles\nwall_temperature max_y -1\n"
+                                "particle 1 0.1 0 0 0 0\n");
+        const ScenarioParseResult c = parse_scenario(cold);
+        MALLOY_CHECK_TRUE(c.ok);
+        MALLOY_CHECK_FALSE(c.scenario.particle_settings.is_valid());
+    }
+    {
+        const char* const bad[] = {
+            "type nbody\nseed 1\n",                              // wrong domain
+            "type rigid\nwall_temperature min_x 1\n",            // wrong domain
+            "type particles\nseed\n",                            // missing value
+            "type particles\nseed -1\n",                         // a sign (>> would wrap it)
+            "type particles\nseed +5\n",                         // a sign
+            "type particles\nseed 1.5\n",                        // a fraction
+            "type particles\nseed 1e3\n",                        // an exponent
+            "type particles\nseed 0x10\n",                       // a hex prefix
+            "type particles\nseed 18446744073709551616\n",       // one past 2^64 - 1
+            "type particles\nseed 7 8\n",                        // a trailing token
+            "type particles\nwall_temperature min_x\n",          // missing temperature
+            "type particles\nwall_temperature 1.5\n",            // missing wall
+            "type particles\nwall_temperature left 1\n",         // unknown wall
+            "type particles\nwall_temperature min_z 1\n",        // a 3D wall in 2D
+            "type particles3d\nwall_temperature top 1\n",        // unknown wall in 3D
+            "type particles\nwall_temperature min_x 1 2\n",      // a trailing token
+            "type particles\nwall_temperature min_x nan\n",      // not a number
+            "type particles\nwall_temperature min_x inf\n",      // not finite
+            "type particles\nwall_temperature min_x 1e400\n",    // too large for a double
+            "type particles\nwall_temperature min_x 1\nwall_temperature min_x 2\n",
+            "type particles3d\nwall_temperature max_z 1\nwall_temperature max_z 1\n",
+            // Either key marks the file as committed to its domain, so a later
+            // `type` line cannot switch it (the seed would land in the wrong
+            // settings, or a 2D wall name would have been checked against 2D).
+            "type particles\nseed 5\ntype particles3d\n",
+            "type particles\nwall_temperature min_x 1\ntype particles3d\n",
+        };
+        for (const char* text : bad)
+        {
+            std::istringstream in(text);
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_FALSE(r.error.empty());
+        }
+        // The messages name the trouble: the wall list for a wrong name (in the
+        // declared dimension), and the duplicate by name on its own line.
+        std::istringstream wrong("type particles3d\nwall_temperature top 1\n");
+        MALLOY_CHECK_TRUE(parse_scenario(wrong).error ==
+                          "line 2: unknown wall 'top' (walls are min_x, max_x, min_y, max_y, "
+                          "min_z and max_z)");
+        std::istringstream twice("type particles\nwall_temperature min_y 1\n"
+                                 "wall_temperature max_y 1\nwall_temperature min_y 2\n");
+        MALLOY_CHECK_TRUE(parse_scenario(twice).error ==
+                          "line 4: wall_temperature names min_y twice");
+        std::istringstream wrapped("type particles\nseed -1\n");
+        MALLOY_CHECK_TRUE(parse_scenario(wrapped).error ==
+                          "line 2: seed must be a whole number from 0 to "
+                          "18446744073709551615, not '-1'");
+        // The wall name is resolved before the temperature is read, so a bad
+        // name is reported as a bad name even with no temperature after it.
+        std::istringstream bare("type particles\nwall_temperature left\n");
+        MALLOY_CHECK_TRUE(parse_scenario(bare).error ==
+                          "line 2: unknown wall 'left' (walls are min_x, max_x, min_y and "
+                          "max_y)");
+        std::istringstream huge("type particles\nwall_temperature min_x 1e400\n");
+        MALLOY_CHECK_TRUE(parse_scenario(huge).error ==
+                          "line 2: wall_temperature requires: wall temperature");
+        for (const char* text : {"type particles\nseed 5\ntype particles3d\n",
+                                 "type particles\nwall_temperature min_x 1\ntype particles3d\n"})
+        {
+            std::istringstream in(text);
+            MALLOY_CHECK_TRUE(parse_scenario(in).error ==
+                              "line 3: type must come before any domain-specific key");
+        }
     }
 
     // --- M38: `lattice` builds a whole gas in one line. It is expanded after
@@ -2267,12 +2390,19 @@ int main()
                 const std::string token = std::string("k") + c + "y";
                 const std::string shown =
                     "'k" + rendered(static_cast<unsigned char>(b)) + "y'";
-                const std::string inputs[3] = {token + " 1\n", "type " + token + "\n",
-                                               "dt 0.5 " + token + "\n"};
-                const std::string expected[3] = {"line 1: unknown key " + shown,
-                                                 "line 1: unknown type " + shown,
-                                                 "line 1: unexpected extra token " + shown};
-                for (int site = 0; site < 3; ++site)
+                // M39 added two more places a token is repeated: an unknown wall
+                // name and a seed that is not a whole number.
+                const std::string inputs[5] = {
+                    token + " 1\n", "type " + token + "\n", "dt 0.5 " + token + "\n",
+                    "type particles\nwall_temperature " + token + " 1\n",
+                    "type particles3d\nseed " + token + "\n"};
+                const std::string expected[5] = {
+                    "line 1: unknown key " + shown, "line 1: unknown type " + shown,
+                    "line 1: unexpected extra token " + shown,
+                    "line 2: unknown wall " + shown + " (walls are min_x, max_x, min_y and max_y)",
+                    "line 2: seed must be a whole number from 0 to 18446744073709551615, not " +
+                        shown};
+                for (int site = 0; site < 5; ++site)
                 {
                     std::istringstream in(inputs[site]);
                     const ScenarioParseResult r = parse_scenario(in);

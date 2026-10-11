@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M37). These boundaries are in force
+> All modules below are implemented (M2-M39). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -54,9 +54,9 @@ Not responsible for density, mass, inertia, bodies, velocity, contact response, 
 
 ## `malloy_particles`
 
-Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form. Since M38 it also reads a box of particles as a gas (`thermo.hpp`): each world keeps a per-wall tally of the normal impulse its walls have delivered (`wall_impulse()`, bookkeeping that changes no trajectory and is rolled back with a rolled-back step), and pure functions turn the state and that tally into a temperature, a wall pressure and two relaxation statistics, plus `lattice_gas`/`lattice_gas3d`, a deterministic grid start with no random numbers.
+Responsible for `Particle2D`, `ParticleSettings`, `ParticleWorld`, non-rotational contact response (positional correction, an impulse along the contact normal and, since M35, a Coulomb friction impulse along the tangent, clamped to the normal one, on both particle and wall contacts; a particle has no orientation, so it imparts no spin), wall containment, uniform gravity, and its own validation and diagnostics including potential and total energy. Since M32 it also has the 3D siblings `Particle3D`, `ParticleSettings3D` and `ParticleWorld3D`: spheres colliding (the M22/M24 geometry) and confined to a 3D `collide::Aabb3` box. It is the last of the five domains to gain a 3D form. Since M38 it also reads a box of particles as a gas (`thermo.hpp`): each world keeps a per-wall tally of the normal impulse its walls have delivered (`wall_impulse()`, bookkeeping that changes no trajectory and is rolled back with a rolled-back step), and pure functions turn the state and that tally into a temperature, a wall pressure and two relaxation statistics, plus `lattice_gas`/`lattice_gas3d`, a deterministic grid start with no random numbers. Since M39 its walls can be THERMAL (`wall_temperature` in the settings): a thermal wall re-emits a particle from its temperature's distribution, drawing from the world's own seeded `SplitMix64` (`splitmix64.hpp`, ADR 0010), and a per-wall heat tally (`wall_heat()`) records what each wall gave the gas; the generator is rolled back with a rolled-back step, and a box without a thermal wall never draws.
 
-Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, random numbers, broadphase acceleration, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
+Not responsible for collision geometry (that is `malloy_collide`), orientation, angular velocity, torque, any random numbers but its own seeded generator (no `<random>` engines or distributions, no global or time-seeded generator; ADR 0010), broadphase acceleration, or scenario loading. It carries its own body type rather than widening `nbody::Body2D`, because each domain owns its concrete state.
 
 ## `malloy_rigid`
 

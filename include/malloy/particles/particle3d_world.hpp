@@ -7,15 +7,31 @@
 #include <malloy/math/vec3.hpp>
 #include <malloy/particles/particle3d.hpp>
 #include <malloy/particles/particle3d_settings.hpp>
+#include <malloy/particles/splitmix64.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/time/fixed_step.hpp>
 
 namespace malloy::particles
 {
 // The total normal impulse each of the six walls has delivered since the run
-// began (M38), the 3D sibling of WallImpulse2D: non-negative, normal component
-// only, and divided by the elapsed time and the wall area it is the pressure.
+// began (M38), the 3D sibling of WallImpulse2D: non-negative, the normal
+// momentum change only (m (1 + e) |v_n| at a specular wall, m (|v_n,in| +
+// v_n,out) at a thermal one), and divided by the elapsed time and the wall area
+// it is the pressure.
 struct WallImpulse3D
+{
+    math::Real min_x{0.0};
+    math::Real max_x{0.0};
+    math::Real min_y{0.0};
+    math::Real max_y{0.0};
+    math::Real min_z{0.0};
+    math::Real max_z{0.0};
+};
+
+// The total heat each of the six walls has delivered to the gas (M39), the 3D
+// sibling of WallHeat2D: kinetic energy after minus before, at every bounce off
+// a thermal wall, positive into the gas; a specular wall's entry stays 0.
+struct WallHeat3D
 {
     math::Real min_x{0.0};
     math::Real max_x{0.0};
@@ -45,7 +61,14 @@ public:
     //   2. move every particle by the UPDATED velocity * dt (semi-implicit
     //      Euler);
     //   3. resolve particle/particle contacts in ascending pair order;
-    //   4. clamp every particle back inside the box.
+    //   4. clamp every particle back inside the box, particle by particle in
+    //      ascending index, each particle's x walls, then y, then z.
+    //
+    // A THERMAL wall (M39) re-emits instead of reflecting, drawing exactly three
+    // uniforms per bounce in a fixed order: the normal speed, then the two
+    // tangential components (thermo.hpp), which go to the wall's two tangent
+    // axes in ascending order (an x wall sets y then z, a y wall x then z, a z
+    // wall x then y). No other step draws.
     //
     // The contact response is a positional correction plus an equal-and-opposite
     // impulse along the line of centres, so it imparts no spin (a particle has
@@ -71,12 +94,22 @@ public:
     // changes no trajectory and is rolled back with a rolled-back step.
     const WallImpulse3D& wall_impulse() const { return wall_impulse_; }
 
+    // The heat each wall has delivered to the gas so far (M39), rolled back
+    // with a rolled-back step.
+    const WallHeat3D& wall_heat() const { return wall_heat_; }
+
+    // The generator's state, seeded from ParticleSettings3D::seed; it moves by
+    // exactly three draws per thermal bounce and is restored by a rollback.
+    std::uint64_t random_state() const { return random_.state(); }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     ParticleSettings3D particle_settings_;
     std::vector<Particle3D> particles_;
     std::vector<Particle3D> previous_;
     WallImpulse3D wall_impulse_{};
+    WallHeat3D wall_heat_{};
+    SplitMix64 random_;
     std::optional<time::FixedStep> step_;
 };
 

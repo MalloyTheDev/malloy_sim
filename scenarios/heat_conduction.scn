@@ -1,0 +1,78 @@
+# MalloySim scenario: heat conducted through a gas between a hot and a cold wall
+# (M39).
+#
+# The hard_disk_gas.scn geometry again (100 disks of mass 1 and radius 0.2, box
+# of side 10), but now the left wall (min_x) is thermal at T_h = 4 and the right
+# wall (max_x) thermal at T_c = 1, while the top and bottom stay specular. The
+# lattice starts at speed 2, so at T = 2 = sqrt(T_h T_c), roughly where the gas
+# settles. Heat flows in at the hot wall, through the gas by collisions, and out
+# at the cold one: the gas conducts.
+#
+# The heat tallies. Each wall's `heat_*` is the kinetic energy it has given the
+# gas: positive at the hot wall, negative at the cold one, and exactly 0 at a
+# specular wall, which exchanges none. With restitution 1 the gas's kinetic
+# energy changes by exactly their sum.
+#
+# How much. There is no exact formula in this collisional regime, so the centre
+# comes from a model: Fourier conduction with the Enskog conductivity of hard
+# disks (after Gass, J. Chem. Phys. 54, 1898, 1971; Henderson's contact value
+# and equation of state), plus a temperature jump of one to two and a half mean
+# free paths at each diffuse wall, whose 2D coefficient is not known precisely.
+# That gives a steady flux of 9.9 to 13.1 per unit time across the box, and over
+# 40 time units, with the gas's own warming in the first steps, a hot-wall heat
+# of about 487 and a cold-wall heat of about -470. The tolerances, 243 and 229,
+# are the model's half-band plus three times the 40-seed spread (55.5 and 51.7).
+# Measured with an independent prototype across 40 seeds: 484 +- 56 and
+# -459 +- 52, a steady flux of 11.4 (0.47 of the free-molecular rate the same box
+# would carry with collisions switched off), a profile falling from 3.4 to 1.35
+# across the box, and an interior gradient within 5 per cent of Enskog. Across
+# 1000 seeds of the real code: 486 +- 58 and -462 +- 51. The bands exclude no
+# conduction (0) and free-molecular flow (with collisions switched off, +966 +-
+# 91 and -961 +- 86 over 300 seeds, which passes both checks less than 0.5 per
+# cent of the time), and a swapped pair of walls fails on sign.
+
+type particles
+
+dt 0.01
+steps 4000
+output_every 1000
+
+restitution 1.0
+bounds -5.0 -5.0 5.0 5.0
+
+# wall_temperature <wall> <T>: hot on the left, cold on the right; the top and
+# bottom are not named, so they stay specular.
+wall_temperature min_x 4.0
+wall_temperature max_x 1.0
+
+seed 1
+
+# lattice <nx> <ny> <mass> <radius> <speed>
+lattice 10 10  1.0 0.2 2.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E 2.00000000e+02   T 2.00000000e+00   Q min_x 0   Q max_x 0
+#   step   4000   E 2.26168329e+02   T 2.26168329e+00
+#                 Q min_x  4.78903006e+02   Q max_x -4.52734677e+02
+#
+# The energy books balance: 200 + 478.903006 - 452.734677 = 226.168329.
+#
+# The invariants:
+#
+# 1. Heat enters at the hot wall and leaves at the cold one, in the amounts
+#    above.
+# 2. The specular walls exchange no heat at all.
+# 3. The gas's kinetic energy changes by exactly the sum of the two heats.
+#
+# On the ASCII view: a gas, denser on the cold side, since the pressure is
+# uniform and a colder gas must be denser to match it.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# check step 0    temperature    2.00000000e+00   tol 1e-12
+# check step 0    heat_min_x     0.00000000e+00   tol 0
+# check step 4000 heat_min_x     4.87000000e+02   tol 243
+# check step 4000 heat_max_x    -4.70000000e+02   tol 229
+# check step 4000 heat_min_y     0.00000000e+00   tol 0
+# check step 4000 heat_max_y     0.00000000e+00   tol 0

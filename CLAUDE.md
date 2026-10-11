@@ -62,7 +62,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M38 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M39 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -77,8 +77,9 @@ force on a 3D body, charged particles in three dimensions, an oriented box
 resting and tumbling on a ground plane, spring networks in three dimensions,
 colliding particles in three dimensions, box-against-box collision,
 box-against-sphere collision, Coulomb friction for particle contacts,
-box-against-box collision in two dimensions, a 2D box on a ground plane, and
-the kinetic theory of a hard-disk gas (temperature, pressure, relaxation).
+box-against-box collision in two dimensions, a 2D box on a ground plane, the
+kinetic theory of a hard-disk gas (temperature, pressure, relaxation), and
+thermal walls with seeded randomness (heat flow through a gas).
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -116,11 +117,17 @@ per-wall impulse tally on each particle world (`wall_impulse()`) and
 `particles::pressure` from it, the relaxation statistics `speed_ratio` and
 `slow_fraction`, and a deterministic `lattice`/`lattice3` scenario key that lays
 out a whole gas (`include/malloy/particles/thermo.hpp`). No new world, settings
-type, `type` key or test executable. Thermal walls (heat flow, which needs a
-fully specified PRNG inside the domain, never the std distributions) and a
-moving piston (work) are the natural next steps, each its own milestone.
+type, `type` key or test executable. M39 added THERMAL WALLS: a wall at a
+temperature re-emits each particle it meets from that temperature's
+distribution, drawing from a seeded SplitMix64 generator owned by the particle
+world (`include/malloy/particles/splitmix64.hpp`, ADR 0010), so heat flows
+through the gas; a per-wall heat tally (`wall_heat()`) records it, and the
+`wall_temperature` and `seed` scenario keys set it up. Randomness is seeded,
+fully specified, consumed in a fixed order and rolled back with a failed step,
+and a box without a thermal wall never draws (ADR 0010). A moving piston (work)
+is the natural next step, its own milestone.
 
-Do not start any further milestone (M39 or later) unless explicitly asked, and
+Do not start any further milestone (M40 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -204,7 +211,9 @@ Quantities available in every domain: `energy`, `kinetic`, `momentum_x`,
 `momentum_y`. Also `angular` in nbody and rigid, `elastic` in springs, and
 `speed` in charges. Since M38, particles and particles3d also have
 `temperature`, `pressure`, `speed_ratio` and `slow_fraction`; pressure does not
-exist before any time has passed, so a `step 0 pressure` check fails. Naming a
+exist before any time has passed, so a `step 0 pressure` check fails. Since
+M39 they also have the per-wall heats `heat_min_x`, `heat_max_x`, `heat_min_y`
+and `heat_max_y` (particles3d adds `heat_min_z` and `heat_max_z`). Naming a
 quantity a domain does not have FAILS rather than being skipped, so a check
 cannot quietly stop checking. A check on a statistical quantity carries a
 DERIVED tolerance, stated beside it, never one fitted to the run
@@ -237,7 +246,7 @@ No cross-platform bitwise determinism claims.
 V1 determinism means:
 
 ```text
-same binary + same platform + same initial state + same fixed timestep + same update order = repeatable output
+same binary + same platform + same initial state + same fixed timestep + same update order + same seed = repeatable output
 ```
 
 ## Build commands

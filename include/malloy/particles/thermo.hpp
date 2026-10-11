@@ -6,10 +6,12 @@
 #include <malloy/collide/shapes.hpp>
 #include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/real.hpp>
+#include <malloy/math/vec2.hpp>
 #include <malloy/particles/particle2d.hpp>
 #include <malloy/particles/particle3d.hpp>
 #include <malloy/particles/particle3d_world.hpp>
 #include <malloy/particles/particle_world.hpp>
+#include <malloy/particles/splitmix64.hpp>
 
 // Kinetic theory over the particle lists (M38): what a box of colliding
 // particles looks like as a GAS. Nothing here changes a trajectory. These are
@@ -17,7 +19,10 @@
 // so the same dynamics that M10 and M32 already validated are simply read as
 // temperature, pressure and a velocity distribution. Like ballistics in M12,
 // this is measurement on an existing domain, not a new one: no new world,
-// settings type or scenario `type`.
+// settings type or scenario `type`. The two emission samplers at the end (M39)
+// are the exception: they advance the generator they are handed, which is how a
+// thermal wall draws, and are public so a test can check their distributions
+// and the order a world draws them in.
 //
 // Units are the project's normalized ones with Boltzmann's constant k_B = 1, so
 // temperature is an energy (docs/04).
@@ -92,4 +97,33 @@ std::vector<Particle2D> lattice_gas(const collide::Aabb& bounds, int nx, int ny,
 std::vector<Particle3D> lattice_gas3d(const collide::Aabb3& bounds, int nx, int ny,
                                       int nz, math::Real mass, math::Real radius,
                                       math::Real speed);
+
+// --- Thermal walls (M39) ---
+//
+// A thermal wall at temperature T re-emits a particle of mass m from the
+// distribution a wall at T emits: the flux of a Maxwell-Boltzmann gas leaving
+// it, |v_n| f_MB(v; T) on the half-space into the box (Maxwell 1879; the
+// fully accommodating, diffuse wall). Its normal speed is therefore
+// flux-weighted (a Rayleigh law, density (m/T) v exp(-m v^2 / (2T))) and each
+// tangential component is Gaussian with variance T/m. A half-Gaussian normal
+// law would be wrong: it does not bring a gas to T (Tehver, Toigo, Koplik and
+// Banavar 1998). A colliding gas settles at d/(d+1) of T instead; collisionless
+// points settle lower still, at about half of T in a 2D box. The emitted
+// kinetic energy averages (d+1) T / 2.
+
+// The normal speed of an emission: sqrt(-2 (T/m) ln u), the inverse of the
+// Rayleigh distribution function, from ONE uniform u in (0, 1). At most 8.57
+// sqrt(T/m) (docs/04), since u is never below 2^-53. Finite for T/m up to about
+// 2.4e306 and positive for any T/m that is not subnormal; past that range the
+// world's non-finite check rolls the step back.
+math::Real emission_normal_speed(SplitMix64& random, math::Real temperature,
+                                 math::Real mass);
+
+// Two independent tangential components of an emission, each Gaussian with mean
+// 0 and variance T/m, from TWO uniforms in order (Box and Muller 1958): radius
+// sqrt(-2 (T/m) ln u1), angle 2 pi u2, giving (r cos, r sin). A 3D wall uses
+// both; a 2D wall uses the first and discards the second, so a thermal bounce
+// costs exactly three draws in either dimension and no spare is carried over.
+math::Vec2 emission_tangent(SplitMix64& random, math::Real temperature,
+                            math::Real mass);
 } // namespace malloy::particles

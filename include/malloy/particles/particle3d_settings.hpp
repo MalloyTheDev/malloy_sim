@@ -1,11 +1,28 @@
 #pragma once
 
+#include <cstdint>
+
 #include <malloy/collide/shapes3d.hpp>
 #include <malloy/math/real.hpp>
 #include <malloy/math/vec3.hpp>
 
 namespace malloy::particles
 {
+// The temperature of each of the six walls (M39), the 3D sibling of
+// WallTemperature2D: a wall at T > 0 is thermal, 0 (the default) is the
+// ordinary specular wall. Valid when every entry is non-negative and finite.
+struct WallTemperature3D
+{
+    math::Real min_x{0.0};
+    math::Real max_x{0.0};
+    math::Real min_y{0.0};
+    math::Real max_y{0.0};
+    math::Real min_z{0.0};
+    math::Real max_z{0.0};
+
+    bool is_valid() const;
+};
+
 // Parameters for a 3D colliding-particle simulation, the 3D sibling of
 // ParticleSettings. The fixed timestep is not here (it lives in
 // sim_core::SimulationSettings).
@@ -34,8 +51,17 @@ struct ParticleSettings3D
     // force (the 3D sibling of ParticleSettings).
     math::Real friction{0.0};
 
+    // M39: which walls are thermal, and at what temperature; restitution and
+    // friction do not apply at a thermal wall. As in 2D, added after `friction`.
+    WallTemperature3D wall_temperature{};
+
+    // M39: the seed of the world's random number generator, which only a
+    // thermal wall draws from. Every value is valid. The LAST field.
+    std::uint64_t seed{0};
+
     // Valid when restitution is in [0, 1] and finite, friction is non-negative
-    // and finite, bounds is a valid box, and gravity is finite.
+    // and finite, bounds is a valid box, gravity is finite, and every wall
+    // temperature is non-negative and finite.
     bool is_valid() const;
 };
 } // namespace malloy::particles

@@ -1583,6 +1583,758 @@ int main()
         }
     }
 
+    // --- M39: thermal walls. A wall held at a temperature re-emits each particle
+    //     it meets from that temperature's distribution, drawing from the
+    //     world's seeded generator, so heat flows between the walls and the
+    //     gas. The generator and samplers first, then the bookkeeping, which is
+    //     exact, then the physics, which is statistical with derived tolerances
+    //     (docs/05). The physics centres and tolerances were measured across
+    //     40 to 60 seeds by an independent prototype before this was built. ---
+    {
+        using malloy::particles::emission_normal_speed;
+        using malloy::particles::emission_tangent;
+        using malloy::particles::SplitMix64;
+        using malloy::particles::WallTemperature2D;
+        using malloy::particles::WallTemperature3D;
+        const Real pi = 3.14159265358979323846;
+        const std::uint64_t gamma = SplitMix64::gamma;
+
+        // The generator: SplitMix64 is pinned by known answers (they match an
+        // independent implementation, Java's SplittableRandom), at compile
+        // time and at run time, and its uniform deviate stays strictly inside
+        // (0, 1). After n draws its state is exactly seed + n gamma.
+        {
+            static_assert([] {
+                SplitMix64 g{0};
+                return g.next();
+            }() == 0xe220a8397b1dcdafULL);
+            static_assert(SplitMix64::to_unit_open(0) == 0x1p-53);
+            static_assert(SplitMix64::to_unit_open(~std::uint64_t{0}) == 1.0 - 0x1p-53);
+            SplitMix64 zero{0};
+            MALLOY_CHECK_TRUE(zero.next() == 0xe220a8397b1dcdafULL);
+            MALLOY_CHECK_TRUE(zero.next() == 0x6e789e6aa1b965f4ULL);
+            MALLOY_CHECK_TRUE(zero.next() == 0x06c45d188009454fULL);
+            SplitMix64 other{1234567};
+            MALLOY_CHECK_TRUE(other.next() == 0x599ed017fb08fc85ULL);
+            MALLOY_CHECK_TRUE(other.next() == 0x2c73f08458540fa5ULL);
+            MALLOY_CHECK_TRUE(other.next() == 0x883ebce5a3f27c77ULL);
+            SplitMix64 counted{42};
+            for (int i = 0; i < 1000; ++i)
+            {
+                const Real u = counted.uniform();
+                MALLOY_CHECK_TRUE(u > 0.0 && u < 1.0);
+            }
+            MALLOY_CHECK_TRUE(counted.state() == 42 + 1000 * gamma);
+        }
+
+        // The samplers' distributions, a million emissions at T = 2, m = 0.5
+        // (sigma^2 = T/m = 4; m != 1 so a missing division by m shows). Each
+        // tolerance is three standard errors of the mean in question. The
+        // normal speed is Rayleigh: mean sigma sqrt(pi/2) = 2.5066 (a
+        // half-Gaussian would give sigma sqrt(2/pi) = 1.596), mean square
+        // 2 sigma^2, and v^2 below 2T/m with probability 1 - 1/e (0.843 for a
+        // half-Gaussian). The tangential pair is two independent N(0, sigma^2).
+        {
+            SplitMix64 g{7};
+            const Real t = 2.0;
+            const Real m = 0.5;
+            const int count = 1000000;
+            Real normal = 0.0;
+            Real normal_sq = 0.0;
+            Real tangent = 0.0;
+            Real tangent_sq = 0.0;
+            Real product = 0.0;
+            int slow = 0;
+            bool all_positive = true;
+            for (int i = 0; i < count; ++i)
+            {
+                const Real vn = emission_normal_speed(g, t, m);
+                const Vec2 vt = emission_tangent(g, t, m);
+                all_positive = all_positive && vn > 0.0 && std::isfinite(vn);
+                normal += vn;
+                normal_sq += vn * vn;
+                slow += vn * vn < 2.0 * t / m ? 1 : 0;
+                tangent += vt.x + vt.y;
+                tangent_sq += vt.x * vt.x + vt.y * vt.y;
+                product += vt.x * vt.y;
+            }
+            const Real k = static_cast<Real>(count);
+            MALLOY_CHECK_TRUE(all_positive);
+            MALLOY_CHECK_NEAR(normal / k, 2.0 * std::sqrt(pi / 2.0), 0.0039); // sd 1.310
+            MALLOY_CHECK_NEAR(normal_sq / k, 8.0, 0.024);                      // sd 8
+            MALLOY_CHECK_NEAR(slow / k, 1.0 - std::exp(-1.0), 0.00145);        // binomial
+            MALLOY_CHECK_NEAR(tangent / (2.0 * k), 0.0, 0.0043);               // sd 2
+            MALLOY_CHECK_NEAR(tangent_sq / (2.0 * k), 4.0, 0.012);             // sd 5.66
+            MALLOY_CHECK_NEAR(product / k, 0.0, 0.012);                        // sd 4
+        }
+
+        // The samplers' exact values, not just their distributions: a rewrite
+        // that keeps the law (log(1 - u) for log(u), cos and sin swapped, u1
+        // and u2 swapped) would still change every thermal run, and ADR 0010
+        // makes that a deliberate act. The tolerance is relative 1e-12, which
+        // absorbs a last-bit difference in log, cos or sin between C runtimes.
+        {
+            SplitMix64 g{0};
+            const Real golden[2][3] = {
+                {0.99630577286538602, 2.5572672056599703, 0.42868116209283502},
+                {0.48621283223457967, -1.9772082492486569, 3.7442027606630823}};
+            for (const auto& row : golden)
+            {
+                const Real vn = emission_normal_speed(g, 2.0, 0.5);
+                const Vec2 vt = emission_tangent(g, 2.0, 0.5);
+                MALLOY_CHECK_NEAR(vn, row[0], 1e-12 * std::abs(row[0]));
+                MALLOY_CHECK_NEAR(vt.x, row[1], 1e-12 * std::abs(row[1]));
+                MALLOY_CHECK_NEAR(vt.y, row[2], 1e-12 * std::abs(row[2]));
+            }
+        }
+
+        // Validation: every wall's temperature is checked on its own, so a
+        // validator that looked only at one wall fails. NaN, an infinity and a
+        // negative are refused; -0.0 is allowed and, not above 0, specular.
+        {
+            Real WallTemperature2D::* const walls2[] = {
+                &WallTemperature2D::min_x, &WallTemperature2D::max_x,
+                &WallTemperature2D::min_y, &WallTemperature2D::max_y};
+            for (Real WallTemperature2D::* const wall : walls2)
+            {
+                for (const Real bad : {nan, inf, -1.0})
+                {
+                    ParticleSettings s;
+                    s.wall_temperature.*wall = bad;
+                    MALLOY_CHECK_FALSE(s.is_valid());
+                }
+                ParticleSettings fine;
+                fine.wall_temperature.*wall = -0.0;
+                MALLOY_CHECK_TRUE(fine.is_valid());
+                fine.wall_temperature.*wall = 3.5;
+                MALLOY_CHECK_TRUE(fine.is_valid());
+            }
+            Real WallTemperature3D::* const walls3[] = {
+                &WallTemperature3D::min_x, &WallTemperature3D::max_x,
+                &WallTemperature3D::min_y, &WallTemperature3D::max_y,
+                &WallTemperature3D::min_z, &WallTemperature3D::max_z};
+            for (Real WallTemperature3D::* const wall : walls3)
+            {
+                for (const Real bad : {nan, inf, -1.0})
+                {
+                    ParticleSettings3D s;
+                    s.wall_temperature.*wall = bad;
+                    MALLOY_CHECK_FALSE(s.is_valid());
+                }
+                ParticleSettings3D fine;
+                fine.wall_temperature.*wall = -0.0;
+                MALLOY_CHECK_TRUE(fine.is_valid());
+            }
+            // And a world with an invalid temperature refuses to step.
+            ParticleSettings hot_nan;
+            hot_nan.wall_temperature.max_y = nan;
+            ParticleWorld w{SimulationSettings{0.01}, hot_nan,
+                            {Particle2D{Vec2{}, Vec2{1.0, 0.0}, 1.0, 0.1}}};
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidSettings);
+        }
+
+        // No thermal wall, no draw: a box full of bounces leaves the stream at
+        // its seed, and two different seeds give bit-identical runs.
+        // Determinism: with thermal walls the same seed repeats the run exactly
+        // and a different seed does not, and the stream has moved by a whole
+        // number of thermal bounces, three draws each.
+        {
+            const Aabb box{Vec2{-2.0, -2.0}, Vec2{2.0, 2.0}};
+            const std::vector<Particle2D> gas = lattice_gas(box, 4, 4, 1.0, 0.1, 1.0);
+            ParticleSettings plain{1.0, box};
+            plain.seed = 1;
+            ParticleSettings plain_other = plain;
+            plain_other.seed = 0xDEADBEEFULL;
+            ParticleWorld a{SimulationSettings{0.01}, plain, gas};
+            ParticleWorld b{SimulationSettings{0.01}, plain_other, gas};
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(a.step().ok());
+                MALLOY_CHECK_TRUE(b.step().ok());
+            }
+            MALLOY_CHECK_TRUE(a.random_state() == 1);
+            MALLOY_CHECK_TRUE(b.random_state() == 0xDEADBEEFULL);
+            MALLOY_CHECK_TRUE(a.wall_impulse().min_x > 0.0); // it did bounce
+            for (std::size_t i = 0; i < gas.size(); ++i)
+            {
+                MALLOY_CHECK_TRUE(a.particles()[i].position.x == b.particles()[i].position.x);
+                MALLOY_CHECK_TRUE(a.particles()[i].velocity.y == b.particles()[i].velocity.y);
+            }
+            MALLOY_CHECK_TRUE(a.wall_heat().min_x == 0.0 && a.wall_heat().max_y == 0.0);
+
+            ParticleSettings warm = plain;
+            warm.wall_temperature = WallTemperature2D{2.0, 0.5, 0.0, 1.0};
+            warm.seed = 99;
+            ParticleSettings warm_other = warm;
+            warm_other.seed = 100;
+            ParticleWorld c{SimulationSettings{0.01}, warm, gas};
+            ParticleWorld d{SimulationSettings{0.01}, warm, gas};
+            ParticleWorld e{SimulationSettings{0.01}, warm_other, gas};
+            for (int i = 0; i < 2000; ++i)
+            {
+                MALLOY_CHECK_TRUE(c.step().ok());
+                MALLOY_CHECK_TRUE(d.step().ok());
+                MALLOY_CHECK_TRUE(e.step().ok());
+            }
+            MALLOY_CHECK_TRUE(c.random_state() == d.random_state());
+            bool same = true;
+            bool differs = false;
+            for (std::size_t i = 0; i < gas.size(); ++i)
+            {
+                same = same && c.particles()[i].position.x == d.particles()[i].position.x &&
+                       c.particles()[i].velocity.y == d.particles()[i].velocity.y;
+                differs = differs || c.particles()[i].position.x != e.particles()[i].position.x;
+            }
+            MALLOY_CHECK_TRUE(same);
+            MALLOY_CHECK_TRUE(differs);
+            MALLOY_CHECK_TRUE(c.wall_heat().min_x == d.wall_heat().min_x);
+            MALLOY_CHECK_TRUE(c.wall_impulse().max_y == d.wall_impulse().max_y);
+            MALLOY_CHECK_TRUE(c.wall_heat().min_y == 0.0); // the specular wall
+            // Draws so far, n = (state - seed) / gamma mod 2^64, via gamma's
+            // inverse (Newton's iteration doubles the correct low bits each time).
+            std::uint64_t inverse = gamma;
+            for (int i = 0; i < 6; ++i)
+            {
+                inverse *= 2 - gamma * inverse;
+            }
+            MALLOY_CHECK_TRUE(gamma * inverse == 1);
+            const std::uint64_t draws = (c.random_state() - 99) * inverse;
+            MALLOY_CHECK_TRUE(draws > 0 && draws % 3 == 0 && draws < 3000000);
+        }
+
+        // One thermal bounce, in closed form against the public samplers: the
+        // world draws the normal speed, then the tangential pair, from its
+        // stream (three draws), points the normal speed into the box, and puts
+        // the particle on the wall. The tallies get exactly m (|v_in| + v_out)
+        // and the change in kinetic energy, computed the same way. Restitution
+        // and friction do not touch a thermal bounce.
+        {
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}};
+            for (const bool damped : {false, true})
+            {
+                ParticleSettings s{1.0, box};
+                s.wall_temperature.min_x = 2.0;
+                s.seed = 2024;
+                if (damped)
+                {
+                    s.restitution = 0.3;
+                    s.friction = 0.7;
+                }
+                ParticleWorld w{SimulationSettings{0.1}, s,
+                                {Particle2D{Vec2{0.05, 0.5}, Vec2{-1.0, 0.3}, 0.5, 0.0}}};
+                MALLOY_CHECK_TRUE(w.step().ok());
+                SplitMix64 copy{2024};
+                const Real vn = emission_normal_speed(copy, 2.0, 0.5);
+                const Vec2 vt = emission_tangent(copy, 2.0, 0.5);
+                const Particle2D& p = w.particles()[0];
+                MALLOY_CHECK_TRUE(p.velocity.x == vn); // into the box, +x
+                MALLOY_CHECK_TRUE(p.velocity.y == vt.x);
+                MALLOY_CHECK_TRUE(p.position.x == 0.0); // on the wall
+                MALLOY_CHECK_TRUE(w.random_state() == copy.state());
+                MALLOY_CHECK_TRUE(copy.state() == 2024 + 3 * gamma);
+                MALLOY_CHECK_TRUE(w.wall_impulse().min_x == 0.5 * (1.0 + vn));
+                const Real before = 0.5 * 0.5 * (1.0 * 1.0 + 0.3 * 0.3);
+                const Real after = 0.5 * 0.5 * (vn * vn + vt.x * vt.x);
+                MALLOY_CHECK_NEAR(w.wall_heat().min_x, after - before, 1e-15);
+                MALLOY_CHECK_TRUE(w.wall_heat().max_x == 0.0 && w.wall_heat().min_y == 0.0);
+            }
+            // A max wall emits toward -x, and a y wall sets x as the tangent.
+            ParticleSettings s{1.0, box};
+            s.wall_temperature.max_x = 1.5;
+            s.wall_temperature.min_y = 0.25;
+            s.seed = 77;
+            ParticleWorld w{SimulationSettings{0.1}, s,
+                            {Particle2D{Vec2{0.97, 0.5}, Vec2{1.0, 0.0}, 2.0, 0.0},
+                             Particle2D{Vec2{0.5, 0.04}, Vec2{0.2, -1.0}, 3.0, 0.0}}};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            SplitMix64 copy{77};
+            const Real vn0 = emission_normal_speed(copy, 1.5, 2.0);
+            const Vec2 vt0 = emission_tangent(copy, 1.5, 2.0);
+            const Real vn1 = emission_normal_speed(copy, 0.25, 3.0);
+            const Vec2 vt1 = emission_tangent(copy, 0.25, 3.0);
+            MALLOY_CHECK_TRUE(w.particles()[0].velocity.x == -vn0);
+            MALLOY_CHECK_TRUE(w.particles()[0].velocity.y == vt0.x);
+            MALLOY_CHECK_TRUE(w.particles()[1].velocity.y == vn1);
+            MALLOY_CHECK_TRUE(w.particles()[1].velocity.x == vt1.x);
+            MALLOY_CHECK_TRUE(w.random_state() == copy.state());
+            MALLOY_CHECK_TRUE(w.wall_impulse().max_x == 2.0 * (1.0 + vn0));
+            MALLOY_CHECK_TRUE(w.wall_impulse().min_y == 3.0 * (1.0 + vn1));
+        }
+        {
+            // 3D: an x wall sets the tangents y then z, a z wall x then y.
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 1.0, 1.0}};
+            ParticleSettings3D s;
+            s.bounds = box;
+            s.wall_temperature.min_x = 2.0;
+            s.wall_temperature.max_z = 0.5;
+            s.seed = 31337;
+            ParticleWorld3D w{SimulationSettings{0.1}, s,
+                              {Particle3D{Vec3{0.05, 0.5, 0.5}, Vec3{-1.0, 0.2, 0.1}, 0.5, 0.0},
+                               Particle3D{Vec3{0.5, 0.5, 0.97}, Vec3{0.1, 0.0, 1.0}, 2.0, 0.0}}};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            SplitMix64 copy{31337};
+            const Real vn0 = emission_normal_speed(copy, 2.0, 0.5);
+            const Vec2 vt0 = emission_tangent(copy, 2.0, 0.5);
+            const Real vn1 = emission_normal_speed(copy, 0.5, 2.0);
+            const Vec2 vt1 = emission_tangent(copy, 0.5, 2.0);
+            const Vec3 v0 = w.particles()[0].velocity;
+            const Vec3 v1 = w.particles()[1].velocity;
+            MALLOY_CHECK_TRUE(v0.x == vn0 && v0.y == vt0.x && v0.z == vt0.y);
+            MALLOY_CHECK_TRUE(v1.x == vt1.x && v1.y == vt1.y && v1.z == -vn1);
+            MALLOY_CHECK_TRUE(w.random_state() == copy.state());
+            MALLOY_CHECK_TRUE(copy.state() == 31337 + 6 * gamma);
+            MALLOY_CHECK_TRUE(w.wall_impulse().min_x == 0.5 * (1.0 + vn0));
+            MALLOY_CHECK_TRUE(w.wall_impulse().max_z == 2.0 * (1.0 + vn1));
+            const Real before = 0.5 * 0.5 * (1.0 * 1.0 + 0.2 * 0.2 + 0.1 * 0.1);
+            const Real after = 0.5 * 0.5 * (vn0 * vn0 + vt0.x * vt0.x + vt0.y * vt0.y);
+            MALLOY_CHECK_NEAR(w.wall_heat().min_x, after - before, 1e-15);
+            MALLOY_CHECK_TRUE(w.wall_heat().max_x == 0.0 && w.wall_heat().min_z == 0.0);
+        }
+
+        // Every wall at once: one particle into each wall in the same step,
+        // each wall at its own temperature and each particle of its own mass,
+        // checked component by component, and every impulse and heat slot,
+        // against the samplers drawn in particle order. Each wall has its own
+        // call site, so this pins the normal sign, the tangent axes and the
+        // tally slot at every one of them, not just the few above.
+        {
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}};
+            ParticleSettings s{1.0, box};
+            s.wall_temperature = WallTemperature2D{1.1, 1.3, 1.7, 1.9};
+            s.seed = 404;
+            const std::vector<Particle2D> movers = {
+                Particle2D{Vec2{0.05, 0.4}, Vec2{-1.0, 0.25}, 1.5, 0.0},  // into min_x
+                Particle2D{Vec2{0.95, 0.6}, Vec2{1.0, -0.5}, 2.5, 0.0},   // into max_x
+                Particle2D{Vec2{0.3, 0.05}, Vec2{0.75, -1.0}, 3.5, 0.0},  // into min_y
+                Particle2D{Vec2{0.7, 0.95}, Vec2{-0.125, 1.0}, 4.5, 0.0}, // into max_y
+            };
+            ParticleWorld w{SimulationSettings{0.1}, s, movers};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            SplitMix64 copy{404};
+            const Real temps[4] = {1.1, 1.3, 1.7, 1.9};
+            Real impulse[4]{};
+            Real heat[4]{};
+            for (int i = 0; i < 4; ++i)
+            {
+                const Particle2D& in = movers[i];
+                const Real vn = emission_normal_speed(copy, temps[i], in.mass);
+                const Vec2 vt = emission_tangent(copy, temps[i], in.mass);
+                const Real sign = i % 2 == 0 ? 1.0 : -1.0; // min walls emit +, max walls -
+                const Vec2 out = i < 2 ? Vec2{sign * vn, vt.x} : Vec2{vt.x, sign * vn};
+                const Vec2 got = w.particles()[static_cast<std::size_t>(i)].velocity;
+                MALLOY_CHECK_TRUE(got.x == out.x && got.y == out.y);
+                const Real speed_in = std::abs(i < 2 ? in.velocity.x : in.velocity.y);
+                impulse[i] = in.mass * (speed_in + vn);
+                heat[i] = 0.5 * in.mass * malloy::math::dot(out, out) -
+                          0.5 * in.mass * malloy::math::dot(in.velocity, in.velocity);
+            }
+            MALLOY_CHECK_TRUE(w.random_state() == copy.state());
+            const auto& j = w.wall_impulse();
+            const auto& q = w.wall_heat();
+            MALLOY_CHECK_TRUE(j.min_x == impulse[0] && j.max_x == impulse[1] &&
+                              j.min_y == impulse[2] && j.max_y == impulse[3]);
+            MALLOY_CHECK_NEAR(q.min_x, heat[0], 1e-14);
+            MALLOY_CHECK_NEAR(q.max_x, heat[1], 1e-14);
+            MALLOY_CHECK_NEAR(q.min_y, heat[2], 1e-14);
+            MALLOY_CHECK_NEAR(q.max_y, heat[3], 1e-14);
+        }
+        {
+            // 3D: each wall's tangents in ascending axis order (an x wall sets
+            // y then z, a y wall x then z, a z wall x then y).
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 1.0, 1.0}};
+            ParticleSettings3D s;
+            s.bounds = box;
+            s.wall_temperature = WallTemperature3D{1.1, 1.3, 1.7, 1.9, 2.3, 2.9};
+            s.seed = 505;
+            const std::vector<Particle3D> movers = {
+                Particle3D{Vec3{0.05, 0.4, 0.3}, Vec3{-1.0, 0.25, 0.5}, 1.5, 0.0},
+                Particle3D{Vec3{0.95, 0.6, 0.7}, Vec3{1.0, -0.5, 0.25}, 2.5, 0.0},
+                Particle3D{Vec3{0.3, 0.05, 0.4}, Vec3{0.75, -1.0, -0.25}, 3.5, 0.0},
+                Particle3D{Vec3{0.7, 0.95, 0.6}, Vec3{-0.125, 1.0, 0.375}, 4.5, 0.0},
+                Particle3D{Vec3{0.4, 0.3, 0.05}, Vec3{0.5, 0.25, -1.0}, 5.5, 0.0},
+                Particle3D{Vec3{0.6, 0.7, 0.95}, Vec3{-0.25, 0.125, 1.0}, 6.5, 0.0},
+            };
+            ParticleWorld3D w{SimulationSettings{0.1}, s, movers};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            SplitMix64 copy{505};
+            const Real temps[6] = {1.1, 1.3, 1.7, 1.9, 2.3, 2.9};
+            Real impulse[6]{};
+            Real heat[6]{};
+            for (int i = 0; i < 6; ++i)
+            {
+                const Particle3D& in = movers[static_cast<std::size_t>(i)];
+                const Real vn = emission_normal_speed(copy, temps[i], in.mass);
+                const Vec2 vt = emission_tangent(copy, temps[i], in.mass);
+                const Real n = (i % 2 == 0 ? 1.0 : -1.0) * vn;
+                const Vec3 out = i < 2   ? Vec3{n, vt.x, vt.y}
+                                 : i < 4 ? Vec3{vt.x, n, vt.y}
+                                         : Vec3{vt.x, vt.y, n};
+                const Vec3 got = w.particles()[static_cast<std::size_t>(i)].velocity;
+                MALLOY_CHECK_TRUE(got.x == out.x && got.y == out.y && got.z == out.z);
+                const Real speed_in = std::abs(i < 2   ? in.velocity.x
+                                               : i < 4 ? in.velocity.y
+                                                       : in.velocity.z);
+                impulse[i] = in.mass * (speed_in + vn);
+                heat[i] = 0.5 * in.mass * malloy::math::dot(out, out) -
+                          0.5 * in.mass * malloy::math::dot(in.velocity, in.velocity);
+            }
+            MALLOY_CHECK_TRUE(w.random_state() == copy.state());
+            const auto& j = w.wall_impulse();
+            const auto& q = w.wall_heat();
+            MALLOY_CHECK_TRUE(j.min_x == impulse[0] && j.max_x == impulse[1] &&
+                              j.min_y == impulse[2] && j.max_y == impulse[3] &&
+                              j.min_z == impulse[4] && j.max_z == impulse[5]);
+            const Real got_heat[6] = {q.min_x, q.max_x, q.min_y, q.max_y, q.min_z, q.max_z};
+            for (int i = 0; i < 6; ++i)
+            {
+                MALLOY_CHECK_NEAR(got_heat[i], heat[i], 1e-14);
+            }
+        }
+
+        // A corner: a particle crossing a thermal x wall and a thermal y wall
+        // in the same step meets the x wall first (the documented order). The x
+        // emission sets its velocity; if the new y component still points into
+        // the y wall, the y wall emits too, from the next three draws;
+        // otherwise the particle is only clamped there.
+        {
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}};
+            int emitted_twice = 0;
+            for (std::uint64_t seed = 1; seed <= 8; ++seed)
+            {
+                ParticleSettings s{1.0, box};
+                s.wall_temperature = WallTemperature2D{1.2, 0.0, 2.7, 0.0};
+                s.seed = seed;
+                ParticleWorld w{SimulationSettings{0.1}, s,
+                                {Particle2D{Vec2{0.05, 0.03}, Vec2{-1.0, -0.9}, 1.25, 0.0}}};
+                MALLOY_CHECK_TRUE(w.step().ok());
+                SplitMix64 copy{seed};
+                const Real vn = emission_normal_speed(copy, 1.2, 1.25);
+                const Vec2 vt = emission_tangent(copy, 1.2, 1.25);
+                Vec2 expected{vn, vt.x};
+                if (expected.y < 0.0) // still heading into min_y
+                {
+                    const Real vn2 = emission_normal_speed(copy, 2.7, 1.25);
+                    const Vec2 vt2 = emission_tangent(copy, 2.7, 1.25);
+                    expected = Vec2{vt2.x, vn2};
+                    ++emitted_twice;
+                }
+                const Particle2D& p = w.particles()[0];
+                MALLOY_CHECK_TRUE(p.velocity.x == expected.x && p.velocity.y == expected.y);
+                MALLOY_CHECK_TRUE(p.position.x == 0.0 && p.position.y == 0.0);
+                MALLOY_CHECK_TRUE(w.random_state() == copy.state());
+            }
+            MALLOY_CHECK_TRUE(emitted_twice > 0 && emitted_twice < 8); // both branches ran
+        }
+
+        // A rolled-back step rolls the stream and the heat tally back too.
+        // Particle A bounces off a thermal max_x wall in step 1, a good step
+        // that draws and tallies. In step 2 particle B reaches min_x, whose
+        // T/m overflows (1e308 / 1e-10), so its emission is infinite and the
+        // step is refused: every tally, the stream, the positions and the tick
+        // are exactly as step 1 left them, and a retry fails the same way.
+        {
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}};
+            ParticleSettings s{1.0, box};
+            s.wall_temperature.min_x = 1e308;
+            s.wall_temperature.max_x = 1.0;
+            s.seed = 5;
+            ParticleWorld w{SimulationSettings{0.1}, s,
+                            {Particle2D{Vec2{0.95, 0.5}, Vec2{1.0, 0.0}, 1.0, 0.0},
+                             Particle2D{Vec2{0.15, 0.3}, Vec2{-1.0, 0.0}, 1e-10, 0.0}}};
+            MALLOY_CHECK_TRUE(w.validate() == StepStatus::Ok);
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const std::uint64_t state = w.random_state();
+            const Real heat = w.wall_heat().max_x;
+            const Real impulse = w.wall_impulse().max_x;
+            const Vec2 a = w.particles()[0].position;
+            const Vec2 b = w.particles()[1].position;
+            MALLOY_CHECK_TRUE(state == 5 + 3 * gamma);
+            MALLOY_CHECK_TRUE(heat != 0.0);
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+                MALLOY_CHECK_TRUE(w.random_state() == state);
+                MALLOY_CHECK_TRUE(w.wall_heat().max_x == heat);
+                MALLOY_CHECK_TRUE(w.wall_heat().min_x == 0.0);
+                MALLOY_CHECK_TRUE(w.wall_impulse().max_x == impulse);
+                MALLOY_CHECK_TRUE(w.wall_impulse().min_x == 0.0);
+                MALLOY_CHECK_TRUE(w.particles()[0].position.x == a.x);
+                MALLOY_CHECK_TRUE(w.particles()[1].position.x == b.x);
+                MALLOY_CHECK_TRUE(w.tick_count() == 1);
+            }
+        }
+        {
+            // The same in 3D: A bounces off a thermal max_z wall in step 1; B,
+            // of mass 1e-10, reaches a min_y wall at 1e308 in step 2.
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 1.0, 1.0}};
+            ParticleSettings3D s;
+            s.bounds = box;
+            s.wall_temperature.min_y = 1e308;
+            s.wall_temperature.max_z = 1.0;
+            s.seed = 6;
+            ParticleWorld3D w{SimulationSettings{0.1}, s,
+                              {Particle3D{Vec3{0.5, 0.5, 0.95}, Vec3{0.0, 0.0, 1.0}, 1.0, 0.0},
+                               Particle3D{Vec3{0.3, 0.15, 0.4}, Vec3{0.0, -1.0, 0.0}, 1e-10, 0.0}}};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const std::uint64_t state = w.random_state();
+            const Real heat = w.wall_heat().max_z;
+            const Real impulse = w.wall_impulse().max_z;
+            const Vec3 a = w.particles()[0].position;
+            const Vec3 b = w.particles()[1].position;
+            MALLOY_CHECK_TRUE(state == 6 + 3 * gamma);
+            MALLOY_CHECK_TRUE(heat != 0.0);
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+                MALLOY_CHECK_TRUE(w.random_state() == state);
+                MALLOY_CHECK_TRUE(w.wall_heat().max_z == heat);
+                MALLOY_CHECK_TRUE(w.wall_heat().min_y == 0.0);
+                MALLOY_CHECK_TRUE(w.wall_impulse().max_z == impulse);
+                MALLOY_CHECK_TRUE(w.wall_impulse().min_y == 0.0);
+                MALLOY_CHECK_TRUE(w.particles()[0].position.z == a.z);
+                MALLOY_CHECK_TRUE(w.particles()[1].position.y == b.y);
+                MALLOY_CHECK_TRUE(w.tick_count() == 1);
+            }
+        }
+
+        // The energy books balance exactly: with restitution 1, no friction and
+        // no gravity, only a thermal wall changes the gas's kinetic energy, so
+        // KE(t) - KE(0) is the sum of the wall heats to rounding. A specular
+        // wall's heat is exactly 0. Disks of unequal mass and radius, a hot and
+        // a cold wall and a third thermal wall, 1500 steps. And the x momentum
+        // balances against the x walls' impulse tallies when only x walls are
+        // thermal and the others specular and frictionless.
+        {
+            const Aabb box{Vec2{-3.0, -2.0}, Vec2{3.0, 2.0}};
+            std::vector<Particle2D> gas = lattice_gas(box, 6, 4, 1.0, 0.15, 1.0);
+            for (std::size_t i = 0; i < gas.size(); i += 3)
+            {
+                gas[i].mass = 2.5;
+                gas[i].radius = 0.25;
+            }
+            ParticleSettings s{1.0, box};
+            s.wall_temperature = WallTemperature2D{3.0, 0.5, 0.0, 1.5};
+            s.seed = 11;
+            ParticleWorld w{SimulationSettings{0.01}, s, gas};
+            const Real ke0 = total_kinetic_energy(gas);
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            const auto& q = w.wall_heat();
+            MALLOY_CHECK_NEAR(total_kinetic_energy(w.particles()) - ke0,
+                              q.min_x + q.max_x + q.min_y + q.max_y, 1e-9);
+            MALLOY_CHECK_TRUE(q.min_y == 0.0);
+            MALLOY_CHECK_TRUE(q.min_x > 1.0); // the hot wall heats a cooler gas
+
+            ParticleSettings x_only{1.0, box};
+            x_only.wall_temperature = WallTemperature2D{3.0, 0.5, 0.0, 0.0};
+            x_only.seed = 12;
+            ParticleWorld m{SimulationSettings{0.01}, x_only, gas};
+            const Vec2 p0 = total_momentum(gas);
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(m.step().ok());
+            }
+            const auto& j = m.wall_impulse();
+            MALLOY_CHECK_NEAR(total_momentum(m.particles()).x - p0.x, j.min_x - j.max_x, 1e-9);
+        }
+        {
+            const Aabb3 box{Vec3{-2.0, -1.5, -1.0}, Vec3{2.0, 1.5, 1.0}};
+            std::vector<Particle3D> gas = lattice_gas3d(box, 4, 3, 2, 1.0, 0.15, 1.0);
+            for (std::size_t i = 0; i < gas.size(); i += 3)
+            {
+                gas[i].mass = 2.5;
+                gas[i].radius = 0.25;
+            }
+            ParticleSettings3D s;
+            s.bounds = box;
+            s.wall_temperature = WallTemperature3D{3.0, 0.5, 0.0, 1.5, 2.0, 0.0};
+            s.seed = 13;
+            ParticleWorld3D w{SimulationSettings{0.01}, s, gas};
+            const Real ke0 = total_kinetic_energy3d(gas);
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+            }
+            const auto& q = w.wall_heat();
+            MALLOY_CHECK_NEAR(total_kinetic_energy3d(w.particles()) - ke0,
+                              q.min_x + q.max_x + q.min_y + q.max_y + q.min_z + q.max_z,
+                              1e-9);
+            MALLOY_CHECK_TRUE(q.min_y == 0.0 && q.max_z == 0.0);
+
+            ParticleSettings3D x_only;
+            x_only.bounds = box;
+            x_only.wall_temperature = WallTemperature3D{3.0, 0.5, 0.0, 0.0, 0.0, 0.0};
+            x_only.seed = 14;
+            ParticleWorld3D m{SimulationSettings{0.01}, x_only, gas};
+            const Vec3 p0 = total_momentum3d(gas);
+            for (int i = 0; i < 1500; ++i)
+            {
+                MALLOY_CHECK_TRUE(m.step().ok());
+            }
+            const auto& j = m.wall_impulse();
+            MALLOY_CHECK_NEAR(total_momentum3d(m.particles()).x - p0.x, j.min_x - j.max_x, 1e-9);
+        }
+
+        // Equilibrium: with every wall thermal at T_w the gas relaxes to T_w,
+        // for any masses (the diffuse wall's stationary state is the canonical
+        // Maxwell-Boltzmann distribution at T_w). Point particles, half of
+        // mass 4, started cold (T 0.3125) on a lattice in a unit box, time-
+        // averaged after a burn-in. Tolerances: at least three times the
+        // seed-to-seed spread measured across 1000 seeds, plus the fixed step's
+        // bias (it raises T by about dt / (2 d E[tau]), 0.3 per cent here, and
+        // moves the heavy-to-light ratio to about 0.998). They exclude the
+        // unrelaxed start (0.31), a half-Gaussian emitter (about 0.50 T_w for
+        // these collisionless points in 2D; in a colliding gas it would be
+        // d/(d+1) T_w), and a sampler that forgot to divide by m (the
+        // heavy-to-light energy ratio would be 4).
+        const auto relax2 = [&](std::uint64_t seed, Real& temperature, Real& ratio) {
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}};
+            std::vector<Particle2D> gas = lattice_gas(box, 4, 4, 1.0, 0.0, 0.5);
+            for (std::size_t i = 0; i < gas.size(); i += 2)
+            {
+                gas[i].mass = 4.0;
+            }
+            ParticleSettings s{1.0, box};
+            s.wall_temperature = WallTemperature2D{1.0, 1.0, 1.0, 1.0};
+            s.seed = seed;
+            ParticleWorld w{SimulationSettings{0.01}, s, gas};
+            Real t_sum = 0.0;
+            Real heavy = 0.0;
+            Real light = 0.0;
+            int samples = 0;
+            for (int i = 1; i <= 40000; ++i)
+            {
+                if (!w.step().ok())
+                {
+                    return false;
+                }
+                if (i > 2000)
+                {
+                    t_sum += malloy::particles::temperature(w.particles());
+                    for (const Particle2D& p : w.particles())
+                    {
+                        const Real ke = 0.5 * p.mass * malloy::math::dot(p.velocity, p.velocity);
+                        (p.mass > 2.0 ? heavy : light) += ke;
+                    }
+                    ++samples;
+                }
+            }
+            temperature = t_sum / samples;
+            ratio = heavy / light;
+            return true;
+        };
+        {
+            Real temperature = 0.0;
+            Real ratio = 0.0;
+            MALLOY_CHECK_TRUE(relax2(3, temperature, ratio));
+            MALLOY_CHECK_NEAR(temperature, 1.0, 0.056);
+            MALLOY_CHECK_NEAR(ratio, 1.0, 0.095);
+        }
+        {
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 1.0, 1.0}};
+            std::vector<Particle3D> gas = lattice_gas3d(box, 4, 2, 2, 1.0, 0.0, 0.5);
+            for (std::size_t i = 0; i < gas.size(); i += 2)
+            {
+                gas[i].mass = 4.0;
+            }
+            ParticleSettings3D s;
+            s.bounds = box;
+            s.wall_temperature = WallTemperature3D{1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+            s.seed = 4;
+            ParticleWorld3D w{SimulationSettings{0.01}, s, gas};
+            Real t_sum = 0.0;
+            Real heavy = 0.0;
+            Real light = 0.0;
+            int samples = 0;
+            for (int i = 1; i <= 40000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                if (i > 2000)
+                {
+                    t_sum += malloy::particles::temperature3d(w.particles());
+                    for (const Particle3D& p : w.particles())
+                    {
+                        const Real ke = 0.5 * p.mass * malloy::math::dot(p.velocity, p.velocity);
+                        (p.mass > 2.0 ? heavy : light) += ke;
+                    }
+                    ++samples;
+                }
+            }
+            MALLOY_CHECK_NEAR(t_sum / samples, 1.0, 0.04);
+            MALLOY_CHECK_NEAR(heavy / light, 1.0, 0.065);
+        }
+
+        // Free-molecular heat flow, in closed form: point particles never
+        // collide, so each one bounces between a hot wall (min_x, T_h = 4) and
+        // a cold one (max_x, T_c = 1) on its own, the side walls specular. By
+        // renewal-reward the long-run heat rate per particle is the mean energy
+        // carried per round trip over the mean trip time,
+        //   q = ((d+1)/2) (T_h - T_c) / (L sqrt(pi m / 2) (T_h^-1/2 + T_c^-1/2) + dt),
+        // the dt being the fixed step's lag (each trip wastes half a step at
+        // each end). 2.380990 in 2D and 3.174654 in 3D for L = 1, m = 1,
+        // dt = 0.01. Estimated as the mean of the two walls' magnitudes,
+        // (Q_hot - Q_cold) / (2 N t). Tolerance: three times the derived sigma
+        // (the trip time is heavy-tailed, so it is truncated at the run length),
+        // 0.072 and 0.090, plus 0.5 per cent. It excludes a wall that kept the
+        // tangential velocity (0.67 q in 2D, 0.50 q in 3D), a half-Gaussian
+        // normal (about 0.2 q), and no flow. The time-averaged temperature,
+        // about sqrt(T_h T_c) = 2 (2.0093 and 2.0071 with the step), is checked
+        // too. It is heavy-tailed (a slow, hot emission lingers), so three
+        // standard deviations pass only 99.3 per cent of seeds; its tolerances,
+        // 0.19 and 0.18, are the 99.73 per cent quantiles of |T - centre|
+        // measured over 5000 seeds. They exclude the arithmetic mean 2.5 and
+        // the harmonic 1.6.
+        {
+            const Aabb box{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}};
+            ParticleSettings s{1.0, box};
+            s.wall_temperature = WallTemperature2D{4.0, 1.0, 0.0, 0.0};
+            s.seed = 21;
+            ParticleWorld w{SimulationSettings{0.01}, s, lattice_gas(box, 4, 4, 1.0, 0.0, 1.0)};
+            Real t_sum = 0.0;
+            int samples = 0;
+            for (int i = 1; i <= 40000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                if (i > 2000)
+                {
+                    t_sum += malloy::particles::temperature(w.particles());
+                    ++samples;
+                }
+            }
+            const auto& q = w.wall_heat();
+            const Real rate = (q.min_x - q.max_x) / (2.0 * 16.0 * w.elapsed_time());
+            MALLOY_CHECK_NEAR(rate, 2.380990, 0.227);
+            MALLOY_CHECK_NEAR(t_sum / samples, 2.0093, 0.19);
+            MALLOY_CHECK_TRUE(q.min_y == 0.0 && q.max_y == 0.0);
+        }
+        {
+            const Aabb3 box{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 1.0, 1.0}};
+            ParticleSettings3D s;
+            s.bounds = box;
+            s.wall_temperature = WallTemperature3D{4.0, 1.0, 0.0, 0.0, 0.0, 0.0};
+            s.seed = 22;
+            ParticleWorld3D w{SimulationSettings{0.01}, s,
+                              lattice_gas3d(box, 4, 2, 2, 1.0, 0.0, 1.0)};
+            Real t_sum = 0.0;
+            int samples = 0;
+            for (int i = 1; i <= 40000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                if (i > 2000)
+                {
+                    t_sum += malloy::particles::temperature3d(w.particles());
+                    ++samples;
+                }
+            }
+            const auto& q = w.wall_heat();
+            const Real rate = (q.min_x - q.max_x) / (2.0 * 16.0 * w.elapsed_time());
+            MALLOY_CHECK_NEAR(rate, 3.174654, 0.286);
+            MALLOY_CHECK_NEAR(t_sum / samples, 2.0071, 0.18);
+        }
+    }
+
     std::cout << "malloy_particles_tests passed\n";
     return 0;
 }

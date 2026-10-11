@@ -5,7 +5,7 @@ simulation-first and terminal-first. It grows one finished physics domain at a
 time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M38 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M39 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all ten scenario types. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and all five of
@@ -57,7 +57,7 @@ alternative to them. See
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 11. `docs/09_MISTAKES_TO_AVOID.md`
 12. `docs/10_CHANGELOG_TEMPLATE.md`
-13. `docs/decisions/` (ADRs 0001-0009)
+13. `docs/decisions/` (ADRs 0001-0010)
 
 ## Build and test
 
@@ -73,7 +73,7 @@ completion.
 
 ## What's next
 
-M1-M38 are done. The classical mechanics track is complete, including the
+M1-M39 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, the uniform gravity field for that domain, which became M15, and the
 halfplane ground of M16 and the Coulomb friction of M17, and M18 added
@@ -91,7 +91,9 @@ M34 collides a box with a sphere, M35 gives particle contacts Coulomb
 friction, M36 collides two oriented boxes in the plane, and M37 rests a 2D box
 on a ground plane. M38 then opened thermodynamics, reading a box of colliding
 particles as a gas: its temperature, the pressure on its walls, and its
-relaxation to Maxwell-Boltzmann.
+relaxation to Maxwell-Boltzmann. M39 gave its walls a temperature, so heat
+flows through the gas, using the project's first random numbers: seeded,
+fully specified and owned by the particle domain (ADR 0010).
 Five finished domains sit behind multi-domain dispatch, across ten
 scenario types.
 Work stays gated one milestone at a time; see

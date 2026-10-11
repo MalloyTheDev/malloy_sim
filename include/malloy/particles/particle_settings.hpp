@@ -1,10 +1,28 @@
 #pragma once
 
+#include <cstdint>
+
 #include <malloy/collide/shapes.hpp>
 #include <malloy/math/real.hpp>
 
 namespace malloy::particles
 {
+// The temperature of each wall of the box (M39), named as the impulse tally
+// names them. A wall at T > 0 is THERMAL: it forgets how a particle arrived and
+// re-emits it as a wall at temperature T would, so heat flows between the wall
+// and the gas (docs/04). 0, the default, is the ordinary specular wall, so a
+// box with no thermal wall behaves exactly as it did before M39 and draws no
+// random number. Valid when every entry is non-negative and finite.
+struct WallTemperature2D
+{
+    math::Real min_x{0.0};
+    math::Real max_x{0.0};
+    math::Real min_y{0.0};
+    math::Real max_y{0.0};
+
+    bool is_valid() const;
+};
+
 // Parameters for a colliding-particle simulation. The fixed timestep is not
 // here: that is generic and lives in sim_core::SimulationSettings
 // (docs/03_MODULE_BOUNDARIES.md).
@@ -37,8 +55,21 @@ struct ParticleSettings
     // persistent force, so no body type changes and no accumulator is added.
     math::Real friction{0.0};
 
+    // M39: which walls are thermal, and at what temperature. At a thermal wall
+    // restitution and friction do not apply: the wall fully accommodates, so
+    // what leaves it does not depend on what arrived. They still act on pair
+    // contacts and on the specular walls. Added after `friction` so that every
+    // earlier brace still compiles and behaves as before.
+    WallTemperature2D wall_temperature{};
+
+    // M39: the seed of the world's random number generator, which only a
+    // thermal wall draws from, so without one it changes nothing. Every value is
+    // valid. The LAST field, for the same reason as wall_temperature.
+    std::uint64_t seed{0};
+
     // Valid when restitution is in [0, 1] and finite, friction is non-negative
-    // and finite, bounds is a valid box, and gravity is finite.
+    // and finite, bounds is a valid box, gravity is finite, and every wall
+    // temperature is non-negative and finite.
     bool is_valid() const;
 };
 } // namespace malloy::particles

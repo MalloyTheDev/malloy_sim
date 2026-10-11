@@ -35,7 +35,7 @@ malloy::math::Real
 
 Do not claim cross-platform bitwise determinism.
 
-V1 determinism means same binary, same platform, same initial state, same fixed timestep, same update order, and same result within expected tolerance.
+V1 determinism means same binary, same platform, same initial state, same fixed timestep, same update order, same seed (M39, ADR 0010), and same result within expected tolerance.
 
 ## Units
 
@@ -79,12 +79,47 @@ Each definition below is the one the code computes and the templates check.
   Both are unweighted by mass, so those targets are for a gas of equal masses.
   `slow_fraction` is decided by rounding when every speed is equal, so it is read
   after relaxation, and `speed_ratio` describes the start.
-- **No random numbers.** A gas starts from `lattice`: a grid with every speed
-  equal and directions in exactly opposite pairs, pair `k` at `k` golden angles
-  (2D) or on two independent equidistributed sequences (3D). Collisions do the
-  randomizing. If a later milestone needs randomness, it uses a fully specified
-  generator inside its domain, never the std distributions, whose algorithms the
-  standard leaves to the implementation.
+- **A deterministic start.** A gas starts from `lattice`: a grid with every
+  speed equal and directions in exactly opposite pairs, pair `k` at `k` golden
+  angles (2D) or on two independent equidistributed sequences (3D). Collisions
+  do the randomizing.
+
+## Thermal walls and randomness (M39)
+
+A wall at temperature `T_w > 0` is THERMAL; 0 is the ordinary specular wall.
+
+- **Emission.** A thermal wall fully accommodates: it forgets how a particle
+  arrived and re-emits it from the flux of a Maxwell-Boltzmann gas at `T_w`
+  leaving it. The normal speed is flux-weighted, a Rayleigh law
+  `sqrt(-2 (T_w/m) ln u)`, and each tangential component is Gaussian with
+  variance `T_w/m` (Box-Muller). A half-Gaussian normal law would leave a
+  colliding gas at `d/(d+1)` of `T_w` (collisionless points in a 2D box at
+  about half of it). The particle stays on the wall, and restitution and
+  friction do not apply there.
+- **Tallies.** The impulse tally records the true normal momentum change,
+  `m (|v_n,in| + v_n,out)`. The heat tally records the kinetic energy after
+  minus before, positive into the gas; a specular wall's heat stays 0. With
+  restitution 1 and no gravity, the gas's kinetic energy changes by exactly the
+  summed heat.
+- **The generator.** SplitMix64 (`include/malloy/particles/splitmix64.hpp`),
+  one stream per world, seeded from the `seed` setting. Deviates are strictly
+  inside (0, 1), so no logarithm is ever infinite. A failed step restores the
+  stream. Draws come only at thermal bounces, three per bounce, by particle
+  index then wall axis. Order and count are observable behaviour (ADR 0010).
+- **Determinism.** The integer stream is the same everywhere. The doubles derived
+  from it pass through `log`, `cos` and `sin`, so bitwise agreement across
+  platforms is still not claimed.
+- **Two fixed-step biases.**
+  - A wall clamp wastes part of a step per bounce, which raises a point gas's
+    temperature by about `dt / (2 d E[tau])`, with `E[tau]` the mean flight
+    time between walls. That is 0.4 per cent in a unit box at `dt = 0.01`.
+  - The same lag adds `dt` to each round trip in free-molecular heat flow. The
+    closed form between a hot and a cold wall, per particle, is
+    `q = ((d+1)/2) (T_h - T_c) / (L sqrt(pi m / 2) (T_h^-1/2 + T_c^-1/2) + dt)`.
+- **Choosing dt.** An emitted normal speed can reach `8.57 sqrt(T_w/m)` (the
+  smallest deviate is 2^-53), and the whole emitted speed, normal and
+  tangential together, about `12.1 sqrt(T_w/m)`. Keep that times `dt` well
+  under a particle diameter.
 
 ## N-body softening
 

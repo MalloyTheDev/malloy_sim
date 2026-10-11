@@ -7,6 +7,7 @@
 #include <malloy/math/vec2.hpp>
 #include <malloy/particles/particle2d.hpp>
 #include <malloy/particles/particle_settings.hpp>
+#include <malloy/particles/splitmix64.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 #include <malloy/time/fixed_step.hpp>
 
@@ -18,10 +19,29 @@ namespace malloy::particles
 // away, which is what makes it measurable: divided by the elapsed time and the
 // length of wall it is the pressure the gas exerts (thermo.hpp).
 //
-// Every entry is non-negative and counts only the NORMAL component, m (1 + e)
-// times the speed into the wall. Friction's tangential impulse pushes along a
-// wall, not into it, so it is not pressure and is not tallied.
+// Every entry is non-negative and counts only the NORMAL momentum change of
+// each bounce: m (1 + e) times the speed into a specular wall, and at a thermal
+// wall (M39) m times the speed in plus the speed out, since what leaves a
+// thermal wall does not depend on what arrived. Tangential impulse, friction's
+// or a thermal wall's, pushes along a wall, not into it, so it is not pressure
+// and is not tallied.
 struct WallImpulse2D
+{
+    math::Real min_x{0.0};
+    math::Real max_x{0.0};
+    math::Real min_y{0.0};
+    math::Real max_y{0.0};
+};
+
+// The total heat each wall has delivered to the gas since the run began (M39):
+// at every bounce off a THERMAL wall, the particle's kinetic energy after the
+// re-emission minus its kinetic energy before. Positive into the gas, so a hot
+// wall's entry grows and a cold wall's falls. A specular wall exchanges no
+// heat and its entry stays exactly 0. With restitution 1 and no gravity the
+// gas's kinetic energy changes by exactly the sum of these, to rounding. Like
+// the impulse tally it is a running sum and is never reset, so a very long run
+// loses precision in it before it could overflow.
+struct WallHeat2D
 {
     math::Real min_x{0.0};
     math::Real max_x{0.0};
@@ -52,7 +72,15 @@ public:
     //   2. move every particle by the UPDATED velocity * dt, which makes this
     //      semi-implicit (symplectic) Euler, the same order NBodyWorld uses;
     //   3. resolve particle/particle contacts in ascending pair order;
-    //   4. resolve wall contacts.
+    //   4. resolve wall contacts, particle by particle in ascending index, each
+    //      particle's x walls before its y walls.
+    //
+    // A THERMAL wall (M39) re-emits a particle instead of reflecting it, drawing
+    // three uniforms from the world's generator per bounce, in a fixed order:
+    // one for the normal speed, then two for the tangential component
+    // (thermo.hpp). That order and count, with the step order above, make the
+    // stream a function of the run, so the same seed repeats it (docs/04). No
+    // other step draws, and a box without a thermal wall never draws at all.
     //
     // Step 4 clamps a particle that has passed a wall back to the surface,
     // which changes its position without changing its velocity. In a gravity
@@ -93,6 +121,16 @@ public:
     // this existed. A step rolled back for non-finite state rolls this back too.
     const WallImpulse2D& wall_impulse() const { return wall_impulse_; }
 
+    // The heat each wall has delivered to the gas so far (M39); rolled back with
+    // a rolled-back step, as the impulse tally is.
+    const WallHeat2D& wall_heat() const { return wall_heat_; }
+
+    // The state of the world's random number generator, seeded from
+    // ParticleSettings::seed. It moves only when a thermal wall draws, by
+    // exactly three draws per thermal bounce, and a rolled-back step restores
+    // it, so a failed step leaves no trace in the stream.
+    std::uint64_t random_state() const { return random_.state(); }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     ParticleSettings particle_settings_;
@@ -102,6 +140,8 @@ private:
     // allocation rather than allocating once per step.
     std::vector<Particle2D> previous_;
     WallImpulse2D wall_impulse_{};
+    WallHeat2D wall_heat_{};
+    SplitMix64 random_;
     // Tick counting and elapsed time come from malloy_time rather than being
     // reimplemented per domain. Empty when dt is unusable.
     std::optional<time::FixedStep> step_;

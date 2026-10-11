@@ -1062,6 +1062,180 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M39] - 2026-10-10  (thermal walls: heat flow through a gas)
+
+### Added
+
+- **Thermal walls in both particle worlds.**
+  - A wall at a temperature `T_w > 0` re-emits each particle it meets from the
+    flux of a Maxwell-Boltzmann gas at `T_w` leaving it: a flux-weighted
+    (Rayleigh) normal speed, and Gaussian tangential components of variance
+    `T_w / m`. Restitution and friction do not apply there.
+  - Settings: `WallTemperature2D` / `WallTemperature3D` in the particle
+    settings. 0 is the ordinary specular wall.
+- **The project's first random numbers.** `particles::SplitMix64`
+  (`splitmix64.hpp`) is header-only and fully specified. Each world has one
+  stream, seeded from a new `seed` setting, readable as `random_state()`, and
+  restored by a rolled-back step. A thermal bounce takes exactly three draws, in
+  a fixed order; nothing else draws. ADR 0010 records the rules.
+- **The samplers.** `emission_normal_speed` and `emission_tangent` in
+  `thermo.hpp`. Their uniform deviates are strictly inside (0, 1), so no
+  logarithm is ever infinite.
+- **A per-wall heat tally**, `WallHeat2D` / `WallHeat3D` (`wall_heat()`): the
+  kinetic energy each thermal wall gives the gas, positive into it. At a thermal
+  wall the impulse tally records the true normal momentum change,
+  `m (|v_n,in| + v_n,out)`.
+- **Scenario keys** for types particles and particles3d:
+  - `wall_temperature <wall> <T>`: each wall may be named once, and an unknown
+    name is echoed escaped.
+  - `seed <n>`: plain decimal digits across the whole 64-bit range, parsed with
+    `from_chars`, because `>>` reads "-1" as 2^64 - 1.
+- **Check quantities and app output.**
+  - Check quantities `heat_min_x` ... `heat_max_y`, with `heat_min_z` and
+    `heat_max_z` in 3D.
+  - App: a `Q <wall>` column for each thermal wall, and the seed in the run
+    header when some wall is thermal.
+- **The `thermal_relaxation` and `heat_conduction` templates.** Thirty templates
+  now, across ten domains.
+- ADR 0010: randomness is seeded and owned by its domain.
+
+### Heat, and a gas that takes its walls' temperature
+
+M38 read a box of particles as a gas. M39 lets its walls hold a temperature, so
+heat can flow in and out. That needs randomness: a wall that emitted a fixed
+pattern would impose the pattern, not a temperature.
+
+**Measured before it was built.** The emission model, the sampling formulas and
+the closed-form predictions came first, and every template tolerance was
+measured with a prototype across 40 to 60 seeds before any code was written.
+Once the code existed, every statistical check was run again on it across 1000
+to 5000 seeds; that pass widened two heavy-tailed tolerances and recentred one
+template check (below).
+
+**No existing behaviour changed.** A box without a thermal wall never draws, and
+all 28 earlier templates give byte-identical app output before and after M39,
+exit codes included.
+
+**Exact checks.**
+- The generator matches known answers, which agree with an independent
+  implementation (Java's `SplittableRandom`).
+- With restitution 1, the gas's kinetic energy changes by exactly the summed
+  wall heat, to rounding.
+- One bounce matches the public samplers drawn in the documented order, bit for
+  bit, in 2D and 3D. Its impulse and heat are exactly `m (|v_in| + v_out)` and
+  the change in kinetic energy.
+- A rolled-back step (an emission whose `T/m` overflows) restores the stream,
+  both tallies, the positions and the tick.
+
+**Statistical checks**, each against a closed form or a measured ensemble:
+- **Relaxation.** A gas relaxes to its walls' temperature, for any masses (the
+  diffuse wall's stationary state is canonical at `T_w`).
+- **Free-molecular heat flow.** Point particles between a hot and a cold wall
+  carry heat at exactly the rate a renewal-reward argument gives:
+  - 2.380990 per particle in 2D and 3.174654 in 3D, the fixed step's lag
+    included;
+  - the gas settles at `sqrt(T_h T_c)`.
+- **Conduction.** The heat conducted through colliding disks matches an Enskog
+  conductivity with diffuse-wall temperature jumps.
+- **Tolerances** are derived (docs/05). They exclude the known wrong designs:
+  - a half-Gaussian emitter, which leaves a colliding gas at `d/(d+1)` of
+    `T_w` (and collisionless points in a 2D box at about half of it);
+  - a wall that keeps the tangential velocity;
+  - a sampler that forgot to divide by the mass.
+
+### Invariants
+
+The particle tests cover:
+- **The generator:** known answers at compile time and at run time, deviates
+  strictly inside (0, 1), and the draw-count identity.
+- **The samplers' moments** over a million draws at `m != 1`.
+- **Validation:** each wall's temperature checked on its own against NaN, an
+  infinity and a negative; -0.0 is allowed as specular.
+- **No draw and determinism:** no draw without a thermal wall, and different
+  seeds then give bit-identical runs. The same seed repeats a run, a different
+  one changes it, and the stream moves by a whole number of bounces.
+- **The samplers' exact values** from a fixed seed, so a rewrite that keeps
+  their distributions but changes their output (`log(1 - u)` for `log(u)`, the
+  two deviates swapped) fails.
+- **Single bounces:** the closed form in 2D (both signs, x and y walls) and 3D
+  (an x wall and a z wall, tangents in ascending axis order). Restitution and
+  friction leave a thermal bounce bit-identical.
+- **Every wall at once:** one particle into each wall in the same step (four in
+  2D, six in 3D, each wall at its own temperature), every velocity component,
+  impulse and heat slot compared with the samplers drawn in particle order.
+- **A corner:** a particle crossing a thermal x wall and a thermal y wall in one
+  step meets the x wall first, and the y wall emits again only if the x wall's
+  emission still points into it.
+- **Rollback,** in 2D and 3D.
+- **Conservation:** the energy identity in 2D and 3D, and the x-momentum
+  balance against the x walls' impulse tallies.
+- **Physics:** relaxation in 2D and 3D, and free-molecular heat flow in 2D and
+  3D.
+
+The parser tests cover:
+- every wall name in 2D and 3D, and the seed at both ends of its range;
+- the refusals: a sign, a fraction, an exponent, a hex prefix, an overflow, a
+  trailing token, an unknown wall, a 3D wall in 2D, a duplicate wall, the
+  wrong domain, and either key before a second `type` line;
+- a negative temperature parsing and then being refused by `validate()`;
+- the byte sweep from #28, extended to the two new places a token is echoed.
+
+The templates pin the start exactly and the end within derived bands; the
+conduction template's specular walls exchange exactly no heat.
+
+### Calibration
+
+Every statistical check was run on the real code across 1000 to 5000 seeds
+other than its own. Each centre matched its derivation within statistics, and
+the bookkeeping identities held to 2e-13 over 500 seeds. Three things changed:
+
+- **Two time-averaged temperatures** (free-molecular flow, 2D and 3D) are
+  heavy-tailed, so three standard deviations passed only 99.3 per cent of
+  seeds. Their tolerances are now the measured 99.73 per cent quantiles, 0.19
+  and 0.18, which still exclude the arithmetic and harmonic means.
+- **The relaxation template's pressure** is centred on the measured ensemble
+  mean, 2.56, instead of a model's 2.60: the cold start costs the time average
+  6.6 per cent, more than the well-mixed heating model predicted. Started at the
+  walls' temperature, the gas gives 2.744, which confirms the hard-disk value
+  of 4 x 0.683 to 0.4 per cent.
+- **The heavy-to-light energy ratios** in the relaxation tests are now a true
+  three standard deviations of the 1000-seed spread (0.095 and 0.065).
+
+Each template's own seed is typical: within 1.3 standard deviations of the
+ensemble on every check.
+
+### Mutation testing
+
+Thirty-seven mutations, all caught, three of them at compile time by the
+generator's `static_assert` known answers:
+- **The generator:** a wrong shift in the mixer, 53 bits scaled as 52 (deviates
+  up to 2), and no half-cell offset (a deviate of 0).
+- **The samplers:** either one forgetting the mass, a half-circle angle, the two
+  tangent deviates drawn in swapped order, cos and sin swapped, and `log(1 - u)`
+  for `log(u)`. The last three keep every distribution exactly and change only
+  the values, so only the golden-value test sees them.
+- **The bounce:** the impulse missing the incoming speed (2D and 3D), the 2D
+  tangent from the wrong deviate, the 3D second tangent repeating the first, the
+  heat measured before the emission only, a 0 K wall treated as thermal (2D and
+  3D), the 3D y-wall tangents in the wrong order, a heat landing in the wrong
+  wall's slot (2D and 3D), and the y wall met before the x wall at a corner.
+- **Validation, seeding and rollback:** a wall's temperature unchecked (2D and
+  3D), an infinity let through, the seed ignored (2D and 3D), and a rolled-back
+  step keeping the stream or the heat (2D and 3D).
+- **The parser:** a partial seed token accepted, a 3D seed stored in the 2D
+  settings, every wall sharing one duplicate bit, a wall parsed into the wrong
+  slot, an unknown wall echoed unescaped, either key failing to commit the file
+  to its domain, and the temperature read before the wall name is resolved.
+
+### Docs
+
+ADR 0010 records the randomness rules. docs/04 gains a thermal-walls section
+(the emission law, the tallies, the generator, determinism, the two fixed-step
+biases and how to choose `dt`); docs/05 adds that a random quantity's tolerance
+comes from many seeds, never from the one a template ships with; docs/03 and
+the scenario header document the new settings and keys; and the determinism
+definition everywhere now includes the seed.
+
 ## [M38] - 2026-10-10  (a hard-disk gas: kinetic theory)
 
 ### Added

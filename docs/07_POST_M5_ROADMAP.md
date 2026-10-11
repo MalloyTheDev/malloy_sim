@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M38 are complete, so this is the live roadmap for what comes next.
+M1-M39 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -52,6 +52,7 @@ M35 - Coulomb friction for particles        [done]
 M36 - 2D oriented boxes (SAT)               [done]
 M37 - a 2D box on a ground plane            [done]
 M38 - a hard-disk gas (kinetic theory)      [done]
+M39 - thermal walls (heat flow)             [done]
 ```
 
 ## Track 1: classical mechanics depth (active)
@@ -153,7 +154,7 @@ None of these is scheduled; the order will be revisited after Track 2.
 
 ```text
 fluids (SPH, 2D)
-thermodynamics, beyond the ideal gas: thermal walls (heat flow), a piston (work)
+thermodynamics, beyond M39: a piston (work), accommodation coefficients
 vehicles, as an application of rigid bodies
 ```
 
@@ -162,9 +163,13 @@ as M38, and like ballistics in M12 it was measurement on an existing domain, not
 a new one: a box of `malloy_particles` particles read as a gas, with a
 temperature, a wall-impulse tally giving the pressure, relaxation statistics,
 and a deterministic `lattice` start. The two hard-gas templates match Henderson
-(2D) and Carnahan-Starling (3D) once the walls are accounted for. What follows
-it needs things M38 deliberately left out: thermal walls need random numbers (a
-fully specified generator inside the domain), and a piston needs a moving wall.
+(2D) and Carnahan-Starling (3D) once the walls are accounted for.
+M39 added thermal walls, which needed the project's first random numbers: a
+seeded SplitMix64 owned by the particle world, consumed in a fixed order and
+rolled back with a failed step (ADR 0010). A gas now relaxes to its walls'
+temperature and conducts heat between a hot and a cold wall, and the
+free-molecular heat flow between two thermal walls is tested against its
+closed form. What follows needs a moving wall: a piston, and with it work.
 Fluids (SPH) would be a genuinely new domain, with a neighbour search that the
 O(N^2) pair loop cannot afford.
 

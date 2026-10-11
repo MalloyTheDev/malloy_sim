@@ -197,6 +197,17 @@ void print_pressure(const std::optional<malloy::math::Real>& pressure)
     }
 }
 
+// One wall's heat column (M39): the heat a THERMAL wall has delivered to the
+// gas, labelled with the wall. A specular wall exchanges none and prints
+// nothing, so a box without a thermal wall prints exactly what it did before.
+void print_heat(const char* wall, malloy::math::Real temperature, malloy::math::Real heat)
+{
+    if (temperature > malloy::math::Real{0})
+    {
+        std::cout << "   Q " << wall << std::setw(16) << heat;
+    }
+}
+
 // Runs one particle scenario to completion, reporting the conserved quantities
 // this domain actually has. Deliberately a separate function from
 // run_scenario: ParticleWorld and NBodyWorld share no base class, and ADR 0006
@@ -207,9 +218,17 @@ int run_particles(const char* title, const SimulationSettings& sim,
 {
     ParticleWorld world{sim, settings, std::move(particles)};
 
+    const auto& walls = settings.wall_temperature;
+    const bool thermal = walls.min_x > 0.0 || walls.max_x > 0.0 || walls.min_y > 0.0 ||
+                         walls.max_y > 0.0;
     std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
               << "  dt=" << sim.dt << "  steps=" << steps
-              << "  restitution=" << settings.restitution << '\n';
+              << "  restitution=" << settings.restitution;
+    if (thermal)
+    {
+        std::cout << "  seed=" << settings.seed; // a thermal run depends on it
+    }
+    std::cout << '\n';
 
     if (world.validate() != StepStatus::Ok)
     {
@@ -219,7 +238,7 @@ int run_particles(const char* title, const SimulationSettings& sim,
 
     Viewport view = fit_viewport(positions_of(world.particles()));
 
-    const auto report = [&world, &view, &settings](std::int64_t step_index) {
+    const auto report = [&world, &view, &settings, &walls](std::int64_t step_index) {
         const auto& now = world.particles();
         std::cout << "step " << std::setw(6) << step_index;
         std::cout << std::scientific;
@@ -229,6 +248,11 @@ int run_particles(const char* title, const SimulationSettings& sim,
                   << malloy::particles::temperature(now) << "   P ";
         print_pressure(malloy::particles::pressure(world.wall_impulse(), settings.bounds,
                                                    world.elapsed_time()));
+        const auto& heat = world.wall_heat();
+        print_heat("min_x", walls.min_x, heat.min_x);
+        print_heat("max_x", walls.max_x, heat.max_x);
+        print_heat("min_y", walls.min_y, heat.min_y);
+        print_heat("max_y", walls.max_y, heat.max_y);
         std::cout << '\n';
         std::cout << std::fixed;
         print_view(view, positions_of(now));
@@ -258,9 +282,17 @@ int run_particles3d(const char* title, const SimulationSettings& sim,
 {
     ParticleWorld3D world{sim, settings, std::move(particles)};
 
+    const auto& walls = settings.wall_temperature;
+    const bool thermal = walls.min_x > 0.0 || walls.max_x > 0.0 || walls.min_y > 0.0 ||
+                         walls.max_y > 0.0 || walls.min_z > 0.0 || walls.max_z > 0.0;
     std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
               << "  dt=" << sim.dt << "  steps=" << steps
-              << "  restitution=" << settings.restitution << "  (3D)" << '\n';
+              << "  restitution=" << settings.restitution << "  (3D)";
+    if (thermal)
+    {
+        std::cout << "  seed=" << settings.seed; // a thermal run depends on it
+    }
+    std::cout << '\n';
 
     if (world.validate() != StepStatus::Ok)
     {
@@ -270,7 +302,7 @@ int run_particles3d(const char* title, const SimulationSettings& sim,
 
     Viewport view = fit_viewport(projected(world.particles()));
 
-    const auto report = [&world, &view, &settings](std::int64_t step_index) {
+    const auto report = [&world, &view, &settings, &walls](std::int64_t step_index) {
         const auto& now = world.particles();
         std::cout << "step " << std::setw(6) << step_index;
         std::cout << std::scientific;
@@ -280,6 +312,13 @@ int run_particles3d(const char* title, const SimulationSettings& sim,
                   << std::setw(16) << malloy::particles::temperature3d(now) << "   P ";
         print_pressure(malloy::particles::pressure3d(world.wall_impulse(), settings.bounds,
                                                      world.elapsed_time()));
+        const auto& heat = world.wall_heat();
+        print_heat("min_x", walls.min_x, heat.min_x);
+        print_heat("max_x", walls.max_x, heat.max_x);
+        print_heat("min_y", walls.min_y, heat.min_y);
+        print_heat("max_y", walls.max_y, heat.max_y);
+        print_heat("min_z", walls.min_z, heat.min_z);
+        print_heat("max_z", walls.max_z, heat.max_z);
         std::cout << '\n';
         std::cout << std::fixed;
         print_view(view, projected(now));

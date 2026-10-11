@@ -201,6 +201,25 @@ std::vector<Particle2D> lattice_gas(const collide::Aabb& bounds, int nx, int ny,
     return particles;
 }
 
+math::Real emission_normal_speed(SplitMix64& random, math::Real temperature,
+                                 math::Real mass)
+{
+    const math::Real u = random.uniform();
+    return std::sqrt(math::Real{-2} * (temperature / mass) * std::log(u));
+}
+
+math::Vec2 emission_tangent(SplitMix64& random, math::Real temperature,
+                            math::Real mass)
+{
+    // Two draws, in this order, as separate statements so the order is fixed.
+    const math::Real u1 = random.uniform();
+    const math::Real u2 = random.uniform();
+    const math::Real radius =
+        std::sqrt(math::Real{-2} * (temperature / mass) * std::log(u1));
+    const math::Real angle = math::Real{2} * pi * u2;
+    return math::Vec2{radius * std::cos(angle), radius * std::sin(angle)};
+}
+
 std::vector<Particle3D> lattice_gas3d(const collide::Aabb3& bounds, int nx, int ny,
                                       int nz, math::Real mass, math::Real radius,
                                       math::Real speed)

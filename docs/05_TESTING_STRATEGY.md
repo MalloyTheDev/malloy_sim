@@ -99,6 +99,13 @@ is written beside the check:
 Exact quantities keep tight tolerances even in a statistical template: a
 conserved temperature, or a statistic of the deterministic start.
 
+Since M39 some quantities are random, drawn from a seeded generator. A
+template states its seed, and its tolerances come from the spread measured
+across many seeds (40 to 60 for the M39 templates), never from the one seed it
+ships with. The generator itself is pinned by known answers rather than
+statistics, at compile time and at run time, and the draw order by exact
+comparison with the public samplers.
+
 A bound can replace a standard deviation when the error has one. The point
 particle ideal-gas test computes its own tolerance from the run (whole bounces
 counted, plus the clamp lag), and also asserts that tolerance is tight enough to

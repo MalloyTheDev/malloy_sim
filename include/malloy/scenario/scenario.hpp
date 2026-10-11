@@ -256,6 +256,25 @@ struct ScenarioParseResult
 //     is allocated, and a grid spacing below one particle diameter is refused
 //     because the particles would start overlapping.
 //
+//   wall_temperature <wall> <T>      a thermal wall           (default 0)
+//
+//     wall is min_x, max_x, min_y or max_y, the names of the impulse and heat
+//     tallies. A wall at T > 0 is THERMAL (M39): it forgets how a particle
+//     arrived and re-emits it with a velocity drawn from the distribution a
+//     wall at temperature T emits, so heat flows between the wall and the gas.
+//     Restitution and friction do not apply at a thermal wall. T = 0, the
+//     default, is the ordinary specular wall. Each wall may be named once. A
+//     negative T parses and is refused by validate(); a value that is not a
+//     finite number does not parse.
+//
+//   seed <n>                         random seed              (default 0)
+//
+//     Seeds the world's random number generator (M39), a whole number from 0
+//     to 18446744073709551615 in plain decimal digits, with no sign. Only a
+//     thermal wall draws random numbers, so without one the seed changes
+//     nothing. The same seed gives the same run (docs/04), and every template
+//     with a thermal wall states its seed.
+//
 // type rigid:
 //
 //   restitution <value>   bounciness in [0, 1]     (default 1.0)
@@ -363,6 +382,12 @@ struct ScenarioParseResult
 //
 //     The 3D lattice: an nx by ny by nz grid, with the same rules as `lattice`
 //     (particles::lattice_gas3d).
+//
+//   wall_temperature <wall> <T>      a thermal wall           (default 0)
+//   seed <n>                         random seed              (default 0)
+//
+//     As for type particles (M39), with six walls: min_x, max_x, min_y, max_y,
+//     min_z and max_z.
 //
 // A key belonging to another domain is a parse error, so a typo in `type`
 // surfaces immediately rather than silently running the wrong simulation.

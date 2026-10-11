@@ -20,13 +20,13 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0009)
+- docs/decisions/ (ADRs 0001-0010)
 
 Current status:
 
-M1-M38 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
+M1-M39 are complete. Gravity in two and three dimensions, colliding particles in two and (M32) three
 dimensions (with ballistics as uniform
-gravity in that domain, Coulomb friction on their contacts since M35, and read as a gas since M38, with a temperature, a wall pressure and relaxation to Maxwell-Boltzmann), 2D rigid bodies with contact response (discs, and since M36 oriented boxes by the separating-axis test, resting on a ground plane since M37) and their own
+gravity in that domain, Coulomb friction on their contacts since M35, and read as a gas since M38, with a temperature, a wall pressure and relaxation to Maxwell-Boltzmann, and since M39 heated and cooled through thermal walls that draw from a seeded generator), 2D rigid bodies with contact response (discs, and since M36 oriented boxes by the separating-axis test, resting on a ground plane since M37) and their own
 uniform gravity field, halfplane ground and friction, 3D rigid-body rotation
 both torque-free and under a constant applied torque, a sphere bouncing on a 3D
 ground plane, rolling with friction, and colliding with another sphere, mass properties
@@ -42,7 +42,7 @@ and magnetic fields in two and
 (M29) three dimensions, where the field is a vector and a charge spirals along
 it, are the five finished domains, and the scenario format dispatches
 between them with a type key across ten scenario types. The classical mechanics track is complete
-(docs/07_POST_M5_ROADMAP.md), and M38 opened thermodynamics.
+(docs/07_POST_M5_ROADMAP.md), M38 opened thermodynamics, and M39 added thermal walls and the project's first, seeded, randomness (ADR 0010).
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to
