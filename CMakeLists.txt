@@ -634,6 +634,15 @@ if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
     malloy_add_template_check(springs3d spring_tetrahedron)
     malloy_add_template_check(charges cyclotron)
     malloy_add_template_check(charges3d magnetic_helix)
+
+    # The app's own rigid3d E column includes the applied force's potential
+    # (issue #47), which no # check line reads: the scenario tests evaluate the
+    # quantities through the library, not the app. Pinned here on the final
+    # report of the force template, whose energy is conserved but for the
+    # integrator's derived drift; without the potential it would read 6.28e+01.
+    malloy_add_app_check(malloy_app_rigid3d_energy_includes_force
+        "${PROJECT_SOURCE_DIR}/scenarios/applied_force.scn" 0
+        "step +2000 +E +3.02083333e-01")
 endif()
 
 # ----------------------------------------------------------------------------
