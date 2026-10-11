@@ -93,10 +93,12 @@ domains sit behind multi-domain dispatch, across ten scenario types.
 
 Nothing further is scheduled. The candidates for the next milestone are open
 issues labelled `milestone candidate`, listed in
-`docs/07_POST_M5_ROADMAP.md`: a per-point contact solver, immovable 3D bodies,
-box against disc in 2D, a piston, accommodation coefficients, a temperature
-profile, a particle broadphase, gravity for springs, and a shared `# check`
-evaluator. Work stays gated one milestone at a time, started only when asked.
+`docs/07_POST_M5_ROADMAP.md`: 3D rendering and then a GUI, UI and UX (the
+destination), packaging the libraries for other projects, a per-point contact
+solver, immovable 3D bodies, box against disc in 2D, a piston, accommodation
+coefficients, a temperature profile, a particle broadphase, gravity for
+springs, and a shared `# check` evaluator. Work stays gated one milestone at a
+time, started only when asked.
 
 The all-in-one goal is not a license to build ahead. Breadth is earned by
 finishing domains, not by scaffolding for them

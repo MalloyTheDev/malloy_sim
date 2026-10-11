@@ -38,7 +38,10 @@ What the build uses, all in force at M39:
   `MALLOY_BUILD_FUZZERS` (OFF; see Fuzzing below).
 
 Avoid package managers, install/export rules, complex CMake functions, source
-globbing, and dependency fetching.
+globbing, and dependency fetching until a milestone needs them. Two planned
+milestones will: 3D rendering brings the first graphics dependency
+([#80](https://github.com/MalloyTheDev/malloy_sim/issues/80)), and packaging the libraries for other projects brings
+install and export rules ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)).
 
 ## Build commands
 

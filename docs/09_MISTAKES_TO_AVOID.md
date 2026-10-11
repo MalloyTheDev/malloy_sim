@@ -28,6 +28,13 @@ Raylib, SDL, GLFW, SFML, rendering, input, camera, quantum, ECS, serialization,
 CLI parser, logging framework, plugins, scripting, editor, asset manager,
 threading, package manager, or install/export rules.
 
+Being on this list means "not before its milestone", not "unwanted". Rendering
+in 3D, and the windowing, input and camera that come with it, are where the
+project is going ([#80](https://github.com/MalloyTheDev/malloy_sim/issues/80)), followed by a GUI, UI and UX
+([#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)); install and export rules arrive when the libraries
+are packaged for other projects ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)). The mistake is adding
+any of them early, not adding them.
+
 Several items that were on this list have since had their milestone and are no
 longer scope creep: config files (the scenario format, M7), collision geometry
 (M9), rigid bodies (M11), and 3D, which began with `Vec3` and 3D gravity (M19)

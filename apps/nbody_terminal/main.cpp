@@ -383,9 +383,9 @@ int run_rigid(const char* title, const SimulationSettings& sim,
 //
 // An orthographic projection along z, and nothing cleverer. malloy_ascii plots
 // points that are already in the view plane, and drawing a 3D scene properly is
-// a different problem rather than a wider one (ADR 0009). Turning this into a
-// camera would make it a graphics project, which rule 2 exists to prevent until
-// rendering has its own milestone.
+// a different problem rather than a wider one (ADR 0009). A camera belongs to
+// the 3D rendering milestone (issue #80, rule 2), which will show these worlds
+// properly; this flattening is only the terminal base's view until then.
 //
 // The consequence is worth knowing while reading a frame: motion along z is
 // invisible here, so an orbit tilted out of the xy plane looks like an ellipse

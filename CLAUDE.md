@@ -63,8 +63,9 @@ Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
 
 **It is meant to be rendered.** Showing the simulation in 3D is the point of
-the 3D arc, not an optional extra: rendering, and then a GUI, UI and UX, are
-planned, each its own milestone, built over the finished simulation. Until
+the 3D arc, not an optional extra: rendering (issue #80), and then a GUI, UI and
+UX (issue #81), are planned, each its own milestone, built over the finished
+simulation. Until
 then the terminal app and the ASCII view are the working base, not the
 product (ADR 0002).
 
@@ -73,7 +74,7 @@ as the base of other science projects, linked on their own. That is one more
 reason for rules 12 to 15: each domain stands alone on `malloy_math` and the
 tiny `malloy_sim_core`, its public headers are its API, and nothing a library
 needs lives in the app. Packaging them for another project (CMake install and
-export) is its own milestone, when the first consumer needs it.
+export) is its own milestone, when the first consumer needs it (issue #82).
 
 Rules 6 and 7 below still gate what follows. Each remaining piece of 3D is its
 own milestone, and the 2D types stay supported rather than being replaced.

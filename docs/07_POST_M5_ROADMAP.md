@@ -73,6 +73,9 @@ started until it is explicitly asked for, and it gets a number only then.
 | [#79](https://github.com/MalloyTheDev/malloy_sim/issues/79) | a uniform-grid broadphase for the particle domain | 3 |
 | [#78](https://github.com/MalloyTheDev/malloy_sim/issues/78) | uniform gravity for spring networks | 1 |
 | [#64](https://github.com/MalloyTheDev/malloy_sim/issues/64) | one shared `# check` evaluator for the tests and the app | 2 |
+| [#80](https://github.com/MalloyTheDev/malloy_sim/issues/80) | real-time 3D rendering of the simulation (the destination of the 3D arc) | 4 |
+| [#81](https://github.com/MalloyTheDev/malloy_sim/issues/81) | a GUI, UI and UX over the rendering | 4 |
+| [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82) | package the libraries for reuse by other projects | 2 |
 
 Open bugs are issues too. The ones that qualify claims made in these documents
 are noted where the claim is made: boxes that never settle
@@ -248,8 +251,8 @@ box against a sphere                    [done, M34: the box's nearest point to t
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 immovable 3D bodies                     [candidate, #74]
 a per-point iterative contact solver    [candidate, #73: resting boxes and stacks]
-rendering in 3D         (the destination; terminal-first holds until then, ADR 0002)
-a GUI, UI and UX        (after rendering, each its own milestone)
+rendering in 3D         [candidate, #80: the destination; terminal-first holds until then, ADR 0002]
+a GUI, UI and UX        [candidate, #81: after rendering, each its own milestone]
 ```
 
 M19 took the first step and deliberately took the smallest one. N-body is the

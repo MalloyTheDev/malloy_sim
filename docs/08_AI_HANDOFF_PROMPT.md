@@ -67,7 +67,8 @@ graph.
 
 Do not add rendering, ECS, quantum, package
 managers, Catch2, plugins, scripting, or editor systems unless the milestone I
-asked for explicitly requires it.
+asked for explicitly requires it. Rendering and the GUI are planned (issues #80
+and #81), not unwanted: they wait for their milestone like everything else.
 
 A domain is not finished until it has validation, an invariant checked by tests,
 malformed-input tests, and at least one scenario template in scenarios/, with a

@@ -117,7 +117,8 @@ The libraries are a product in their own right, not internals of the app: they
 are meant to be the foundation of other science projects. So a domain can be
 linked on its own, its public headers are its API, and nothing a library needs
 lives in the app. Packaging them for another project (CMake install and
-export) will be its own milestone, when the first consumer needs it.
+export) will be its own milestone, when the first consumer needs it
+([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)).
 
 A domain counts as finished only when it has all four of:
 
@@ -404,7 +405,8 @@ Intended, not yet built, and never added speculatively
 (`docs/07_POST_M5_ROADMAP.md`):
 
 - **rendering in 3D, then a GUI, UI and UX**: what the simulation is built to
-  be shown through, each its own milestone. Rendering is the remaining piece of
+  be shown through, each its own milestone
+  ([#80](https://github.com/MalloyTheDev/malloy_sim/issues/80), [#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)). Rendering is the remaining piece of
   the 3D arc; M19 to M34 built the rest:
   `Vec3`, `Quat` and `Mat3`, a 3D form of every domain, mass properties from
   geometry, a constant torque and force, and collisions between any two 3D
