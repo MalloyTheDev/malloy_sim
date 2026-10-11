@@ -21,15 +21,20 @@ not as one generic engine. That is the central architectural commitment
 (`docs/decisions/0006-multi-domain-dispatch.md`), and it is what makes the
 all-in-one goal compatible with rules 11 to 13 below.
 
-Terminal-first. Depth over breadth: a domain is not finished because it runs,
-it is finished when it validates its input, conserves what it should, holds
-determinism, and ships tested templates.
+Simulation-first, and terminal-first for now. MalloySim is meant to be SEEN:
+the destination is a simulator rendered in 3D, with a GUI, UI and UX on top.
+The simulation comes first only because the system has to exist, and be proven
+correct, before an interface is built over it; until the rendering milestone
+the terminal app is the interface. Depth over breadth: a domain is not finished
+because it runs, it is finished when it validates its input, conserves what it
+should, holds determinism, and ships tested templates.
 
 ### What it will never be
 
 - a game engine clone
 - a Unity/Godot/Unreal replacement
-- a render-first project
+- a render-first project (it WILL be rendered, but the rendering is built over
+  a finished simulation, never the other way round)
 - an editor project
 - a plugin framework
 - a scripting framework
@@ -55,6 +60,18 @@ milestone.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
+
+**It is meant to be rendered.** Showing the simulation in 3D is the point of
+the 3D arc, not an optional extra: rendering, and then a GUI, UI and UX, are
+planned, each its own milestone, built over the finished simulation. Until
+then the terminal and the ASCII view are the interface (ADR 0002).
+
+**Its libraries are foundations.** The domain libraries are meant to be reused
+as the base of other science projects, linked on their own. That is one more
+reason for rules 12 to 15: each domain stands alone on `malloy_math` and the
+tiny `malloy_sim_core`, its public headers are its API, and nothing a library
+needs lives in the app. Packaging them for another project (CMake install and
+export) is its own milestone, when the first consumer needs it.
 
 Rules 6 and 7 below still gate what follows. Each remaining piece of 3D is its
 own milestone, and the 2D types stay supported rather than being replaced.
@@ -144,7 +161,7 @@ M5: terminal N-body demo               [done]
 ## Rules
 
 1. Do not jump ahead; work one milestone at a time.
-2. Do not add rendering until its dedicated milestone. Terminal-first still holds.
+2. Do not add rendering until its dedicated milestone. Terminal-first still holds until then: it is the build order, not the destination (see "Where it is going").
 3. Do not add ECS (wait for real access-pattern pressure).
 4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. M30 added `collide::Box3` against a plane (an oriented box's penetrating corners, resolved as one centroid contact), so a box can rest and tumble on the ground, and M33 added box-against-box in 3D by the separating-axis test (`collide::overlaps`/`contact(Box3, Box3)`), and its clipped contact manifold (`collide::contacts(Box3, Box3)`) is resolved as one contact at the manifold's centroid (a bounce, not a stack; a single face-corner contact until the review pass after M37, which invented torque on head-on hits). M34 added box-against-sphere in 3D (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), so every 3D movable pair now collides. M36 added box-against-box in 2D (`collide::Obb2` and its SAT), so 2D body against body is disc-disc or box-box, and M37 added a 2D box against a `Halfplane` ground (the 2D sibling of M30, penetrating corners reduced to one centroid contact), so boxes rest on the floor in both dimensions; box against disc in 2D is still deferred. M35 gave particle contacts Coulomb friction (a tangential impulse clamped to the normal one, in 2D and 3D, for particle/particle and particle/wall), so they are no longer normal-only; a particle has no orientation, so it imparts no spin.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force. Gravity is a setting applied as an acceleration, not a force. M21 added a constant applied TORQUE and M28 a constant applied FORCE, each a single constant SETTING applied as forcing (F/m for the force, Euler forcing for the torque), NOT a force/torque ACCUMULATOR: do not add an accumulator that sums many force producers, or persistent per-body forces, to `malloy_rigid` until their dedicated milestone.

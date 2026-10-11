@@ -20,7 +20,10 @@ no package manager until a milestone needs one
 ## Core identity
 
 MalloySim is an all-in-one science physics simulation in C++, built
-simulation-first and terminal-first.
+simulation-first and terminal-first. Terminal-first is the build order, not the
+destination: the simulator is meant to be rendered in 3D with a GUI, UI and UX
+(ADR 0002, note of 2026-10-11), and its domain libraries are meant to be the
+foundation of other science projects.
 
 It started as a terminal 2D N-body gravity simulation. It grows one finished
 physics domain at a time. By M39 that has meant collision, colliding particles,

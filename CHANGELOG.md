@@ -134,6 +134,15 @@ All notable changes to MalloySim are recorded here. The format follows
   - stale module comments in `CMakeLists.txt` and the app's header comment are
     corrected.
 - The GitHub repository description no longer calls the project an engine.
+- The project's direction is stated where it was understated:
+  - Where: `CLAUDE.md`, the README, docs/00, 01, 07 and 08, a dated note on ADR
+    0002, and the repository description.
+  - MalloySim is meant to be rendered in 3D, with a GUI, UI and UX built over
+    it, each its own milestone.
+  - Terminal-first is the build order (the system is built and proven before
+    the interface), not the destination.
+  - The domain libraries are meant to be the foundation of other science
+    projects.
 
 ### Fixed
 

@@ -248,7 +248,8 @@ box against a sphere                    [done, M34: the box's nearest point to t
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 immovable 3D bodies                     [candidate, #74]
 a per-point iterative contact solver    [candidate, #73: resting boxes and stacks]
-rendering              (terminal-first holds until then, ADR 0002)
+rendering in 3D         (the destination; terminal-first holds until then, ADR 0002)
+a GUI, UI and UX        (after rendering, each its own milestone)
 ```
 
 M19 took the first step and deliberately took the smallest one. N-body is the
@@ -281,8 +282,10 @@ orthographic flattening onto the xy plane until rendering has its milestone.
 
 It is still gated. Nothing 3D is added before its milestone, and the 2D types
 stay supported (`CLAUDE.md` rule 6). Raylib remains the likely first
-visualization choice because it gets pixels on screen quickly without turning
-this into a graphics project.
+visualization choice because it gets pixels on screen quickly; the GUI, UI and
+UX are then built over the rendering, each its own milestone. The simulation
+libraries stay free of any graphics dependency, so the rendering consumes them
+the way another project would.
 
 ## Track 5: separate
 

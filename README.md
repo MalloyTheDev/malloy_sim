@@ -4,13 +4,20 @@ MalloySim is a from-scratch **all-in-one science physics simulation** in C++20.
 
 The goal is a robust simulator spanning many physics domains, each shipping
 ready-to-run templates so you can pick a scenario and get correct physics
-immediately. It is terminal-first, and it is built as many concrete domain
-simulations behind a thin shared shell rather than as one generic engine
-(`docs/decisions/0006-multi-domain-dispatch.md`).
+immediately. It is meant to be seen: the destination is a simulator rendered
+in 3D, with a GUI, UI and UX on top. It is built simulation-first, because the
+system has to exist and be proven correct before an interface is built over
+it, so for now the terminal is the interface.
 
-It is not a game engine, a Unity, Godot or Unreal replacement, a render-first
-project, an editor, or a plugin or scripting framework, and it is not trying to
-become one.
+It is built as many concrete domain simulations behind a thin shared shell
+rather than as one generic engine
+(`docs/decisions/0006-multi-domain-dispatch.md`), and its domain libraries are
+meant to be reused as the foundation of other science projects.
+
+It is not a game engine, a Unity, Godot or Unreal replacement, an editor, or a
+plugin or scripting framework, and it is not trying to become one. Nor is it
+render-first: it will be rendered, but over a finished simulation, never the
+other way round.
 
 **It is intended to become a 3D simulator, and it has started.** M19 added
 `Vec3` and gravity in three dimensions; M20 added quaternions and torque-free
@@ -104,6 +111,12 @@ and its own test executable. Domains rest only on the shared support libraries
 the tiny `malloy_sim_core` vocabulary; none of them knows the others exist, and
 `malloy_layering_tests` checks that. There is no simulation base class and no
 engine kernel, by design.
+
+The libraries are a product in their own right, not internals of the app: they
+are meant to be the foundation of other science projects. So a domain can be
+linked on its own, its public headers are its API, and nothing a library needs
+lives in the app. Packaging them for another project (CMake install and
+export) will be its own milestone, when the first consumer needs it.
 
 A domain counts as finished only when it has all four of:
 
@@ -389,12 +402,14 @@ waits for a need, and the third is a set of decisions.
 Intended, not yet built, and never added speculatively
 (`docs/07_POST_M5_ROADMAP.md`):
 
-- **rendering**, and the library that would carry it: the remaining piece of
-  the 3D arc. M19 to M34 built the rest:
+- **rendering in 3D, then a GUI, UI and UX**: what the simulation is built to
+  be shown through, each its own milestone. Rendering is the remaining piece of
+  the 3D arc; M19 to M34 built the rest:
   `Vec3`, `Quat` and `Mat3`, a 3D form of every domain, mass properties from
   geometry, a constant torque and force, and collisions between any two 3D
   primitives (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
-  Terminal-first holds until then, and the M8 debug view stays ASCII text
+  Until then the terminal is the interface, and the M8 debug view stays ASCII
+  text
 - **quantum**, further out still, and meant to start as a separate repository
   or an isolated prototype
 - an iterative, per-point contact solver, which a resting box or a stack needs
@@ -427,8 +442,9 @@ Rejected rather than deferred, because adopting them would change what the
 project is:
 
 - a game engine clone, or a Unity, Godot or Unreal replacement
-- a render-first project (rendering has its own milestone, but the simulation
-  comes first)
+- a render-first project: MalloySim is meant to be rendered, but over a
+  finished simulation, so each rendering milestone comes after the physics it
+  shows
 - an editor
 - a plugin framework or a scripting framework
 - a simulation base class, engine kernel, scheduler, event bus or service
