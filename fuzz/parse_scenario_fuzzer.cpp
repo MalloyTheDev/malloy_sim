@@ -20,6 +20,10 @@
 // the shipped templates. A reproducer for anything found is written as
 // out/fuzz/crash-<hash> (without -artifact_prefix, into the current directory).
 //
+// CI runs this recipe on Linux on every push and pull request to main, for 30 s
+// per target (.github/workflows/ci.yml). On Ubuntu, libFuzzer and the sanitizer
+// runtimes come in a package of their own, libclang-rt-<version>-dev.
+//
 // On Windows, configure and build from a shell with the LLVM bin folder and
 // Ninja on PATH (clang++ finds the MSVC headers and libraries itself). ASan's
 // runtime there is a DLL, so before running a fuzzer also put its folder on
@@ -67,9 +71,64 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 
     if (result.ok)
     {
-        if (result.scenario.steps < 0 || result.scenario.output_every < 0)
+        const malloy::scenario::Scenario& s = result.scenario;
+        if (s.steps < 0 || s.output_every < 0)
         {
             fail("a successful parse yielded a negative count");
+        }
+
+        // Every resource cap scenario.hpp documents holds for a file the parser
+        // accepted (issue #66). The reports and the work are recomputed here
+        // from the documented formula, not taken from the parser, so a slip in
+        // the parser's own arithmetic shows up as a disagreement.
+        if (s.steps > 100000000)
+        {
+            fail("a successful parse exceeds the step cap (1e8)");
+        }
+        const std::size_t entities = malloy::scenario::entity_count(s);
+        if (entities > 100000)
+        {
+            fail("a successful parse exceeds the entity cap (1e5)");
+        }
+        const std::size_t planes2 = s.rigid_settings.ground.size();
+        const std::size_t planes3 = s.rigid3d_settings.ground.size();
+        if (planes2 > 1000 || planes3 > 1000)
+        {
+            fail("a successful parse exceeds the ground plane cap (1000)");
+        }
+        const long long reports =
+            s.output_every > 0 ? static_cast<long long>(s.steps) / s.output_every + 1 : 1;
+        if (reports > 100000)
+        {
+            fail("a successful parse exceeds the report cap (1e5)");
+        }
+        // Pair tests per step: N + springs for the linear springs domains, and
+        // N(N-1)/2 pairs plus N per body and N per ground plane otherwise, where
+        // N counts every entity but the springs.
+        const std::size_t springs =
+            s.spring_network.springs().size() + s.spring_network3d.springs().size();
+        const double n = static_cast<double>(entities - springs);
+        const bool linear = s.type == malloy::scenario::ScenarioType::Springs ||
+                            s.type == malloy::scenario::ScenarioType::Springs3D;
+        const double per_step =
+            linear ? n + static_cast<double>(springs)
+                   : n * (n - 1.0) / 2.0 + n * static_cast<double>(planes2 + planes3) + n;
+        const double work =
+            (static_cast<double>(s.steps) + static_cast<double>(reports)) * per_step;
+        if (work > 1e11)
+        {
+            fail("a successful parse exceeds the work budget (1e11)");
+        }
+
+        // No line, counted in bytes up to its newline, may pass 4096.
+        std::size_t line_length = 0;
+        for (std::size_t i = 0; i < size; ++i)
+        {
+            line_length = (data[i] == '\n') ? 0 : line_length + 1;
+            if (line_length > 4096)
+            {
+                fail("a successful parse accepted a line longer than 4096 bytes");
+            }
         }
     }
     else

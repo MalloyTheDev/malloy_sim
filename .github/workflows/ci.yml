@@ -1,0 +1,112 @@
+# Build and test on every push and pull request to main (issue #66): the MSVC
+# Debug and Release builds with every CTest test, and a short fuzzing run of
+# both fuzz targets under ASan and UBSan.
+#
+# Third-party actions are pinned to a full commit SHA, the release named in the
+# comment beside it. The workflow reads the repository and nothing else, and
+# needs no secrets.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-msvc:
+    name: Windows MSVC ${{ matrix.config }}
+    # The developer presets need the Visual Studio 2026 generator and CMake 4.2
+    # or later. This label names the image that carries Visual Studio 2026
+    # (Enterprise 18.10, with CMake 4.4.3 on the PATH, as of image 20260925),
+    # so CI runs the presets developers run, unchanged. The plain windows-latest
+    # label is avoided on purpose: it moves between images.
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [debug, release]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show the toolchain
+        run: cmake --version
+
+      - name: Configure
+        run: cmake --preset windows-msvc-${{ matrix.config }}
+
+      - name: Build
+        run: cmake --build --preset windows-msvc-${{ matrix.config }}
+
+      - name: Test
+        run: ctest --preset windows-msvc-${{ matrix.config }}
+
+  fuzz-smoke:
+    name: Fuzz smoke (clang, libFuzzer, ASan, UBSan)
+    # The recipe in fuzz/parse_scenario_fuzzer.cpp, on Linux, where clang and
+    # the sanitizers need no Windows runtime setup. Seeded from the shipped
+    # templates; the corpus directory comes first, so nothing is written into
+    # scenarios/. A crash, a sanitizer report or a failed invariant fails the
+    # job and its reproducer is kept as an artifact.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      FUZZ_SECONDS: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The image has clang 21 but not its compiler-rt package, which holds
+      # libFuzzer and the sanitizer runtimes.
+      - name: Install the libFuzzer and sanitizer runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-21-dev
+
+      - name: Configure
+        run: >-
+          cmake -S . -B out/fuzz -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=clang++-21 -DMALLOY_BUILD_FUZZERS=ON
+          -DMALLOY_BUILD_TESTS=OFF -DMALLOY_BUILD_APPS=OFF
+
+      - name: Build
+        run: cmake --build out/fuzz
+
+      - name: Fuzz the parser
+        run: |
+          mkdir -p out/fuzz/parse_corpus
+          out/fuzz/malloy_parse_scenario_fuzzer out/fuzz/parse_corpus scenarios \
+            -max_total_time="$FUZZ_SECONDS" -artifact_prefix=out/fuzz/
+
+      - name: Fuzz the app
+        run: |
+          mkdir -p out/fuzz/app_corpus
+          out/fuzz/malloy_app_fuzzer out/fuzz/app_corpus scenarios \
+            -max_total_time="$FUZZ_SECONDS" -timeout=10 -artifact_prefix=out/fuzz/
+
+      - name: Keep any reproducer
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-reproducers
+          path: |
+            out/fuzz/crash-*
+            out/fuzz/leak-*
+            out/fuzz/oom-*
+            out/fuzz/timeout-*
+            out/fuzz/slow-unit-*
+          if-no-files-found: ignore
+          retention-days: 14
