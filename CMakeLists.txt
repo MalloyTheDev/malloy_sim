@@ -578,15 +578,77 @@ endif()
 
 # ----------------------------------------------------------------------------
 # Fuzzers (off by default; not registered as tests, so the count above is
-# unchanged). Require a fuzzer- and sanitizer-capable toolchain such as clang;
-# the default MSVC presets never build these. Coverage-guided robustness for
-# the scenario parser, the one untrusted input (docs/09, security review).
+# unchanged). Coverage-guided robustness for the scenario file, the one
+# untrusted input (docs/09, security review): one target fuzzes the parser, the
+# other the whole app behind it (issue #30). They need clang++, and the default
+# MSVC presets never build them. The recipe is in fuzz/parse_scenario_fuzzer.cpp.
 # ----------------------------------------------------------------------------
 if(MALLOY_BUILD_FUZZERS)
+    # The GNU-style driver, not clang-cl: CMake links through clang++, which is
+    # what makes -fsanitize=fuzzer below pull in libFuzzer and its main().
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
+       CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        message(FATAL_ERROR
+            "MALLOY_BUILD_FUZZERS needs clang++ (the GNU-style clang driver), "
+            "not MSVC or clang-cl. See fuzz/parse_scenario_fuzzer.cpp for the "
+            "recipe.")
+    endif()
+
+    # Issue #27: instrument EVERY target, not only the fuzzers' entry points.
+    # libFuzzer steers by the coverage counters compiled into the code, and
+    # the sanitizers see only code compiled with them, so the libraries need
+    # the flags as much as the harnesses do. Every target links
+    # malloy_project_options, and an INTERFACE target's usage requirements are
+    # read when the build is generated, so adding them here, after the targets
+    # are defined, still reaches all of them. -fno-sanitize-recover: by default
+    # UBSan prints a report and carries on, so libFuzzer would never see it.
+    target_compile_options(malloy_project_options INTERFACE
+        -g -O1 -fno-omit-frame-pointer
+        -fsanitize=fuzzer-no-link,address,undefined
+        -fno-sanitize-recover=undefined)
+    target_link_options(malloy_project_options INTERFACE
+        -fsanitize=address,undefined)
+
     add_executable(malloy_parse_scenario_fuzzer fuzz/parse_scenario_fuzzer.cpp)
-    target_link_libraries(malloy_parse_scenario_fuzzer PRIVATE malloy::scenario)
-    target_compile_options(malloy_parse_scenario_fuzzer
-        PRIVATE -g -O1 -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined)
-    target_link_options(malloy_parse_scenario_fuzzer
-        PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_libraries(malloy_parse_scenario_fuzzer
+        PRIVATE
+            malloy::scenario
+            malloy::project_warnings
+    )
+    target_link_options(malloy_parse_scenario_fuzzer PRIVATE -fsanitize=fuzzer)
+
+    # Issue #30: the app's whole path after parsing. The harness compiles
+    # apps/nbody_terminal/main.cpp in itself, so it needs what the app needs:
+    # the ASCII view, and the scenario loader, which brings every domain.
+    add_executable(malloy_app_fuzzer fuzz/app_fuzzer.cpp)
+    target_link_libraries(malloy_app_fuzzer
+        PRIVATE
+            malloy::ascii
+            malloy::scenario
+            malloy::project_warnings
+    )
+    target_link_options(malloy_app_fuzzer PRIVATE -fsanitize=fuzzer)
+
+    # Windows (clang++ targeting the MSVC ABI). libFuzzer's prebuilt runtime is
+    # compiled against the static release CRT and without ASan's container
+    # annotations, and the MSVC STL refuses to link objects that disagree with
+    # it on the runtime library, the iterator debug level or the annotations
+    # (/failifmismatch). So every target uses the static release CRT, in every
+    # build type (which also keeps _DEBUG and its iterator level out of Debug),
+    # and the STL annotations are off. The cost: ASan cannot see a vector or
+    # string read past size() but inside capacity.
+    if(CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+        target_compile_definitions(malloy_project_options INTERFACE
+            _DISABLE_STRING_ANNOTATION=1
+            _DISABLE_VECTOR_ANNOTATION=1
+            _DISABLE_OPTIONAL_ANNOTATION=1)
+        get_property(malloy_fuzz_build_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(malloy_fuzz_build_target IN LISTS malloy_fuzz_build_targets)
+            get_target_property(malloy_fuzz_target_type ${malloy_fuzz_build_target} TYPE)
+            if(NOT malloy_fuzz_target_type STREQUAL "INTERFACE_LIBRARY")
+                set_property(TARGET ${malloy_fuzz_build_target}
+                             PROPERTY MSVC_RUNTIME_LIBRARY MultiThreaded)
+            endif()
+        endforeach()
+    endif()
 endif()

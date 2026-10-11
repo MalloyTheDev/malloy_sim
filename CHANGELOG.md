@@ -78,8 +78,41 @@ All notable changes to MalloySim are recorded here. The format follows
   the shipped scenarios, reported no crash, out-of-bounds access, or undefined
   behaviour.
 
+### Added
+
+- Issue #30: fuzzing stopped at `parse_scenario`, so nothing exercised what the
+  app does with a parsed file, where the empty-charges crash (#24) lived. A
+  second target, `malloy_app_fuzzer` (`fuzz/app_fuzzer.cpp`), runs the terminal
+  app itself on every input: `apps/nbody_terminal/main.cpp` is compiled into it
+  unchanged except that its file read is answered from the input in memory, so
+  the refusals, the dispatch, building and validating each of the ten worlds,
+  stepping, and every diagnostic and ASCII frame the app prints all run. Each
+  run is cut to its first steps (1e4 pair tests, 32 reports) and scenarios over
+  64 entities are skipped, so every input finishes in milliseconds. It checks
+  that the app returns 0 or 1, refuses what the parser refuses and a scenario
+  with nothing in it, never fails without a message, and writes only printable
+  ASCII to stderr. A 10-minute run (157,323 inputs, cov 2806, against 996 for
+  the parser alone) found nothing; with the #24 bug put back in a scratch copy
+  it found the crash in 19 seconds.
+
 ### Fixed
 
+- Issue #27: the `MALLOY_BUILD_FUZZERS` build instrumented only the fuzzer's
+  entry point, so libFuzzer was blind to the parser it was meant to steer
+  through (406 coverage counters), and on Windows it did not link at all. Every
+  target is now built with coverage, ASan and UBSan
+  (`-fsanitize=fuzzer-no-link,address,undefined` on `malloy_project_options`),
+  and only the fuzzers link libFuzzer. On Windows every target uses the static
+  release CRT, with the MSVC STL's ASan container annotations off, which is what
+  libFuzzer's prebuilt runtime requires. UBSan no longer recovers, so undefined
+  behaviour stops the run with a reproducer instead of scrolling past. The
+  configuration refuses any compiler but clang++, and the recipe in
+  `fuzz/parse_scenario_fuzzer.cpp` is the one that was run. On the same 2307
+  inputs the parser fuzzer now reaches cov 952 (4357 counters) against 74
+  before, exactly what a hand build of every source with the same flags
+  reaches; a 10-minute run (1,144,606 inputs) found nothing. It also now
+  requires every parse error to be non-empty printable ASCII (issue #28), which
+  fails within a second against the code before #28.
 - Issue #33: the terminal app now embeds an application manifest that makes
   UTF-8 its active code page (Windows 10 1903 and later), so a scenario path
   outside the system code page (Greek, CJK, emoji) opens instead of failing as
