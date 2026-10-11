@@ -79,7 +79,7 @@ response**, **M15: gravity for rigid bodies**, **M16: halfplanes**,
 **M28: applied force**, **M29: 3D charged particles**,
 **M30: box on a plane**, **M31: 3D springs**, **M32: 3D particles**).
 The project builds clean under
-MSVC (`/W4 /permissive-`), and all 14 test executables pass via CTest. The
+MSVC (`/W4 /WX /permissive-`), and all 14 test executables pass via CTest. The
 terminal app runs N-body scenarios -- built-in, or loaded from a text file --
 reporting conserved system diagnostics alongside an ASCII view of the bodies.
 

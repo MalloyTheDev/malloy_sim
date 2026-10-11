@@ -22,12 +22,34 @@ add_library(malloy_project_options INTERFACE)
 add_library(malloy::project_options ALIAS malloy_project_options)
 target_compile_features(malloy_project_options INTERFACE cxx_std_20)
 
+# Issue #37: exploit mitigations for every MSVC target, in every configuration.
+# They sit on project_options because every library links it PUBLIC, so every
+# object file and every executable gets them. Control Flow Guard needs both the
+# compile and the link flag; /CETCOMPAT marks the image shadow-stack compatible.
+# Neither changes a result or costs measurable time.
+#
+# Two further hardenings were measured and declined, because the Release pair
+# loop is the product (docs/06 has the timings). _MSVC_STL_HARDENING=1 costs
+# about 20%, and Debug already runs the same checks through iterator
+# debugging; to turn it on, add
+#   target_compile_definitions(malloy_project_options INTERFACE _MSVC_STL_HARDENING=1)
+# here. /sdl costs about 40%, and every warning it promotes is already an error
+# under /W4 /WX below, so it would add only runtime checks; to turn it on, add
+# /sdl to the target_compile_options line here.
+if(MSVC)
+    target_compile_options(malloy_project_options INTERFACE /guard:cf)
+    target_link_options(malloy_project_options INTERFACE /guard:cf /CETCOMPAT)
+endif()
+
 add_library(malloy_project_warnings INTERFACE)
 add_library(malloy::project_warnings ALIAS malloy_project_warnings)
 
 if(MSVC)
+    # /WX (issue #37): the tree builds warning-free at /W4, so a new warning
+    # fails the build instead of accumulating unnoticed.
     target_compile_options(malloy_project_warnings INTERFACE
         /W4
+        /WX
         /permissive-
         /fp:precise
     )
@@ -215,8 +237,14 @@ target_link_libraries(malloy_charges
 )
 
 if(MALLOY_BUILD_APPS)
+    # The manifest makes UTF-8 the process code page (Windows 10 1903 and
+    # later), so the narrow argv and the narrow path the scenario parser opens
+    # both carry UTF-8, and a path outside the system code page opens (issue
+    # #33). CMake merges it into the linker's own manifest; toolchains that do
+    # not embed manifests do not compile it.
     add_executable(malloy_nbody_terminal
         apps/nbody_terminal/main.cpp
+        apps/nbody_terminal/nbody_terminal.manifest
     )
 
     target_link_libraries(malloy_nbody_terminal
@@ -514,10 +542,11 @@ endif()
 # ----------------------------------------------------------------------------
 # App checks: run the real terminal app on inputs it must refuse cleanly, with a
 # clear message rather than a crash or a "successful" empty run (issues #24 and
-# #31). They run the app rather than adding a test executable, so they are
-# registered after the count above, which is unchanged. The inputs are written
-# at configure time, so no fixture files live in the repository. A crash prints
-# no message, so it fails the expression as surely as a wrong answer does.
+# #31), and on one it must open (issue #33). They run the app rather than
+# adding a test executable, so they are registered after the count above, which
+# is unchanged. The inputs are written at configure time, so no fixture files
+# live in the repository. A crash prints no message, so it fails the expression
+# as surely as a wrong answer does.
 # ----------------------------------------------------------------------------
 if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
     set(malloy_app_inputs "${CMAKE_CURRENT_BINARY_DIR}/app_inputs")
@@ -531,6 +560,20 @@ if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
         set_tests_properties(malloy_app_refuses_${input} PROPERTIES
             PASS_REGULAR_EXPRESSION "defines nothing to simulate")
     endforeach()
+
+    # Issue #33: a scenario whose path lies outside the ANSI code page must
+    # open. The name holds a Greek psi (U+03C8, missing from the Western code
+    # pages) and a rocket (U+1F680, outside every ANSI code page), so without
+    # the app's UTF-8 manifest it reaches the parser as "?" and the open fails
+    # on any system. Only a run that loaded the file and stepped it prints the
+    # step 10 line.
+    file(WRITE "${malloy_app_inputs}/two_body_ψ🚀.scn"
+        "dt 0.001\nsteps 10\noutput_every 10\n"
+        "body 1.0 0.0 0.0 0.0 0.0\nbody 0.000001 1.0 0.0 0.0 1.0\n")
+    add_test(NAME malloy_app_opens_unicode_path
+             COMMAND malloy_nbody_terminal "${malloy_app_inputs}/two_body_ψ🚀.scn")
+    set_tests_properties(malloy_app_opens_unicode_path PROPERTIES
+        PASS_REGULAR_EXPRESSION "step +10 +sep")
 endif()
 
 # ----------------------------------------------------------------------------

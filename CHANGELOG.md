@@ -7,6 +7,18 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Security
 
+- Issue #37: the MSVC build now applies Control Flow Guard (`/guard:cf`, at
+  compile and link) and CET shadow-stack compatibility (`/CETCOMPAT`) to every
+  target in every configuration; the Release app went from
+  `GuardCFFunctionCount: 0` to 63, with the `GUARD_CF` and `EX_CET_COMPAT` bits
+  set. Warnings are now errors (`/WX`); the tree was already clean at `/W4`.
+  Neither mitigation changes a result (all 28 templates give byte-identical
+  output) or costs measurable time (578 against 577 ms on a compute-bound
+  100-disk run). `_MSVC_STL_HARDENING=1` and `/sdl` were measured and left off:
+  they cost 20 and 41 per cent on that run, Debug builds already make the
+  standard library's checks through iterator debugging, and every warning
+  `/sdl` promotes is already an error under `/W4 /WX`. docs/06 has the timings
+  and the one-line way to turn each on.
 - Issue #28: parse errors repeated the offending token raw and in full
   (`unknown key`, `unknown type`, `unexpected extra token`), so a scenario file
   could carry ESC and BEL sequences that retitle the terminal, clear it, or erase
@@ -63,6 +75,15 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #33: the terminal app now embeds an application manifest that makes
+  UTF-8 its active code page (Windows 10 1903 and later), so a scenario path
+  outside the system code page (Greek, CJK, emoji) opens instead of failing as
+  `...\?_two_body.scn`. Under that code page the narrow `argv` and the narrow
+  `std::ifstream` path both carry UTF-8, so no source changed; older Windows
+  ignores the setting and behaves as before. A new app check,
+  `malloy_app_opens_unicode_path`, runs the app on a scenario named with a Greek
+  psi and an emoji, and fails without the manifest. CTest now runs 19 tests; the
+  test-executable count is unchanged at 14.
 - Issue #32: a UTF-8 byte-order mark, which Windows editors and PowerShell 5.1's
   `Set-Content -Encoding UTF8` write, became part of the first key, so a valid
   template failed with an invisible one. A mark at the very start of the input
