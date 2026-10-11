@@ -543,23 +543,36 @@ endif()
 # ----------------------------------------------------------------------------
 # App checks: run the real terminal app on inputs it must refuse cleanly, with a
 # clear message rather than a crash or a "successful" empty run (issues #24 and
-# #31), and on one it must open (issue #33). They run the app rather than
-# adding a test executable, so they are registered after the count above, which
-# is unchanged. The inputs are written at configure time, so no fixture files
-# live in the repository. A crash prints no message, so it fails the expression
-# as surely as a wrong answer does.
+# #31), on one it must open (issue #33), and on one shipped template of every
+# scenario type (issue #65). They run the app rather than adding a test
+# executable, so they are registered after the count above, which is unchanged.
+# The refused inputs are written at configure time, so no fixture files live in
+# the repository.
+#
+# Every check goes through cmake/run_app_check.cmake, which requires the exit
+# code AND the output (issue #65). PASS_REGULAR_EXPRESSION alone makes CTest
+# ignore the exit code, so a refusal printed with exit 0, the failure #31 is
+# about, used to pass. A crash has no exit code, so it fails too.
 # ----------------------------------------------------------------------------
 if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
+    function(malloy_add_app_check name scenario exit_code pattern)
+        add_test(NAME ${name}
+                 COMMAND ${CMAKE_COMMAND}
+                     "-DAPP=$<TARGET_FILE:malloy_nbody_terminal>"
+                     "-DSCENARIO=${scenario}"
+                     "-DEXPECT_EXIT=${exit_code}"
+                     "-DEXPECT_OUTPUT=${pattern}"
+                     -P "${PROJECT_SOURCE_DIR}/cmake/run_app_check.cmake")
+    endfunction()
+
     set(malloy_app_inputs "${CMAKE_CURRENT_BINARY_DIR}/app_inputs")
     file(WRITE "${malloy_app_inputs}/empty.scn" "")
     file(WRITE "${malloy_app_inputs}/comment_only.scn" "# nothing but a comment\n")
     file(WRITE "${malloy_app_inputs}/charges_empty.scn" "type charges\nsteps 1\n")
     file(WRITE "${malloy_app_inputs}/charges3d_empty.scn" "type charges3d\nsteps 1\n")
     foreach(input IN ITEMS empty comment_only charges_empty charges3d_empty)
-        add_test(NAME malloy_app_refuses_${input}
-                 COMMAND malloy_nbody_terminal "${malloy_app_inputs}/${input}.scn")
-        set_tests_properties(malloy_app_refuses_${input} PROPERTIES
-            PASS_REGULAR_EXPRESSION "defines nothing to simulate")
+        malloy_add_app_check(malloy_app_refuses_${input}
+            "${malloy_app_inputs}/${input}.scn" 1 "defines nothing to simulate")
     endforeach()
 
     # Issue #33: a scenario whose path lies outside the ANSI code page must
@@ -571,10 +584,53 @@ if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
     file(WRITE "${malloy_app_inputs}/two_body_ψ🚀.scn"
         "dt 0.001\nsteps 10\noutput_every 10\n"
         "body 1.0 0.0 0.0 0.0 0.0\nbody 0.000001 1.0 0.0 0.0 1.0\n")
-    add_test(NAME malloy_app_opens_unicode_path
-             COMMAND malloy_nbody_terminal "${malloy_app_inputs}/two_body_ψ🚀.scn")
-    set_tests_properties(malloy_app_opens_unicode_path PROPERTIES
-        PASS_REGULAR_EXPRESSION "step +10 +sep")
+    malloy_add_app_check(malloy_app_opens_unicode_path
+        "${malloy_app_inputs}/two_body_ψ🚀.scn" 0 "step +10 +sep")
+
+    # Issue #65: one shipped template per scenario type, run to the end. Each
+    # must exit 0 and print its final report, the `step <n>` line for the last
+    # multiple of output_every within steps. Both numbers are read from the
+    # template here, so a template can change its length without this list
+    # changing, and the type is checked against the one named, so the list
+    # keeps covering every runner. The values on the line are not matched: the
+    # templates' `# check` lines, which the scenario tests evaluate, pin those.
+    function(malloy_add_template_check type template)
+        set(scenario "${PROJECT_SOURCE_DIR}/scenarios/${template}.scn")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${scenario}")
+        file(STRINGS "${scenario}" keys REGEX "^(type|steps|output_every) ")
+        set(declared nbody) # the parser's default type
+        set(steps "")
+        set(every "")
+        foreach(key IN LISTS keys)
+            if(key MATCHES "^type +([a-z0-9]+)")
+                set(declared "${CMAKE_MATCH_1}")
+            elseif(key MATCHES "^steps +([0-9]+)")
+                set(steps "${CMAKE_MATCH_1}")
+            elseif(key MATCHES "^output_every +([0-9]+)")
+                set(every "${CMAKE_MATCH_1}")
+            endif()
+        endforeach()
+        if(NOT declared STREQUAL type OR steps STREQUAL "" OR every STREQUAL "")
+            message(FATAL_ERROR "scenarios/${template}.scn: an app check needs a "
+                                "${type} template that states steps and output_every")
+        endif()
+        set(last 0) # output_every 0 prints only the step-0 report
+        if(every GREATER 0)
+            math(EXPR last "${steps} - ${steps} % ${every}")
+        endif()
+        malloy_add_app_check(malloy_app_runs_${type} "${scenario}" 0 "step +${last}[^0-9]")
+    endfunction()
+
+    malloy_add_template_check(nbody three_body_triangle)
+    malloy_add_template_check(nbody3d inclined_orbits)
+    malloy_add_template_check(particles heat_conduction)
+    malloy_add_template_check(particles3d particle_collision3d)
+    malloy_add_template_check(rigid tumbling_impact)
+    malloy_add_template_check(rigid3d box_sphere_collision)
+    malloy_add_template_check(springs spring_chain)
+    malloy_add_template_check(springs3d spring_tetrahedron)
+    malloy_add_template_check(charges cyclotron)
+    malloy_add_template_check(charges3d magnetic_helix)
 endif()
 
 # ----------------------------------------------------------------------------
