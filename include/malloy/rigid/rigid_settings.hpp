@@ -51,7 +51,7 @@ struct RigidSettings
     //
     // Empty by default, so a world written before this existed behaves exactly
     // as it did.
-    std::vector<collide::Halfplane> ground;
+    std::vector<collide::Halfplane> ground{};
 
     // Valid when restitution is in [0, 1] and finite, friction is non-negative
     // and finite, gravity is finite, and every ground plane is itself valid.

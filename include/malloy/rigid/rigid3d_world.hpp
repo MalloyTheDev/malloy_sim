@@ -78,7 +78,7 @@ struct Rigid3DSettings
     // geometry, and the sphere is the only thing that moves, so `RigidBody3D`
     // never has to represent an infinite mass. A plane's normal is its own and
     // never turns, unlike a floor built from spheres. Empty by default.
-    std::vector<collide::Plane3> ground;
+    std::vector<collide::Plane3> ground{};
 
     // Valid when the torque is SQUARABLE (it enters |u|^2 in the drift law),
     // the force is SQUARABLE (its square enters the free-flight energy drift, as
