@@ -7,6 +7,19 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Security
 
+- Issue #28: parse errors repeated the offending token raw and in full
+  (`unknown key`, `unknown type`, `unexpected extra token`), so a scenario file
+  could carry ESC and BEL sequences that retitle the terminal, clear it, or erase
+  the error and print a fake success line, through the one channel that says the
+  file is bad. A repeated token is now escaped: every byte outside printable
+  ASCII, and the backslash and the quote, is written as `\xNN`, and only its
+  first 64 bytes are shown, followed by its full length. Bytes from 0x80 up are
+  escaped too: no key is non-ASCII, and those are the invisible and look-alike
+  characters (a byte-order mark, a no-break space, a C1 control, a bidi
+  override) that a raw echo hides. Every error from `parse_scenario` is now
+  printable ASCII; the hostile-input battery asserts it for every input, and a
+  sweep sends all 256 byte values through each of the three places a token is
+  repeated (the error-text test #30 asked for).
 - Issue #25: the caps bounded steps and entities separately, but a step of the
   pairwise domains costs O(N^2), so together they allowed about 5e17 pair
   tests, and M38's `lattice` made the largest N a one-line request: a 41-byte
@@ -50,6 +63,14 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #32: a UTF-8 byte-order mark, which Windows editors and PowerShell 5.1's
+  `Set-Content -Encoding UTF8` write, became part of the first key, so a valid
+  template failed with an invisible one. A mark at the very start of the input
+  is now skipped and the file parses exactly as without it; a UTF-16 file
+  (PowerShell 5.1's `>`) is refused with "scenario files must be UTF-8 or ASCII"
+  instead of an unknown key full of NUL bytes. A mark anywhere else is ordinary
+  text, shown escaped in the error. The mark's three bytes count toward line 1's
+  4096-byte limit.
 - Issues #38, #39 and #40: documentation that had drifted from the code.
   `scenario.hpp` now documents the 2D `rigid_box` key (parsed since M36 and
   used by two templates, but listed nowhere), what `output_every 0` does, and

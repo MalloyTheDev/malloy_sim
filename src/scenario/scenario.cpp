@@ -1,5 +1,6 @@
 #include <malloy/scenario/scenario.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <fstream>
 #include <limits>
@@ -102,6 +103,56 @@ LineRead read_line(std::istream& input, std::string& line)
     return any ? LineRead::Ok : LineRead::End;
 }
 
+// How much of a token from the file an error message repeats. Every key and
+// type name is under 16 characters, so a typo always shows whole, while a
+// 4096-byte token cannot fill the screen (issue #28).
+constexpr std::size_t max_quoted_bytes = 64;
+
+// A token from the file, made safe to print inside an error message, quotes
+// included. The app prints errors to a terminal, and a token is any run of
+// non-whitespace bytes, so it can carry ESC and BEL sequences that retitle the
+// window, clear the screen, or erase the error and print a fake success line
+// (issue #28). So every byte outside printable ASCII is written as \xNN, two
+// lowercase hex digits, and so are the backslash and the quote, which leaves the
+// text between the quotes unambiguous: a backslash there always starts an
+// escape, and the closing quote cannot be forged.
+//
+// Bytes from 0x80 up are escaped too. No key or type is non-ASCII, so this never
+// disguises a correctly typed token, and the non-ASCII characters are exactly
+// the ones a raw echo hides or forges: a C1 control (0x9B is CSI to an 8-bit
+// terminal), a bidi override that reorders the line as displayed, and the
+// invisible or look-alike ones (a byte-order mark, issue #32; a no-break space,
+// which makes `dt 0.001` one token; a Cyrillic letter in `type`).
+//
+// Only the first max_quoted_bytes bytes of the token are shown, counted before
+// escaping so an escape is never cut, followed by the token's full length.
+std::string quoted(const std::string& token)
+{
+    static constexpr char hex[] = "0123456789abcdef";
+    const std::size_t shown = std::min(token.size(), max_quoted_bytes);
+    std::string out = "'";
+    for (std::size_t i = 0; i < shown; ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(token[i]);
+        if (c < 0x20 || c >= 0x7F || c == '\\' || c == '\'')
+        {
+            out += "\\x";
+            out += hex[c >> 4];
+            out += hex[c & 0x0F];
+        }
+        else
+        {
+            out += static_cast<char>(c);
+        }
+    }
+    out += '\'';
+    if (token.size() > shown)
+    {
+        out += "... (" + std::to_string(token.size()) + " bytes)";
+    }
+    return out;
+}
+
 // The work one step of this scenario does, in pair tests. Every pairwise domain
 // tests each pair of bodies once; the rigid domains also test each body against
 // each ground plane; springs is linear, a body and a spring at a time.
@@ -150,6 +201,30 @@ ScenarioParseResult parse_scenario(std::istream& input)
             break;
         }
         ++line_number;
+
+        // Issue #32: Windows editors, and PowerShell 5.1's `Set-Content -Encoding
+        // UTF8`, start a UTF-8 file with a byte-order mark, which used to become
+        // part of the first key and fail a valid file with an invisible one. A
+        // UTF-16 file (PowerShell 5.1's `>`) failed the same way, NUL bytes and
+        // all, so it is now refused by name. Only a mark at the very start of
+        // the input is a byte-order mark: anywhere else its bytes are text, and
+        // an error shows them escaped. This runs before the length check, so a
+        // UTF-16 file with no 0x0A byte in its first 4096 still gets the
+        // encoding error; the mark's three bytes count toward line 1's length.
+        if (line_number == 1)
+        {
+            if (line.starts_with("\xEF\xBB\xBF"))
+            {
+                line.erase(0, 3);
+            }
+            else if (line.starts_with("\xFF\xFE") || line.starts_with("\xFE\xFF"))
+            {
+                return make_error(line_number,
+                                  "scenario files must be UTF-8 or ASCII (this one "
+                                  "starts with a UTF-16 byte-order mark)");
+            }
+        }
+
         if (read == LineRead::TooLong)
         {
             return make_error(line_number, "line is longer than 4096 characters");
@@ -220,7 +295,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
             }
             else
             {
-                return make_error(line_number, "unknown type '" + value + "'");
+                return make_error(line_number, "unknown type " + quoted(value));
             }
             if (saw_domain_key)
             {
@@ -1048,14 +1123,14 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
         else
         {
-            return make_error(line_number, "unknown key '" + key + "'");
+            return make_error(line_number, "unknown key " + quoted(key));
         }
 
         if (!at_end_of_directive(tokens))
         {
             std::string extra;
             tokens >> extra;
-            return make_error(line_number, "unexpected extra token '" + extra + "'");
+            return make_error(line_number, "unexpected extra token " + quoted(extra));
         }
 
         // The entity cap is checked as each line is read, so an oversized file
@@ -1068,7 +1143,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
         }
     }
 
-    // --- #7: getline stops on a read error as well as on end of input, so a
+    // --- #7: read_line stops on a read error as well as on end of input, so a
     //     truncated read would otherwise be reported as a successful parse.
     if (input.bad())
     {

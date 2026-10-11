@@ -11,11 +11,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <cctype>
 #include <iterator>
 #include <iostream>
+#include <locale>
 #include <set>
 #include <sstream>
 #include <string>
@@ -30,6 +32,32 @@ using malloy::sim_core::StepStatus;
 
 namespace
 {
+// True when every byte is printable ASCII, 0x20 to 0x7E: no control byte, no
+// DEL, nothing from 0x80 up. A parse error must be safe to print to a terminal
+// whatever the file contained (issue #28).
+bool printable_ascii(const std::string& text)
+{
+    return std::all_of(text.begin(), text.end(), [](char c) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        return u >= 0x20 && u < 0x7F;
+    });
+}
+
+// How a parse error should show one byte of a quoted token: the byte itself
+// when it is printable ASCII other than the backslash and the quote, otherwise
+// \xNN in lowercase hex. Written with snprintf rather than the parser's own
+// table, so the expectation and the implementation cannot share a mistake.
+std::string rendered(unsigned char byte)
+{
+    if (byte >= 0x20 && byte < 0x7F && byte != '\\' && byte != '\'')
+    {
+        return std::string(1, static_cast<char>(byte));
+    }
+    char escape[5]{};
+    std::snprintf(escape, sizeof escape, "\\x%02x", static_cast<unsigned>(byte));
+    return escape;
+}
+
 // One `# check` line from a scenario template, which is issue #14: the
 // documented figures are a deliverable, and until now nothing compared them
 // against a run.
@@ -2160,9 +2188,11 @@ int main()
 
         // Robustness battery: each hostile input must RETURN a status rather than
         // crash, hang, or read out of bounds. Reaching the end of the loop is the
-        // assertion; a crash or infinite loop here would fail the test. Some of
-        // these parse to a structurally valid scenario carrying values a world
-        // would later reject, so their ok flag is deliberately not asserted.
+        // main assertion; a crash or infinite loop here would fail the test. Some
+        // of these parse to a structurally valid scenario carrying values a world
+        // would later reject, so their ok flag is deliberately not asserted. What
+        // every outcome must have, whatever the verdict, is a message that is
+        // safe to print (issue #28): printable ASCII, with no control byte.
         {
             const std::vector<std::string> hostile = {
                 "",                                                // empty
@@ -2179,17 +2209,260 @@ int main()
                 "type\ntype\ntype\n",                              // repeated bare key
                 "TYPE NBODY\n",                                    // wrong case
                 "type nbody\nbody 1 1 0 0 0 0 extra\n",            // trailing token
+                // Issue #28: terminal escape sequences in each place a token is
+                // repeated, NUL bytes, a no-break space, and the longest line
+                // allowed, all ESC.
+                "\x1b]0;PWNED-TITLE\x07\x1b[2J\x1b[1;31mFAKE-OK\x1b[0m\n",
+                "dt 0.001 \x1b[1A\x1b[2Kscenario-ok\n",
+                "type \x1b[2Kparticles\n",
+                std::string("ke\0y\0 1\n", 8),
+                "dt\xC2\xA0" "0.001\n",
+                std::string(4096, '\x1b') + "\n",
+                // Issue #32: byte-order marks, UTF-8 and UTF-16.
+                "\xEF\xBB\xBF" "dt 0.5\n",
+                "\xEF\xBB\xBF\xEF\xBB\xBF" "dt 0.5\n",
+                std::string("\xFF\xFE" "t\0y\0p\0e\0\n\0", 12),
             };
             std::size_t returned = 0;
             for (const std::string& s : hostile)
             {
                 std::istringstream in(s);
                 const ScenarioParseResult r = parse_scenario(in);
-                (void)r; // survival, not the verdict, is what this asserts
+                MALLOY_CHECK_TRUE(printable_ascii(r.error));
                 ++returned;
             }
             MALLOY_CHECK_TRUE(returned == hostile.size());
         }
+
+        // Issue #28: an error that repeats a token from the file escapes it, so
+        // the file cannot write terminal control sequences through the one
+        // channel that says it is bad. Every byte value goes through each of the
+        // three places a token is repeated, inside the token `k<byte>y`, and the
+        // message must be printable ASCII and show the byte exactly as
+        // `rendered` says. A byte that ends a line or a token (a newline, a
+        // comment, whitespace as the extractor's locale defines it) cannot be
+        // inside one and is skipped. Compared with == rather than
+        // MALLOY_CHECK_EQ, which would print raw bytes into the log on a failure.
+        {
+            const std::locale locale; // the global one, which istringstream uses
+            for (int b = 0; b < 256; ++b)
+            {
+                const char c = static_cast<char>(b);
+                if (c == '\n' || c == '#' || std::isspace(c, locale))
+                {
+                    continue;
+                }
+                const std::string token = std::string("k") + c + "y";
+                const std::string shown =
+                    "'k" + rendered(static_cast<unsigned char>(b)) + "y'";
+                const std::string inputs[3] = {token + " 1\n", "type " + token + "\n",
+                                               "dt 0.5 " + token + "\n"};
+                const std::string expected[3] = {"line 1: unknown key " + shown,
+                                                 "line 1: unknown type " + shown,
+                                                 "line 1: unexpected extra token " + shown};
+                for (int site = 0; site < 3; ++site)
+                {
+                    std::istringstream in(inputs[site]);
+                    const ScenarioParseResult r = parse_scenario(in);
+                    if (r.error != expected[site])
+                    {
+                        std::cerr << "byte " << b << ", site " << site << '\n';
+                    }
+                    MALLOY_CHECK_FALSE(r.ok);
+                    MALLOY_CHECK_TRUE(printable_ascii(r.error));
+                    MALLOY_CHECK_TRUE(r.error == expected[site]);
+                }
+            }
+        }
+
+        // The issue's three reproductions, one for each place a token is
+        // repeated: a retitle, clear and fake success line in a key, a cursor-up
+        // and erase-line in a trailing token, and an erase-line in a type.
+        {
+            std::istringstream key("\x1b]0;PWNED-TITLE\x07\x1b[2J\x1b[1;31mFAKE-OK\x1b[0m\n");
+            MALLOY_CHECK_TRUE(parse_scenario(key).error ==
+                              "line 1: unknown key "
+                              "'\\x1b]0;PWNED-TITLE\\x07\\x1b[2J\\x1b[1;31mFAKE-OK\\x1b[0m'");
+            std::istringstream extra("dt 0.001 \x1b[1A\x1b[2Kscenario-ok\n");
+            MALLOY_CHECK_TRUE(parse_scenario(extra).error ==
+                              "line 1: unexpected extra token '\\x1b[1A\\x1b[2Kscenario-ok'");
+            std::istringstream type("type \x1b[2Kparticles\n");
+            MALLOY_CHECK_TRUE(parse_scenario(type).error ==
+                              "line 1: unknown type '\\x1b[2Kparticles'");
+        }
+
+        // The echo is cut to the token's first 64 bytes, counted before
+        // escaping, with the full length after the closing quote. The token's
+        // letter differs from one position to the next, so the test shows WHICH
+        // bytes were kept, not only how many.
+        {
+            const auto error_for = [](const std::string& key) {
+                std::istringstream in(key + "\n");
+                return parse_scenario(in).error;
+            };
+            std::string token;
+            for (int i = 0; i < 100; ++i)
+            {
+                token += static_cast<char>('a' + i % 26);
+            }
+            const std::string first64 = token.substr(0, 64);
+            MALLOY_CHECK_TRUE(error_for(token) ==
+                              "line 1: unknown key '" + first64 + "'... (100 bytes)");
+            // Exactly 64 is shown whole and unmarked; 65 is cut.
+            MALLOY_CHECK_TRUE(error_for(first64) == "line 1: unknown key '" + first64 + "'");
+            MALLOY_CHECK_TRUE(error_for(token.substr(0, 65)) ==
+                              "line 1: unknown key '" + first64 + "'... (65 bytes)");
+            // An ESC as the 64th byte is shown whole, as an escape, though its
+            // four characters take the echo past 64; the 65th byte is not shown.
+            MALLOY_CHECK_TRUE(error_for(std::string(63, 'k') + "\x1b" + "Z") ==
+                              "line 1: unknown key '" + std::string(63, 'k') +
+                                  "\\x1b'... (65 bytes)");
+            // The longest token a line allows, all ESC: the message stays short.
+            const std::string longest = error_for(std::string(4096, '\x1b'));
+            MALLOY_CHECK_TRUE(printable_ascii(longest));
+            MALLOY_CHECK_EQ(longest.size(), std::string("line 1: unknown key '").size() +
+                                                std::size_t{64 * 4} +
+                                                std::string("'... (4096 bytes)").size());
+        }
+    }
+
+    // --- Issue #32: a UTF-8 byte-order mark at the very start of the input is
+    //     skipped, so a file saved by a Windows editor parses exactly as it
+    //     would without one. A UTF-16 file is refused by name. The mark anywhere
+    //     else is ordinary text, which the error shows escaped. ---
+    {
+        const std::string bom = "\xEF\xBB\xBF";
+        const auto parse_text = [](const std::string& text) {
+            std::istringstream in(text);
+            return parse_scenario(in);
+        };
+
+        // A value on line 1, right after the mark, and two unequal bodies: line 1
+        // is neither dropped nor cut short, and the rest parses as written.
+        {
+            const ScenarioParseResult r =
+                parse_text(bom + "dt 0.25\nsteps 7\nbody 2 1 0 0 1\nbody 3 -1 0.5 0 -1\n");
+            MALLOY_CHECK_TRUE(r.ok);
+            MALLOY_CHECK_NEAR(r.scenario.simulation.dt, 0.25, eps);
+            MALLOY_CHECK_EQ(r.scenario.steps, 7);
+            MALLOY_CHECK_EQ(r.scenario.bodies.size(), std::size_t{2});
+            MALLOY_CHECK_NEAR(r.scenario.bodies[1].mass, 3.0, eps);
+            MALLOY_CHECK_NEAR(r.scenario.bodies[1].position.y, 0.5, eps);
+        }
+
+        // The issue's case, the mark before a comment line, which left the mark
+        // alone as the first key; with Windows line endings, as Notepad saves.
+        {
+            const ScenarioParseResult r =
+                parse_text(bom + "# a comment\r\ntype rigid\r\nrigid_static 0.5 0 0 0\r\n");
+            MALLOY_CHECK_TRUE(r.ok);
+            MALLOY_CHECK_TRUE(r.scenario.type == malloy::scenario::ScenarioType::Rigid);
+        }
+
+        // Line numbers are unchanged by the mark.
+        {
+            const ScenarioParseResult r = parse_text(bom + "dt 0.5\nsteps 3\nsteps -1\n");
+            MALLOY_CHECK_FALSE(r.ok);
+            MALLOY_CHECK_TRUE(r.error.find("line 3:") != std::string::npos);
+        }
+
+        // A mark alone is an empty file, and the parser accepts it as one (the
+        // app refuses it for having nothing to simulate, issue #31).
+        {
+            const ScenarioParseResult only = parse_text(bom);
+            MALLOY_CHECK_TRUE(only.ok);
+            MALLOY_CHECK_EQ(malloy::scenario::entity_count(only.scenario), std::size_t{0});
+            MALLOY_CHECK_TRUE(parse_text(bom + "\n").ok);
+        }
+
+        // Only a whole mark, only one, and only at the very start is skipped.
+        {
+            const ScenarioParseResult partial = parse_text("\xEF\xBB" "dt 0.5\n");
+            MALLOY_CHECK_FALSE(partial.ok);
+            MALLOY_CHECK_TRUE(partial.error == "line 1: unknown key '\\xef\\xbbdt'");
+
+            const ScenarioParseResult twice = parse_text(bom + bom + "dt 0.5\n");
+            MALLOY_CHECK_FALSE(twice.ok);
+            MALLOY_CHECK_TRUE(twice.error == "line 1: unknown key '\\xef\\xbb\\xbfdt'");
+
+            const ScenarioParseResult later = parse_text("dt 0.5\n" + bom + "steps 3\n");
+            MALLOY_CHECK_FALSE(later.ok);
+            MALLOY_CHECK_TRUE(later.error == "line 2: unknown key '\\xef\\xbb\\xbfsteps'");
+
+            const ScenarioParseResult indented = parse_text(" " + bom + "dt 0.5\n");
+            MALLOY_CHECK_FALSE(indented.ok);
+            MALLOY_CHECK_TRUE(indented.error == "line 1: unknown key '\\xef\\xbb\\xbfdt'");
+        }
+
+        // UTF-16 in either byte order is refused by name, rather than reported as
+        // a key full of NUL bytes.
+        {
+            const auto utf16 = [](const std::string& ascii, bool little_endian) {
+                std::string out = little_endian ? "\xFF\xFE" : "\xFE\xFF";
+                for (const char c : ascii)
+                {
+                    out += little_endian ? c : '\0';
+                    out += little_endian ? '\0' : c;
+                }
+                return out;
+            };
+            for (const bool little_endian : {true, false})
+            {
+                const ScenarioParseResult r =
+                    parse_text(utf16("type nbody\nbody 1 0 0 0 0\n", little_endian));
+                MALLOY_CHECK_FALSE(r.ok);
+                MALLOY_CHECK_TRUE(r.error.find("line 1:") != std::string::npos);
+                MALLOY_CHECK_TRUE(r.error.find("UTF-8 or ASCII") != std::string::npos);
+                MALLOY_CHECK_TRUE(r.error.find("UTF-16") != std::string::npos);
+            }
+
+            // The check comes before the length check: a first line with no
+            // 0x0A byte in its first 4096 still gets the encoding error.
+            const ScenarioParseResult long_line = parse_text("\xFF\xFE" + std::string(5000, 'a'));
+            MALLOY_CHECK_FALSE(long_line.ok);
+            MALLOY_CHECK_TRUE(long_line.error.find("UTF-8 or ASCII") != std::string::npos);
+
+            // Both bytes must match, and only at the very start.
+            const ScenarioParseResult near_miss = parse_text("\xFF\xFF" "dt 0.5\n");
+            MALLOY_CHECK_FALSE(near_miss.ok);
+            MALLOY_CHECK_TRUE(near_miss.error == "line 1: unknown key '\\xff\\xffdt'");
+            const ScenarioParseResult second_line = parse_text("dt 0.5\n\xFF\xFE" "steps 3\n");
+            MALLOY_CHECK_FALSE(second_line.ok);
+            MALLOY_CHECK_TRUE(second_line.error == "line 2: unknown key '\\xff\\xfesteps'");
+        }
+
+#ifdef MALLOY_SCENARIO_DIR
+        // The issue's reproduction on a shipped template: with the mark in
+        // front, two_body.scn parses exactly as it does without one.
+        {
+            const std::string path = std::string(MALLOY_SCENARIO_DIR) + "/two_body.scn";
+            std::ifstream file(path, std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(file)),
+                                   std::istreambuf_iterator<char>());
+            MALLOY_CHECK_FALSE(text.empty());
+            const ScenarioParseResult plain = malloy::scenario::parse_scenario_file(path);
+            const ScenarioParseResult marked = parse_text(bom + text);
+            MALLOY_CHECK_TRUE(plain.ok);
+            MALLOY_CHECK_TRUE(marked.ok);
+            MALLOY_CHECK_TRUE(marked.scenario.type == plain.scenario.type);
+            MALLOY_CHECK_NEAR(marked.scenario.simulation.dt, plain.scenario.simulation.dt, eps);
+            MALLOY_CHECK_EQ(marked.scenario.steps, plain.scenario.steps);
+            MALLOY_CHECK_EQ(marked.scenario.output_every, plain.scenario.output_every);
+            MALLOY_CHECK_NEAR(marked.scenario.nbody_settings.g, plain.scenario.nbody_settings.g, eps);
+            MALLOY_CHECK_NEAR(marked.scenario.nbody_settings.softening,
+                              plain.scenario.nbody_settings.softening, eps);
+            MALLOY_CHECK_EQ(marked.scenario.bodies.size(), plain.scenario.bodies.size());
+            MALLOY_CHECK_TRUE(plain.scenario.bodies.size() >= 2);
+            for (std::size_t i = 0; i < plain.scenario.bodies.size(); ++i)
+            {
+                MALLOY_CHECK_NEAR(marked.scenario.bodies[i].mass, plain.scenario.bodies[i].mass, eps);
+                MALLOY_CHECK_VEC2_NEAR(marked.scenario.bodies[i].position,
+                                       plain.scenario.bodies[i].position, eps);
+                MALLOY_CHECK_VEC2_NEAR(marked.scenario.bodies[i].velocity,
+                                       plain.scenario.bodies[i].velocity, eps);
+            }
+        }
+#endif
     }
 
     std::cout << "malloy_scenario_tests passed\n";

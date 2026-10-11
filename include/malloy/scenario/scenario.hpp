@@ -26,9 +26,6 @@
 
 namespace malloy::scenario
 {
-// A complete, runnable N-body scenario: the fixed timestep, the N-body
-// parameters, the bodies, and how long to run. This is the parsed form of a
-// scenario file.
 // Which domain a scenario describes. Selected by the `type` key, which
 // defaults to NBody when absent so every scenario written before this key
 // existed keeps working unchanged.
@@ -103,6 +100,15 @@ struct Scenario
 // The outcome of parsing. On failure `error` holds a human-readable message
 // (with the offending line number) and `scenario` is unspecified. Parsing
 // never throws (docs/04: status/result returns for normal failures).
+//
+// A message from parse_scenario is plain printable ASCII, safe to print to a
+// terminal whatever the file contained (issue #28). Where it repeats a token
+// from the file, the token is quoted, every byte outside printable ASCII and
+// every backslash and quote in it is written as \xNN (two lowercase hex
+// digits), and only its first 64 bytes are shown, followed by its full length:
+// `unknown key '\x1b[2Kbody'`, or `unknown key '<first 64 bytes>'... (300
+// bytes)` for a longer one. The path in parse_scenario_file's open error is
+// the caller's, not the file's, and is repeated as given.
 struct ScenarioParseResult
 {
     bool ok{false};
@@ -117,6 +123,14 @@ struct ScenarioParseResult
 // machine-checkable assertion, evaluated by the scenario tests against a real
 // run (CLAUDE.md, Template library). The parser ignores it like any other
 // comment.
+//
+// Encoding: a scenario file is UTF-8 or ASCII; every key is ASCII, and other
+// UTF-8 text may appear only in comments. A UTF-8 byte-order mark at the very
+// start of the input is skipped, since Windows editors write one. A UTF-16
+// byte-order mark (FF FE or FE FF) there is refused with an error that names
+// the encoding. Anywhere else the mark's bytes are ordinary text, so a second
+// mark, or one at the start of a later line, is an error that shows its bytes
+// (issue #32).
 //
 // Common to every domain:
 //
@@ -373,7 +387,9 @@ struct ScenarioParseResult
 //                        for the pairwise domains, N + springs for springs
 //   reports              at most 1e5 (steps / output_every + 1); output_every
 //                        0 prints only the step-0 report
-//   line length          at most 4096 characters, comments included
+//   line length          at most 4096 characters, comments included; the
+//                        reader counts bytes, so a leading byte-order mark
+//                        leaves line 1 room for 4093
 //
 // Each refusal is an error naming the line that crossed the limit, except the
 // work and report limits, whose inputs can sit on different lines.
