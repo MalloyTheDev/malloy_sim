@@ -58,6 +58,9 @@ else()
         -Wall
         -Wextra
         -Wpedantic
+        # As /WX above (issue #66): a warning fails the build under clang and
+        # GCC as well, instead of accumulating unnoticed.
+        -Werror
         # The MSVC branch sets /fp:precise. GCC and Clang default to
         # -ffp-contract=fast, which lets the compiler fuse a*b+c into an FMA and
         # silently change results. docs/04 forbids fast-math, so match MSVC.
