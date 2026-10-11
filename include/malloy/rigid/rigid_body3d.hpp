@@ -83,7 +83,10 @@ struct RigidBody3D
     // finite, the orientation is a unit quaternion, the radius is non-negative
     // and finite, the box half-extents are non-negative and finite, and
     // position, velocity and angular velocity are SQUARABLE rather than merely
-    // finite (docs/04).
+    // finite (docs/04). And the body's own terms must not overflow (issue #51):
+    // its linear momentum m v and spin angular momentum (the moments times w,
+    // axis by axis) are squarable, since the world reports |p| and |L|, which
+    // with a squarable v and w also keeps its kinetic energy finite.
     bool is_valid() const;
 };
 

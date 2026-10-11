@@ -47,9 +47,11 @@ struct MeshTriangle
 // A solid uniform body bounded by a closed, outward-wound triangle mesh (M26's
 // third mass primitive, and the general one: the sphere and the box are shapes
 // this could also describe). Its mass properties are the volume integrals over
-// the enclosed solid, computed as a signed sum of tetrahedra from the origin to
-// each triangle, so the origin need not be inside the mesh and need not be the
-// centre of mass.
+// the enclosed solid, computed as a signed sum of tetrahedra spanned from a
+// point of the mesh's own (the mean of its vertices) to each triangle, so
+// neither the world origin nor that point needs to be inside the mesh or at the
+// centre of mass, and the precision depends on the mesh's size, not on how far
+// it sits from the origin (issue #45).
 struct SolidMesh
 {
     std::vector<math::Vec3> vertices;
@@ -115,9 +117,16 @@ math::Vec3 box_inertia(const math::Vec3& half_extents, math::Real mass);
 // mesh, the general primitive. Mass is density times the enclosed volume; the
 // centre of mass and the inertia tensor are the volume integrals of position
 // and of position-squared, each accumulated as a signed sum over the tetrahedra
-// spanned by the origin and every triangle (the divergence theorem), then the
-// tensor is shifted to the centre of mass and diagonalized. An axis-aligned box
-// mesh reproduces `SolidBox` exactly.
+// spanned by the mean of the vertices and every triangle (the divergence
+// theorem), then the tensor is shifted to the centre of mass and diagonalized.
+// An axis-aligned box mesh reproduces `SolidBox` exactly.
+//
+// Spanning from the vertex mean rather than the world origin is what keeps a
+// mesh far from the origin precise. From the origin the cancelling terms grow
+// like (distance / size)^3, so a 1 cm cube 50 m out came back with negative
+// moments (issue #45); from the vertex mean every coordinate is at most the
+// mesh's size, and what is left is the rounding already in the vertices
+// themselves, about eps * distance / size relative.
 //
 // Returns a zero-mass result for a malformed mesh (fewer than four vertices or
 // triangles, a triangle index out of range, a triangle that repeats a vertex, a

@@ -4663,11 +4663,10 @@ int main()
             MALLOY_CHECK_TRUE(approx_equal(tensor_of(mesh), tensor_of(box), 1e-7));
         }
 
-        // --- A cube far from the origin. The signed tetrahedra are spanned from
-        //     the origin, which is nowhere near the body, so this pins that the
-        //     centre of mass comes out right and the parallel-axis shift undoes
-        //     the large origin offset (a big cancellation) to leave the correct
-        //     central, isotropic moment. ---
+        // --- A cube away from the origin: the centre of mass comes out right
+        //     and the parallel-axis shift leaves the correct central, isotropic
+        //     moment. (13 sizes out, which was too close to show issue #45; the
+        //     block below goes much further.) ---
         {
             const MassProperties3D mp =
                 mass_properties_3d(box_mesh(Vec3{10.0, -5.0, 7.0}, Vec3{1.0, 1.0, 1.0},
@@ -4680,10 +4679,60 @@ int main()
             MALLOY_CHECK_NEAR(mp.inertia.z, iso, 1e-6);
         }
 
+        // --- Issue #45: a small mesh FAR from the origin. Spanned from the
+        //     world origin, the signed tetrahedra cancel terms of size d^3 and
+        //     d^5 down to an answer of size s^3 and s^5, so the relative error
+        //     grew like eps (d / s)^3. At the two positions below, the old sums
+        //     had the moments off by 4.7e-3 at 10 m, and off by -7.6e7 at 1 km,
+        //     negative, so the body was refused (in the issue's own
+        //     reproduction, another 1 km position was ACCEPTED with moments off
+        //     by 3.7e6 and the centre of mass 0.15 m away). Spanned from the
+        //     vertex mean it must match the same cube at the origin.
+        //
+        //     The tolerances are what the vertices themselves allow. A vertex 10
+        //     m out is only known to about eps * 10 m = 2e-15 m, a relative 2e-13
+        //     of the 1 cm edge; the volume is third order in the vertices and the
+        //     moments fifth, so they can be off by about 1e-12, and 1e-11 leaves
+        //     ten times that (measured: 1e-13). 1 km out it scales by 100: 1e-9
+        //     (measured: 6e-12). The centre of mass is pinned to the rounding of
+        //     its own coordinates: 1e-13 m at 10 m, 1e-11 m at 1 km (it was off
+        //     by 7e-9 m and 0.15 m). A 1 cm cube of density 1000, turned about a
+        //     generic axis, in a generic direction. ---
+        {
+            const Quat turn = from_axis_angle(Vec3{0.3, -0.7, 0.5}, 0.9);
+            const Vec3 half{0.005, 0.005, 0.005};
+            const MassProperties3D home =
+                mass_properties_3d(box_mesh(Vec3{}, half, turn, 1000.0));
+            MALLOY_CHECK_NEAR(home.mass, 1e-3, 1e-15); // 1000 * (0.01)^3
+            const Vec3 direction = malloy::math::normalize(Vec3{0.37, -0.81, 0.45});
+            struct Far
+            {
+                Real distance;
+                Real tolerance;          // relative, on mass and moments
+                Real position_tolerance; // absolute, on the centre of mass
+            };
+            for (const Far& f : {Far{10.0, 1e-11, 1e-13}, Far{1000.0, 1e-9, 1e-11}})
+            {
+                const Vec3 center = direction * f.distance;
+                const MassProperties3D far =
+                    mass_properties_3d(box_mesh(center, half, turn, 1000.0));
+                MALLOY_CHECK_NEAR(far.mass / home.mass, 1.0, f.tolerance);
+                MALLOY_CHECK_TRUE(
+                    approx_equal(far.center_of_mass, center, f.position_tolerance));
+                MALLOY_CHECK_NEAR(far.inertia.x / home.inertia.x, 1.0, f.tolerance);
+                MALLOY_CHECK_NEAR(far.inertia.y / home.inertia.y, 1.0, f.tolerance);
+                MALLOY_CHECK_NEAR(far.inertia.z / home.inertia.z, 1.0, f.tolerance);
+                MALLOY_CHECK_TRUE(approx_equal(tensor_of(far), tensor_of(home),
+                                               f.tolerance * home.inertia.x));
+                MALLOY_CHECK_TRUE(rigid_body_from(far).is_valid());
+            }
+        }
+
         // --- A tetrahedron: the volume is det/6 and the centre of mass is the
-        //     mean of the four vertices. One vertex sits AT the origin, so three
-        //     of the four face-tetrahedra are degenerate and only the far face
-        //     contributes, which is exactly the signed decomposition working. ---
+        //     mean of the four vertices. One vertex sits at the origin; the
+        //     tetrahedra are spanned from the vertex mean, an interior point, so
+        //     all four faces contribute and the signed sum still adds up to the
+        //     one solid. ---
         {
             const MassProperties3D mp = mass_properties_3d(tet_mesh(
                 Vec3{0.0, 0.0, 0.0}, Vec3{2.0, 0.0, 0.0}, Vec3{0.0, 3.0, 0.0},
@@ -5650,6 +5699,640 @@ int main()
                 // a's centre, so the same impulse has a lever arm on a.)
                 MALLOY_CHECK_NEAR(malloy::math::length(w.bodies()[1].angular_velocity), 0.0, 1e-9);
             }
+        }
+    }
+
+    // --- Issue #41 (and #68): a box contact manifold is reduced to ONE contact
+    //     at its PENETRATION-WEIGHTED centroid, with the deepest penetration.
+    //     The plain mean of a tilted face's corners sits toward the raised side
+    //     of the centre of mass, so the impulse tipped the box further, and with
+    //     the translation-only correction lifting it every step a box on the
+    //     floor rocked forever and gained energy even at restitution 0. Every
+    //     earlier box test is symmetric, so all its corners share one depth and
+    //     the weighting is invisible there; these pin it. ---
+    {
+        using malloy::math::conjugate;
+        using malloy::math::cross;
+        using malloy::math::dot;
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::rotate;
+        using malloy::math::Vec3;
+        using malloy::rigid::box_inertia;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+
+        // The world-frame inverse inertia applied to x, R diag(1/I) R^T x,
+        // written out here rather than borrowed from the library under test.
+        const auto inverse_inertia_world = [](const RigidBody3D& b, const Vec3& x) {
+            const Vec3 local = rotate(conjugate(b.orientation), x);
+            return rotate(b.orientation,
+                          Vec3{local.x / b.inertia.x, local.y / b.inertia.y,
+                               local.z / b.inertia.z});
+        };
+        // The rotational part of the effective mass along d, d . [(I^-1 (r x d)) x r].
+        const auto angular_term = [&](const RigidBody3D& b, const Vec3& r, const Vec3& d) {
+            return dot(d, cross(inverse_inertia_world(b, cross(r, d)), r));
+        };
+        const auto cross2 = [](const Vec2& a, const Vec2& b) { return a.x * b.y - a.y * b.x; };
+
+        // --- 2D, a tilted landing on the ground, in ONE step. No gravity, so
+        //     the integration is a plain translation the test can repeat
+        //     exactly; restitution 0 and no friction, so the impulse is purely
+        //     normal and stops the contact point dead. Tilted clockwise, so the
+        //     RIGHT bottom corner is the deeper one and is the second in the
+        //     corner order (a reduction that took the first point's depth would
+        //     differ). Both bottom corners are in, at depths about 0.005 and
+        //     0.025: the weighted centroid sits near the right corner, while
+        //     the plain mean sits h sin(theta) toward the raised LEFT side. ---
+        {
+            const Real angle = -0.02;
+            const Vec2 half{0.5, 0.25};
+            const Real mass = 1.5;
+            const Real inertia = mass * (half.x * half.x + half.y * half.y) / 3.0;
+            const Real dt = 0.01;
+            RigidBody2D box;
+            box.mass = mass;
+            box.inertia = inertia;
+            box.half_extents = half;
+            box.angle = angle;
+            box.position = Vec2{0.3, 0.245};
+            box.velocity = Vec2{0.0, -1.0};
+            RigidSettings settings;
+            settings.restitution = 0.0;
+            settings.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+            RigidWorld w{SimulationSettings{dt}, {box}, settings};
+
+            // Where the step's integration leaves it, before the contact.
+            const Vec2 com = box.position + box.velocity * dt;
+            const Vec2 u0{std::cos(angle), std::sin(angle)};
+            const Vec2 u1{-std::sin(angle), std::cos(angle)};
+            Vec2 weighted{};
+            Real total = 0.0;
+            Real deepest = 0.0;
+            int touching = 0;
+            Real shallowest = 1.0;
+            for (const Real sx : {-1.0, 1.0})
+            {
+                const Vec2 corner = com + u0 * (sx * half.x) + u1 * (-half.y);
+                const Real depth = -corner.y;
+                MALLOY_CHECK_TRUE(depth > 0.0); // both bottom corners are in
+                ++touching;
+                // The midway point, as every contact reports it.
+                weighted += (corner + Vec2{0.0, depth / 2.0}) * depth;
+                total += depth;
+                deepest = std::fmax(deepest, depth);
+                shallowest = std::fmin(shallowest, depth);
+            }
+            MALLOY_CHECK_EQ(touching, 2);
+            MALLOY_CHECK_TRUE(deepest - shallowest > 0.015); // genuinely tilted
+            const Vec2 arm = weighted / total - com;
+
+            // The impulse at that arm that stops the point (restitution 0).
+            const Real effective = 1.0 / mass + arm.x * arm.x / inertia;
+            const Real j = 1.0 / effective; // the closing speed is 1
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const RigidBody2D& b = w.bodies()[0];
+            MALLOY_CHECK_NEAR(b.velocity.x, 0.0, 1e-15); // frictionless: normal only
+            MALLOY_CHECK_NEAR(b.velocity.y, -1.0 + j / mass, 1e-12);
+            MALLOY_CHECK_NEAR(b.angular_velocity, arm.x * j / inertia, 1e-12);
+            // The impulse RIGHTS the box: counter-clockwise, lifting the deep
+            // right side. The plain mean spun it clockwise, tipping it further.
+            MALLOY_CHECK_TRUE(b.angular_velocity > 0.1);
+            // The correction: a translation along the normal by the DEEPEST
+            // penetration, with no rotation, so no corner is left inside.
+            MALLOY_CHECK_NEAR(b.position.x, com.x, 1e-15);
+            MALLOY_CHECK_NEAR(b.position.y, com.y + deepest, 1e-15);
+            MALLOY_CHECK_EQ(b.angle, angle);
+        }
+
+        // --- 3D, the same tilted landing on a plane: a box with three distinct
+        //     half-widths, tilted 0.03 rad about a horizontal axis that is not a
+        //     box axis, so all four bottom corners are in at four different
+        //     depths (about 0.006 to 0.044), the deepest second in the corner
+        //     order. The impulse must act at their penetration-weighted
+        //     centroid: the angular velocity it leaves is I^-1 (r x J) for that
+        //     arm, and the point it stops is that point. ---
+        {
+            const Vec3 half{0.5, 0.4, 0.25};
+            const Real dt = 0.01;
+            RigidBody3D box;
+            box.mass = 2.0;
+            box.inertia = box_inertia(half, box.mass);
+            box.half_extents = half;
+            box.orientation = from_axis_angle(normalize(Vec3{1.0, 2.0, 0.0}), 0.03);
+            box.position = Vec3{0.2, -0.1, 0.235};
+            box.velocity = Vec3{0.0, 0.0, -1.0};
+            Rigid3DSettings settings;
+            settings.restitution = 0.0;
+            settings.ground.push_back(malloy::collide::Plane3{Vec3{0.0, 0.0, 1.0}, 0.0});
+            Rigid3DWorld w{SimulationSettings{dt}, {box}, settings};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const RigidBody3D& b = w.bodies()[0];
+
+            // The pose the contact saw: the integrated centre and the (only
+            // renormalized) orientation, which the contact does not change.
+            RigidBody3D seen = box;
+            seen.position = box.position + box.velocity * dt;
+            seen.orientation = b.orientation;
+            Vec3 weighted{};
+            Real total = 0.0;
+            Real deepest = 0.0;
+            Real shallowest = 1.0;
+            int touching = 0;
+            for (int i = 0; i < 8; ++i)
+            {
+                const Vec3 local{(i & 1) ? half.x : -half.x, (i & 2) ? half.y : -half.y,
+                                 (i & 4) ? half.z : -half.z};
+                const Vec3 corner = seen.position + rotate(seen.orientation, local);
+                if (corner.z > 0.0)
+                {
+                    continue;
+                }
+                const Real depth = -corner.z;
+                ++touching;
+                weighted += (corner + Vec3{0.0, 0.0, depth / 2.0}) * depth;
+                total += depth;
+                deepest = std::fmax(deepest, depth);
+                shallowest = std::fmin(shallowest, depth);
+            }
+            MALLOY_CHECK_EQ(touching, 4);
+            MALLOY_CHECK_TRUE(deepest - shallowest > 0.03); // four distinct depths
+            const Vec3 point = weighted / total;
+            const Vec3 arm = point - seen.position;
+            const Vec3 up{0.0, 0.0, 1.0};
+            const Real j = 1.0 / (1.0 / box.mass + angular_term(seen, arm, up));
+            const Vec3 impulse = up * j;
+
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                b.velocity, box.velocity + impulse / box.mass, 1e-12));
+            const Vec3 spin_world = rotate(b.orientation, b.angular_velocity);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                spin_world, inverse_inertia_world(seen, cross(arm, impulse)), 1e-12));
+            // Restitution 0 stops that point along the normal.
+            MALLOY_CHECK_NEAR(b.velocity.z + cross(spin_world, arm).z, 0.0, 1e-12);
+            // The correction lifts by the DEEPEST penetration, straight up.
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                b.position, seen.position + up * deepest, 1e-15));
+        }
+
+        // --- 2D, box against box: a small tilted box landing on a wide one,
+        //     both movable. The manifold comes from the collide layer (its two
+        //     points are B's bottom corners, about 0.010 and 0.050 deep); the
+        //     reduction under test is the rigid one, so the expected contact is
+        //     computed from those points here. Equal and opposite impulses at the
+        //     ONE weighted point, and the deepest penetration split between the
+        //     two bodies by inverse mass. ---
+        {
+            const Real dt = 0.01;
+            const Real angle = 0.05;
+            RigidBody2D lower;
+            lower.mass = 3.0;
+            lower.half_extents = Vec2{1.0, 0.25};
+            lower.inertia = 3.0 * (1.0 + 0.0625) / 3.0;
+            RigidBody2D upper;
+            upper.mass = 1.0;
+            upper.half_extents = Vec2{0.4, 0.2};
+            upper.inertia = 1.0 * (0.16 + 0.04) / 3.0;
+            upper.angle = angle;
+            upper.position = Vec2{0.3, 0.429742};
+            upper.velocity = Vec2{0.0, -1.0};
+            RigidWorld w{SimulationSettings{dt}, {lower, upper}, RigidSettings{0.0}};
+
+            const Vec2 lower_seen = lower.position + lower.velocity * dt;
+            const Vec2 upper_seen = upper.position + upper.velocity * dt;
+            const std::vector<malloy::collide::Contact> hits = malloy::collide::contacts(
+                malloy::collide::Obb2{lower_seen, lower.half_extents, lower.angle},
+                malloy::collide::Obb2{upper_seen, upper.half_extents, upper.angle});
+            MALLOY_CHECK_EQ(hits.size(), std::size_t{2});
+            MALLOY_CHECK_TRUE(std::abs(hits[0].penetration - hits[1].penetration) > 0.03);
+            Vec2 weighted{};
+            Real total = 0.0;
+            Real deepest = 0.0;
+            for (const malloy::collide::Contact& hit : hits)
+            {
+                weighted += hit.point * hit.penetration;
+                total += hit.penetration;
+                deepest = std::fmax(deepest, hit.penetration);
+            }
+            const Vec2 normal = hits.front().normal; // from lower toward upper
+            const Vec2 point = weighted / total;
+            const Vec2 arm_lower = point - lower_seen;
+            const Vec2 arm_upper = point - upper_seen;
+            const Real closing = dot(upper.velocity - lower.velocity, normal);
+            const Real ca = cross2(arm_lower, normal);
+            const Real cb = cross2(arm_upper, normal);
+            const Real effective = 1.0 / lower.mass + 1.0 / upper.mass +
+                                   ca * ca / lower.inertia + cb * cb / upper.inertia;
+            const Vec2 impulse = normal * (-closing / effective);
+
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const RigidBody2D& a = w.bodies()[0];
+            const RigidBody2D& b = w.bodies()[1];
+            MALLOY_CHECK_VEC2_NEAR(a.velocity, lower.velocity - impulse / lower.mass, 1e-12);
+            MALLOY_CHECK_VEC2_NEAR(b.velocity, upper.velocity + impulse / upper.mass, 1e-12);
+            MALLOY_CHECK_NEAR(a.angular_velocity, -cross2(arm_lower, impulse) / lower.inertia,
+                              1e-12);
+            MALLOY_CHECK_NEAR(b.angular_velocity, cross2(arm_upper, impulse) / upper.inertia,
+                              1e-12);
+            // The deepest penetration, split by inverse mass: 3/4 to the light
+            // upper box, 1/4 to the heavy lower one.
+            const Real inverse_sum = 1.0 / lower.mass + 1.0 / upper.mass;
+            const Vec2 correction = normal * (deepest / inverse_sum);
+            MALLOY_CHECK_VEC2_NEAR(a.position, lower_seen - correction / lower.mass, 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(b.position, upper_seen + correction / upper.mass, 1e-15);
+        }
+
+        // --- 3D, box against box: a small box tilted about a generic axis
+        //     landing on a wide flat one, four manifold points at four depths
+        //     (about 0.0007 to 0.040, the deepest last), each body checked
+        //     against the impulse at the weighted point. ---
+        {
+            const Real dt = 0.01;
+            RigidBody3D lower;
+            lower.mass = 4.0;
+            lower.half_extents = Vec3{1.2, 1.0, 0.3};
+            lower.inertia = box_inertia(lower.half_extents, lower.mass);
+            lower.orientation = from_axis_angle(Vec3{0.0, 0.0, 1.0}, 0.3);
+            RigidBody3D upper;
+            upper.mass = 1.0;
+            upper.half_extents = Vec3{0.4, 0.3, 0.2};
+            upper.inertia = box_inertia(upper.half_extents, upper.mass);
+            upper.orientation = from_axis_angle(normalize(Vec3{1.0, 2.0, 0.0}), 0.04);
+            upper.position = Vec3{0.2, -0.15, 0.489512};
+            upper.velocity = Vec3{0.0, 0.0, -1.0};
+            Rigid3DSettings settings;
+            settings.restitution = 0.0;
+            Rigid3DWorld w{SimulationSettings{dt}, {lower, upper}, settings};
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const RigidBody3D& a = w.bodies()[0];
+            const RigidBody3D& b = w.bodies()[1];
+
+            RigidBody3D lower_seen = lower;
+            lower_seen.position = lower.position + lower.velocity * dt;
+            lower_seen.orientation = a.orientation;
+            RigidBody3D upper_seen = upper;
+            upper_seen.position = upper.position + upper.velocity * dt;
+            upper_seen.orientation = b.orientation;
+            const std::vector<malloy::collide::Contact3> hits = malloy::collide::contacts(
+                malloy::collide::Box3{lower_seen.position, lower.half_extents,
+                                      lower_seen.orientation},
+                malloy::collide::Box3{upper_seen.position, upper.half_extents,
+                                      upper_seen.orientation});
+            MALLOY_CHECK_EQ(hits.size(), std::size_t{4});
+            Vec3 weighted{};
+            Real total = 0.0;
+            Real deepest = 0.0;
+            Real shallowest = 1.0;
+            for (const malloy::collide::Contact3& hit : hits)
+            {
+                weighted += hit.point * hit.penetration;
+                total += hit.penetration;
+                deepest = std::fmax(deepest, hit.penetration);
+                shallowest = std::fmin(shallowest, hit.penetration);
+            }
+            MALLOY_CHECK_TRUE(deepest - shallowest > 0.03);
+            const Vec3 normal = hits.front().normal;
+            const Vec3 point = weighted / total;
+            const Vec3 arm_lower = point - lower_seen.position;
+            const Vec3 arm_upper = point - upper_seen.position;
+            const Real closing = dot(upper.velocity - lower.velocity, normal);
+            const Real effective = 1.0 / lower.mass + 1.0 / upper.mass +
+                                   angular_term(lower_seen, arm_lower, normal) +
+                                   angular_term(upper_seen, arm_upper, normal);
+            const Vec3 impulse = normal * (-closing / effective);
+
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                a.velocity, lower.velocity - impulse / lower.mass, 1e-12));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                b.velocity, upper.velocity + impulse / upper.mass, 1e-12));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                rotate(a.orientation, a.angular_velocity),
+                inverse_inertia_world(lower_seen, cross(arm_lower, impulse)) * -1.0, 1e-12));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                rotate(b.orientation, b.angular_velocity),
+                inverse_inertia_world(upper_seen, cross(arm_upper, impulse)), 1e-12));
+            const Real inverse_sum = 1.0 / lower.mass + 1.0 / upper.mass;
+            const Vec3 correction = normal * (deepest / inverse_sum);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                a.position, lower_seen.position - correction / lower.mass, 1e-15));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(
+                b.position, upper_seen.position + correction / upper.mass, 1e-15));
+        }
+
+        // --- A bare touch has no weights: every depth is exactly 0, so the
+        //     reduction falls back to the plain mean instead of dividing zero by
+        //     zero. Built from binary fractions so the integration lands the
+        //     box's bottom face EXACTLY on the floor while it is still moving
+        //     down at 0.25: the contact at the middle of that face must stop it
+        //     (restitution 0), with no spin. A reduction without the fallback
+        //     gets a NaN point and drops the contact, and the box keeps
+        //     falling. ---
+        {
+            RigidBody2D square;
+            square.half_extents = Vec2{0.5, 0.5};
+            square.inertia = (0.25 + 0.25) / 3.0;
+            square.position = Vec2{0.0, 0.625};
+            square.velocity = Vec2{0.0, -0.25};
+            RigidSettings flat;
+            flat.restitution = 0.0;
+            flat.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+            RigidWorld w2{SimulationSettings{0.5}, {square}, flat};
+            MALLOY_CHECK_TRUE(w2.step().ok());
+            MALLOY_CHECK_EQ(w2.bodies()[0].position.y, 0.5); // exactly touching
+            MALLOY_CHECK_EQ(w2.bodies()[0].velocity.y, 0.0);
+            MALLOY_CHECK_EQ(w2.bodies()[0].angular_velocity, 0.0);
+
+            RigidBody3D cube;
+            cube.half_extents = Vec3{0.5, 0.5, 0.5};
+            cube.inertia = box_inertia(cube.half_extents, cube.mass);
+            cube.position = Vec3{0.0, 0.0, 0.625};
+            cube.velocity = Vec3{0.0, 0.0, -0.25};
+            Rigid3DSettings level;
+            level.restitution = 0.0;
+            level.ground.push_back(malloy::collide::Plane3{Vec3{0.0, 0.0, 1.0}, 0.0});
+            Rigid3DWorld w3{SimulationSettings{0.5}, {cube}, level};
+            MALLOY_CHECK_TRUE(w3.step().ok());
+            MALLOY_CHECK_EQ(w3.bodies()[0].position.z, 0.5);
+            MALLOY_CHECK_EQ(w3.bodies()[0].velocity.z, 0.0);
+            MALLOY_CHECK_EQ(malloy::math::length(w3.bodies()[0].angular_velocity), 0.0);
+        }
+
+        // --- The issue's own reproduction, 2D: a box resting on its long face
+        //     (half-widths 0.5 by 0.25, mass 1) nudged with spin 0.05, gravity
+        //     9.8, restitution 0, no friction, dt 0.002, for 20 s. Every contact
+        //     here only removes kinetic energy; the one thing that can ADD
+        //     energy is the positional correction, which lifts the box by the
+        //     deepest penetration.
+        //
+        //     The bound. Each step starts with every corner at or above the
+        //     floor (the last correction lifted the deepest one exactly onto it),
+        //     so a correction can lift the centre of mass by at most how far a
+        //     corner sank in that step. From rest on the floor the first step
+        //     sinks a corner by at most (g dt + a |w0|) dt, a the corner's
+        //     horizontal lever: one step of gravity plus one step of free
+        //     rotation, worth B = m g (g dt + a |w0|) dt = 8.74e-4 J. A contact
+        //     that only dissipates after that never climbs past E0 + B; one
+        //     that pumps does: the plain mean reached E0 + 1.49 B, and the
+        //     weighted centroid stays at E0 + 0.65 B. (B bounds the lift of the
+        //     FIRST step, not of every later one: a nudge well below one step's
+        //     gravity, w0 = 0.02, briefly reaches 1.4 B even with the weighting,
+        //     because each step-scale rock gets its own lift. The issue's nudge
+        //     is the one pinned.)
+        //
+        //     And it comes to REST: over the last 5 s its kinetic energy stays
+        //     below 1e-4 of one step's gravity, m g^2 dt^2 (measured 3e-10 J;
+        //     the plain mean kept it rocking at up to 8.3e-4 J, still turning at
+        //     0.043 rad/s after 20 s). ---
+        {
+            const Real g = 9.8;
+            const Real dt = 0.002;
+            const Real w0 = 0.05;
+            const Vec2 half{0.5, 0.25};
+            RigidBody2D box;
+            box.half_extents = half;
+            box.inertia = (half.x * half.x + half.y * half.y) / 3.0; // mass 1
+            box.position = Vec2{0.0, half.y};
+            box.angular_velocity = w0;
+            RigidSettings settings;
+            settings.gravity = Vec2{0.0, -g};
+            settings.restitution = 0.0;
+            settings.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+            RigidWorld w{SimulationSettings{dt}, {box}, settings};
+            // Mechanical energy above the box resting flat, centre at y = h.
+            const auto energy = [&] {
+                return total_energy(w.bodies(), settings.gravity) - g * half.y;
+            };
+            const Real e0 = energy();
+            const Real bound = g * (g * dt + half.x * w0) * dt;
+            const Real step_scale = g * g * dt * dt;
+            Real worst = e0;
+            Real late_kinetic = 0.0;
+            for (int i = 1; i <= 10000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                worst = std::fmax(worst, energy());
+                if (i > 7500)
+                {
+                    late_kinetic = std::fmax(late_kinetic, total_kinetic_energy(w.bodies()));
+                }
+            }
+            MALLOY_CHECK_TRUE(worst - e0 <= bound);
+            MALLOY_CHECK_TRUE(late_kinetic < 1e-4 * step_scale);
+            MALLOY_CHECK_TRUE(std::abs(w.bodies()[0].angular_velocity) < 1e-3);
+        }
+
+        // --- And 3D: a box (0.5, 0.5, 0.25) resting on its face, nudged with
+        //     spin (0.3, 0.2, 0), the issue's reproduction. The same bound, with
+        //     the lever now the corner's horizontal distance sqrt(a^2 + b^2):
+        //     B = m g (g dt + sqrt(a^2 + b^2) |w0|) dt = 5.38e-3 J. The plain mean
+        //     climbed to E0 + 1.95 B (2.5 times E0); the weighted centroid peaks
+        //     at E0 + 0.06 B.
+        //
+        //     It does NOT come fully to rest, and is not claimed to: one contact
+        //     cannot stop four corners at once, so the box settles into a
+        //     step-scale rock (a four-step cycle around its corners, tilted
+        //     about 1e-4 rad) with kinetic energy near one step's gravity,
+        //     m g^2 dt^2 = 3.84e-4 J. Over the last 5 s it stays below
+        //     3 m g^2 dt^2 (measured 5.07e-4 J, 1.3 of them), where the plain
+        //     mean kept 7.52e-3 J (19.6 of them): a factor of 15. Bringing it
+        //     to rest is the per-point solver's job (issue #73). ---
+        {
+            const Real g = 9.8;
+            const Real dt = 0.002;
+            const Vec3 half{0.5, 0.5, 0.25};
+            const Vec3 w0{0.3, 0.2, 0.0};
+            RigidBody3D box;
+            box.half_extents = half;
+            box.inertia = box_inertia(half, 1.0);
+            box.position = Vec3{0.0, 0.0, half.z};
+            box.angular_velocity = w0;
+            Rigid3DSettings settings;
+            settings.gravity = Vec3{0.0, 0.0, -g};
+            settings.restitution = 0.0;
+            settings.ground.push_back(malloy::collide::Plane3{Vec3{0.0, 0.0, 1.0}, 0.0});
+            Rigid3DWorld w{SimulationSettings{dt}, {box}, settings};
+            const auto energy = [&] {
+                return malloy::rigid::total_kinetic_energy3d(w.bodies()) +
+                       malloy::rigid::total_potential_energy3d(w.bodies(), settings.gravity) -
+                       g * half.z;
+            };
+            const Real e0 = energy();
+            const Real lever = std::sqrt(half.x * half.x + half.y * half.y);
+            const Real bound = g * (g * dt + lever * malloy::math::length(w0)) * dt;
+            const Real step_scale = g * g * dt * dt;
+            Real worst = e0;
+            Real late_kinetic = 0.0;
+            for (int i = 1; i <= 10000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                worst = std::fmax(worst, energy());
+                if (i > 7500)
+                {
+                    late_kinetic = std::fmax(late_kinetic,
+                                             malloy::rigid::total_kinetic_energy3d(w.bodies()));
+                }
+            }
+            MALLOY_CHECK_TRUE(worst - e0 <= bound);
+            MALLOY_CHECK_TRUE(late_kinetic < 3.0 * step_scale);
+        }
+    }
+
+    // --- Issue #51: a huge mass or inertia must not validate while every energy
+    //     the world reports is inf. Since #16 the position and velocity must be
+    //     squarable, but nothing bounded the mass or inertia, so a body whose
+    //     own kinetic energy overflowed was accepted and every step reported Ok
+    //     with E printed as inf. In 2D the body's own kinetic energy is now
+    //     required to be finite, which bounds its momenta too; in 3D, where |p|
+    //     and |L| are reported, its momenta must be squarable, which bounds its
+    //     energy too. Infinite mass and inertia stay legal in 2D. ---
+    {
+        using malloy::math::Vec3;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+
+        // 2D. The reviewer's body: mass and inertia 1e300, speed and spin 1e5.
+        {
+            RigidBody2D huge;
+            huge.mass = 1e300;
+            huge.inertia = 1e300;
+            huge.radius = 0.5;
+            huge.velocity = Vec2{1e5, 0.0};
+            huge.angular_velocity = 1e5;
+            MALLOY_CHECK_FALSE(huge.is_valid());
+            RigidWorld w{SimulationSettings{0.001}, {huge}, RigidSettings{}};
+            MALLOY_CHECK_TRUE(w.validate() == StepStatus::InvalidState);
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_EQ(w.bodies()[0].position.x, 0.0); // left unchanged
+
+            // Each half on its own: the translation, then the rotation.
+            RigidBody2D heavy;
+            heavy.mass = 1e300;
+            heavy.velocity = Vec2{0.0, 1e5};
+            MALLOY_CHECK_FALSE(heavy.is_valid());
+            RigidBody2D stiff;
+            stiff.inertia = 1e300;
+            stiff.angular_velocity = 1e5;
+            MALLOY_CHECK_FALSE(stiff.is_valid());
+
+            // And their SUM, which is what total_kinetic_energy adds: each half
+            // is 1e308, finite, and together they are not.
+            RigidBody2D both;
+            both.mass = 1e300;
+            both.inertia = 1e300;
+            both.velocity = Vec2{std::sqrt(2e8), 0.0};
+            both.angular_velocity = std::sqrt(2e8);
+            MALLOY_CHECK_TRUE(std::isfinite(0.5 * both.mass * both.velocity.x * both.velocity.x));
+            MALLOY_CHECK_FALSE(both.is_valid());
+
+            // A huge mass is not itself the problem: at rest, or slow enough,
+            // it is a perfectly good body.
+            RigidBody2D resting = huge;
+            resting.velocity = Vec2{};
+            resting.angular_velocity = 0.0;
+            MALLOY_CHECK_TRUE(resting.is_valid());
+            RigidBody2D creeping = huge;
+            creeping.velocity = Vec2{1e-100, 0.0};
+            creeping.angular_velocity = -1e-100;
+            MALLOY_CHECK_TRUE(creeping.is_valid());
+
+            // Infinite mass and inertia stay legal: a static body, a kinematic
+            // one (immovable but moving), and each half-infinite kind. inf * 0
+            // would be NaN and inf * v inf, so the infinite half is skipped.
+            RigidBody2D wall;
+            wall.mass = inf;
+            wall.inertia = inf;
+            wall.radius = 1.0;
+            MALLOY_CHECK_TRUE(wall.is_valid());
+            RigidBody2D conveyor = wall;
+            conveyor.velocity = Vec2{2.0, 0.0};
+            conveyor.angular_velocity = 0.5;
+            MALLOY_CHECK_TRUE(conveyor.is_valid());
+            RigidBody2D pinned; // cannot translate, can spin
+            pinned.mass = inf;
+            pinned.angular_velocity = 3.0;
+            MALLOY_CHECK_TRUE(pinned.is_valid());
+            RigidBody2D slider; // cannot spin, can translate
+            slider.inertia = inf;
+            slider.velocity = Vec2{1.0, 2.0};
+            MALLOY_CHECK_TRUE(slider.is_valid());
+
+            // A body that starts valid and is pushed past the limit by a step
+            // is refused and rolled back, like any other invalid result. Mass
+            // 1e300 at 18900 has energy 1.79e308 minus a little; one step of a
+            // strong gravity takes it to 19900, and 1.98e308 overflows.
+            RigidBody2D edge;
+            edge.mass = 1e300;
+            edge.velocity = Vec2{0.0, -18900.0};
+            MALLOY_CHECK_TRUE(edge.is_valid());
+            RigidSettings strong;
+            strong.gravity = Vec2{0.0, -1000.0};
+            RigidWorld fall{SimulationSettings{1.0}, {edge}, strong};
+            MALLOY_CHECK_TRUE(fall.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_EQ(fall.bodies()[0].velocity.y, -18900.0);
+        }
+
+        // 3D. The reviewer's body, then each term on its own.
+        {
+            RigidBody3D huge;
+            huge.mass = 1e300;
+            huge.inertia = Vec3{1e300, 1e300, 1e300};
+            huge.radius = 0.5;
+            huge.velocity = Vec3{1e5, 0.0, 0.0};
+            huge.angular_velocity = Vec3{1e5, 0.0, 0.0};
+            MALLOY_CHECK_FALSE(huge.is_valid());
+            Rigid3DWorld w{SimulationSettings{0.001}, {huge}};
+            MALLOY_CHECK_TRUE(w.validate() == StepStatus::InvalidState);
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+
+            RigidBody3D heavy;
+            heavy.mass = 1e300;
+            heavy.velocity = Vec3{0.0, 1e5, 0.0};
+            MALLOY_CHECK_FALSE(heavy.is_valid());
+
+            // Each axis pairs with its OWN moment: a huge moment about an axis
+            // the body does not spin about is harmless, spinning about it is
+            // not.
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                RigidBody3D stiff;
+                Vec3 inertia{1.0, 1.0, 1.0};
+                Vec3 spin{};
+                Vec3 other_spin{};
+                (axis == 0 ? inertia.x : axis == 1 ? inertia.y : inertia.z) = 1e300;
+                (axis == 0 ? spin.x : axis == 1 ? spin.y : spin.z) = 1e5;
+                (axis == 0 ? other_spin.y : axis == 1 ? other_spin.z : other_spin.x) = 1e5;
+                stiff.inertia = inertia;
+                stiff.angular_velocity = spin;
+                MALLOY_CHECK_FALSE(stiff.is_valid());
+                stiff.angular_velocity = other_spin; // a moment of 1, at 1e5
+                MALLOY_CHECK_TRUE(stiff.is_valid());
+            }
+
+            // The momenta must be SQUARABLE, not just finite, because the
+            // world reports |p| and |L|. Mass 1e300 at 1e-140 has energy 5e19
+            // and momentum 1e160, whose square is inf; the same for a moment.
+            RigidBody3D drifting;
+            drifting.mass = 1e300;
+            drifting.velocity = Vec3{1e-140, 0.0, 0.0};
+            MALLOY_CHECK_TRUE(std::isfinite(0.5 * drifting.mass * 1e-140 * 1e-140));
+            MALLOY_CHECK_FALSE(drifting.is_valid());
+            RigidBody3D turning;
+            turning.inertia = Vec3{1.0, 1e300, 1.0};
+            turning.angular_velocity = Vec3{0.0, 1e-140, 0.0};
+            MALLOY_CHECK_FALSE(turning.is_valid());
+
+            // At rest, or slow enough, a huge mass is a good body.
+            RigidBody3D resting = huge;
+            resting.velocity = Vec3{};
+            resting.angular_velocity = Vec3{};
+            MALLOY_CHECK_TRUE(resting.is_valid());
+            RigidBody3D creeping = huge;
+            creeping.velocity = Vec3{0.0, 0.0, 1e-160};
+            creeping.angular_velocity = Vec3{1e-160, 0.0, 0.0};
+            MALLOY_CHECK_TRUE(creeping.is_valid());
         }
     }
 

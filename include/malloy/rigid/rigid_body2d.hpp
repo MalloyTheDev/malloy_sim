@@ -62,7 +62,11 @@ struct RigidBody2D
     // every impulse formula handles the case without branching.
     //
     // Valid when mass and inertia are strictly positive (infinity included),
-    // radius is non-negative and finite, and every other value is finite.
+    // radius is non-negative and finite, every other value is finite (position,
+    // velocity and the local centre of mass SQUARABLE), and the body's own
+    // kinetic energy, (1/2) m |v|^2 + (1/2) I w^2, is finite, so a huge mass or
+    // inertia cannot validate while every energy reported is inf (issue #51).
+    // An infinite mass or inertia leaves its half out, as the diagnostics do.
     bool is_valid() const;
 
     // Infinity is PER QUANTITY, and the two mean different things. Infinite

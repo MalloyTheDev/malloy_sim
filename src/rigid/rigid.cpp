@@ -194,6 +194,70 @@ bool body_is_box2(const RigidBody2D& body)
     return body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0};
 }
 
+// Reduces a box contact manifold (box on the ground, M37, or box against box,
+// M36) to the one contact the impulse core resolves: its point is the
+// PENETRATION-WEIGHTED centroid of the manifold, and its depth is the deepest
+// penetration. The caller supplies the normal, which every point shares.
+//
+// Weighted, not the plain mean (issue #41). Tilt a box resting on its face so
+// both bottom corners are in: their plain mean is the middle of the bottom
+// face, which sits toward the RAISED side of the centre of mass, so the upward
+// impulse tipped the box further instead of righting it, and with the
+// positional correction below lifting it each step it rocked forever and gained
+// energy even at restitution 0. Weighting by depth is what a contact whose
+// force grows with penetration does: the deeper corner carries more of the
+// load, so the resultant sits toward it and rights the box. Every weight is
+// non-negative, so the point stays within the manifold, a place a resultant of
+// contact forces can act.
+//
+// A LEVEL manifold, whose depths agree to within rounding, takes the plain mean
+// instead, exactly as before, so a flat landing still makes no torque. That
+// covers a bare touch where every depth is 0 and there is nothing to weight by
+// (box against box reports 0 for points kept within rounding in front of the
+// face), and a bare touch whose depths are themselves rounding: two turned
+// boxes meeting head-on can first touch at depths near 1e-16 that differ by a
+// few 1e-17, and weighting by that noise moved the contact up to 6 per cent of
+// the half-face off the line of centres and spun 48 of the 200 turned hits in
+// the issue #23 test, which have no torque. "Within rounding" is
+// kLevelTolerance times the size of the boxes, the collide layer's own
+// touch-tolerance convention; a face tilted by more than about 1e-9 rad is
+// weighted.
+//
+// The depth stays the DEEPEST, so the translation-only correction in
+// apply_contact still leaves no corner inside. This is an interim reduction: a
+// single contact cannot stop two corners at once, so a box on the floor still
+// chatters at the scale of one step's gravity (about m g^2 dt^2) until a
+// per-point iterative solver resolves the manifold point by point (issue #73).
+constexpr math::Real kLevelTolerance = 1e-9;
+
+collide::Contact reduce_manifold(const std::vector<collide::Contact>& hits,
+                                 const math::Vec2& normal, math::Real size)
+{
+    math::Vec2 sum{};
+    math::Vec2 weighted{};
+    math::Real total_depth = 0.0;
+    math::Real deepest = 0.0;
+    math::Real shallowest = std::numeric_limits<math::Real>::infinity();
+    for (const collide::Contact& hit : hits)
+    {
+        sum += hit.point;
+        weighted += hit.point * hit.penetration;
+        total_depth += hit.penetration;
+        deepest = std::fmax(deepest, hit.penetration);
+        shallowest = std::fmin(shallowest, hit.penetration);
+    }
+    // Not level means the deepest point is deeper than the shallowest by more
+    // than the tolerance, so the total depth is positive and the weighted mean
+    // is defined.
+    const bool level = !(deepest - shallowest > kLevelTolerance * size);
+    collide::Contact manifold;
+    manifold.normal = normal;
+    manifold.penetration = deepest;
+    manifold.point = level ? sum / static_cast<math::Real>(hits.size())
+                           : weighted / total_depth;
+    return manifold;
+}
+
 void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settings)
 {
     if (a.is_static() && b.is_static())
@@ -206,10 +270,11 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settin
 
     // Box against box (M36): the separating-axis contact, fed through the SAME
     // solver the discs use (ADR 0008). The clipped contact manifold is reduced to
-    // one contact at its CENTROID with the deepest penetration, exactly as M37
-    // reduces a box on the ground: a face resting on a face pushes through the
-    // middle of the touch, so two aligned boxes meeting head-on trade momentum
-    // along the line of centres with no torque, while a corner or an offset
+    // one contact at its penetration-weighted CENTROID with the deepest
+    // penetration, exactly as M37 reduces a box on the ground (reduce_manifold,
+    // issue #41): a face resting level on a face pushes through the middle of the
+    // touch, so two aligned boxes meeting head-on trade momentum along the line
+    // of centres with no torque, while a corner, a tilted face or an offset
     // overlap lands the centroid off the centre of mass and spins the boxes as
     // it should. (Until the review pass after M37 this used the single vertex
     // `collide::contact` reports, which sits on a face corner and invented a
@@ -224,19 +289,11 @@ void resolve_contact(RigidBody2D& a, RigidBody2D& b, const RigidSettings& settin
         {
             return;
         }
-        math::Vec2 centroid{};
-        math::Real deepest = math::Real{0};
-        for (const collide::Contact& hit : hits)
-        {
-            centroid += hit.point;
-            deepest = std::fmax(deepest, hit.penetration);
-        }
-        centroid = centroid / static_cast<math::Real>(hits.size());
-        collide::Contact manifold;
-        manifold.normal = hits.front().normal; // the SAT normal, shared by every point
-        manifold.penetration = deepest;
-        manifold.point = centroid;
-        apply_contact(a, b, manifold, settings);
+        // The SAT normal, shared by every point, and the boxes' size as the
+        // collide layer measures it, for the level test.
+        const math::Real size = std::fmax(std::fmax(a.half_extents.x, a.half_extents.y),
+                                          std::fmax(b.half_extents.x, b.half_extents.y));
+        apply_contact(a, b, reduce_manifold(hits, hits.front().normal, size), settings);
         return;
     }
     // A box against a disc is deferred, as box against sphere was in 3D before
@@ -282,13 +339,16 @@ void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
 
     // A box against the ground touches at up to two corners at once (M37), so
     // like the 3D box on a plane (M30) the corner manifold is reduced to a
-    // SINGLE contact at the CENTROID of the penetrating corners, resolved with
-    // the deepest penetration. For a flat drop that centroid sits directly below
-    // the centre of mass, so the normal impulse passes through it and makes no
-    // torque: the box lands flat and stays flat. For a corner or edge landing the
-    // centroid is that corner or edge, the correct lever arm, so it tips. A full
-    // per-corner manifold with an iterative solver, needed to stand a stack, is a
-    // later milestone (the same boundary M30 and the 2D disc solver drew).
+    // SINGLE contact at the penetration-weighted CENTROID of the penetrating
+    // corners, resolved with the deepest penetration (reduce_manifold, issue
+    // #41). For a flat drop the corners are equally deep, so that centroid sits
+    // directly below the centre of mass, the normal impulse passes through it and
+    // makes no torque: the box lands flat and stays flat. For a corner landing
+    // the centroid is that corner, the correct lever arm, so it tips; for a
+    // tilted face it leans toward the deeper corner, so the impulse rights the
+    // box. A full per-corner manifold with an iterative solver, needed to stand
+    // a stack or to bring a rocking box fully to rest, is a later milestone
+    // (issue #73; the same boundary M30 and the 2D disc solver drew).
     if (body_is_box2(body))
     {
         const collide::Obb2 shape{body.position, body.half_extents, body.angle};
@@ -297,19 +357,9 @@ void resolve_ground(RigidBody2D& body, const collide::Halfplane& plane,
         {
             return;
         }
-        math::Vec2 centroid{};
-        math::Real deepest = math::Real{0};
-        for (const collide::Contact& hit : hits)
-        {
-            centroid += hit.point;
-            deepest = std::fmax(deepest, hit.penetration);
-        }
-        centroid = centroid / static_cast<math::Real>(hits.size());
-        collide::Contact manifold;
-        manifold.normal = -plane.normal; // from the box toward the solid, no fallback
-        manifold.penetration = deepest;
-        manifold.point = centroid;
-        apply_contact(body, ground, manifold, settings);
+        // From the box toward the solid, no fallback.
+        const math::Real size = std::fmax(body.half_extents.x, body.half_extents.y);
+        apply_contact(body, ground, reduce_manifold(hits, -plane.normal, size), settings);
         return;
     }
 
@@ -333,13 +383,36 @@ bool RigidBody2D::is_valid() const
 {
     // mass and inertia may be infinite, meaning immovable. NaN still fails,
     // because NaN > 0 is false.
-    return mass > math::Real{0} && inertia > math::Real{0} &&
-           radius >= math::Real{0} && math::is_finite(radius) &&
-           half_extents.x >= math::Real{0} && half_extents.y >= math::Real{0} &&
-           math::is_finite(half_extents) &&
-           math::is_finite(angle) && math::is_finite(angular_velocity) &&
-           math::is_squarable(position) && math::is_squarable(velocity) &&
-           math::is_squarable(local_center_of_mass);
+    if (!(mass > math::Real{0} && inertia > math::Real{0} &&
+          radius >= math::Real{0} && math::is_finite(radius) &&
+          half_extents.x >= math::Real{0} && half_extents.y >= math::Real{0} &&
+          math::is_finite(half_extents) &&
+          math::is_finite(angle) && math::is_finite(angular_velocity) &&
+          math::is_squarable(position) && math::is_squarable(velocity) &&
+          math::is_squarable(local_center_of_mass)))
+    {
+        return false;
+    }
+
+    // The body's own kinetic energy must be finite too (issue #51). A squarable
+    // velocity is not enough once the mass or inertia is huge: mass 1e300 at
+    // speed 1e5 validated clean while every energy the world reported was inf.
+    // A finite energy also bounds the momenta, m |v| and I w, since a momentum
+    // overflows only if its energy does. Each half is skipped when its mass or
+    // inertia is infinite, exactly as the diagnostics skip it: an immovable
+    // body has no energy to report, and inf * 0 would be NaN. (The orbital
+    // angular momentum and the gravity potential depend on the origin and on g,
+    // so they are not the body's own and are not bounded here.)
+    math::Real kinetic = 0.0;
+    if (!has_infinite_mass())
+    {
+        kinetic += math::Real{0.5} * mass * math::dot(velocity, velocity);
+    }
+    if (!has_infinite_inertia())
+    {
+        kinetic += math::Real{0.5} * inertia * angular_velocity * angular_velocity;
+    }
+    return math::is_finite(kinetic);
 }
 
 bool RigidBody2D::has_infinite_mass() const

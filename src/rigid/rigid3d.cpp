@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -187,6 +188,71 @@ bool body_is_box(const RigidBody3D& body)
            body.half_extents.y > math::Real{0} && body.half_extents.z > math::Real{0};
 }
 
+// The one contact a whole box manifold (box on a plane, M30, or box against
+// box, M33) is reduced to: the PENETRATION-WEIGHTED centroid of its points,
+// with the deepest penetration. The 3D sibling of the 2D reduce_manifold, and
+// the reasons are the same (issue #41).
+//
+// The plain mean of a tilted face's penetrating corners sits toward the RAISED
+// side of the centre of mass, so the normal impulse tipped the box further and,
+// with the translation-only correction lifting it each step, a box resting on
+// the ground rocked forever and gained energy even at restitution 0. Weighting
+// by depth, as a contact whose force grows with penetration would, puts the
+// resultant toward the deeper corners and rights the box. The weights are
+// non-negative, so the point stays within the manifold.
+//
+// A LEVEL manifold, whose depths agree to within kLevelTolerance times the
+// boxes' size (the collide layer's touch-tolerance convention), takes the plain
+// mean as before, so a flat landing still makes no torque. That covers a bare
+// touch, every depth 0 and nothing to weight by, and a bare touch whose depths
+// are themselves rounding, which weighting would turn into an arbitrary lever
+// arm: two turned boxes meeting head-on can first touch at depths near 1e-16
+// that differ by a few 1e-17, and 3 of the 6 turned head-on hits in the issue
+// #23 test then spun.
+//
+// Still one contact, not a per-point solve: it cannot stop several corners at
+// once, so a box on the ground keeps a small chatter at the scale of one step's
+// gravity (about m g^2 dt^2) until the iterative contact solver of issue #73.
+constexpr math::Real kLevelTolerance = 1e-9;
+
+struct ManifoldContact
+{
+    math::Vec3 point;
+    math::Real penetration;
+};
+
+ManifoldContact reduce_manifold(const std::vector<collide::Contact3>& hits,
+                                math::Real size)
+{
+    math::Vec3 sum{};
+    math::Vec3 weighted{};
+    math::Real total_depth = 0.0;
+    math::Real deepest = 0.0;
+    math::Real shallowest = std::numeric_limits<math::Real>::infinity();
+    for (const collide::Contact3& hit : hits)
+    {
+        sum += hit.point;
+        weighted += hit.point * hit.penetration;
+        total_depth += hit.penetration;
+        deepest = std::fmax(deepest, hit.penetration);
+        shallowest = std::fmin(shallowest, hit.penetration);
+    }
+    // Not level means the deepest point is deeper than the shallowest by more
+    // than the tolerance, so the total depth is positive and the weighted mean
+    // is defined.
+    const bool level = !(deepest - shallowest > kLevelTolerance * size);
+    const math::Vec3 point = level ? sum / static_cast<math::Real>(hits.size())
+                                   : weighted / total_depth;
+    return ManifoldContact{point, deepest};
+}
+
+// The largest half-width of a box, the size the level test scales with.
+math::Real box_size(const RigidBody3D& body)
+{
+    return std::fmax(std::fmax(body.half_extents.x, body.half_extents.y),
+                     body.half_extents.z);
+}
+
 // A body against one immovable ground plane (M22, M23 for a sphere; M30 for a
 // box): the plane is the null participant.
 void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
@@ -200,31 +266,27 @@ void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
         // than resolve each corner in sequence, which would inject a spurious
         // torque on a symmetric landing (the corners are handled one at a time,
         // so the body is no longer symmetric by the second), the coplanar
-        // manifold is reduced to a SINGLE contact at the CENTROID of the
-        // penetrating corners, resolved with the deepest penetration. For a
-        // flat face that centroid lies directly below the centre of mass, so
-        // the normal impulse passes through it and makes no torque: a flat drop
-        // stays flat and its angular momentum is conserved. For a corner or
-        // edge landing the centroid is that corner or edge, which is the
-        // correct lever arm, so the box tips and tumbles as it should. A full
-        // per-corner manifold with an iterative solver, needed to stand a
-        // stack, is a later milestone (the same boundary the 2D solver drew).
+        // manifold is reduced to a SINGLE contact at the penetration-weighted
+        // CENTROID of the penetrating corners, resolved with the deepest
+        // penetration (reduce_manifold, issue #41). For a flat face the corners
+        // are equally deep, so that centroid lies directly below the centre of
+        // mass, the normal impulse passes through it and makes no torque: a
+        // flat drop stays flat and its angular momentum is conserved. For a
+        // corner or edge landing the centroid is that corner or edge, which is
+        // the correct lever arm, so the box tips and tumbles as it should; a
+        // tilted face puts it toward the deeper corners, so the impulse rights
+        // the box. A full per-corner manifold with an iterative solver, needed
+        // to stand a stack or to bring a rocking box fully to rest, is a later
+        // milestone (issue #73; the same boundary the 2D solver drew).
         const collide::Box3 shape{body.position, body.half_extents, body.orientation};
         const std::vector<collide::Contact3> hits = collide::contacts(shape, plane);
         if (hits.empty())
         {
             return;
         }
-        math::Vec3 centroid{};
-        math::Real deepest = math::Real{0};
-        for (const collide::Contact3& hit : hits)
-        {
-            centroid += hit.point;
-            deepest = std::fmax(deepest, hit.penetration);
-        }
-        centroid = centroid / static_cast<math::Real>(hits.size());
-        const Participant box_body{&body, centroid - body.position};
-        resolve_pair(box_body, ground, -plane.normal, deepest, settings);
+        const ManifoldContact manifold = reduce_manifold(hits, box_size(body));
+        const Participant box_body{&body, manifold.point - body.position};
+        resolve_pair(box_body, ground, -plane.normal, manifold.penetration, settings);
         return;
     }
 
@@ -249,16 +311,17 @@ void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
                        const Rigid3DSettings& settings)
 {
     // Two boxes resolve through the separating-axis contact (M33). The clipped
-    // contact manifold is reduced to ONE contact at its centroid with the
-    // deepest penetration, exactly as M30 reduces a box on a plane: a face
-    // resting on a face pushes through the middle of the touch, so two aligned
-    // boxes meeting head-on trade momentum along the line of centres with no
-    // torque, while a corner, an edge or an offset overlap lands the centroid off
-    // the centre of mass and spins them as it should. (Until the review pass
-    // after M37 this used the single vertex `collide::contact` reports, which
-    // sits on a face corner and invented a lever arm for a head-on hit.) One
-    // contact, not a per-point solve: enough for a correct bounce, not for a
-    // stable stack, which needs an iterative solver a later milestone owns.
+    // contact manifold is reduced to ONE contact at its penetration-weighted
+    // centroid with the deepest penetration, exactly as M30 reduces a box on a
+    // plane (reduce_manifold, issue #41): a face resting level on a face pushes
+    // through the middle of the touch, so two aligned boxes meeting head-on
+    // trade momentum along the line of centres with no torque, while a corner,
+    // an edge, a tilted face or an offset overlap lands the centroid off the
+    // centre of mass and spins them as it should. (Until the review pass after
+    // M37 this used the single vertex `collide::contact` reports, which sits on
+    // a face corner and invented a lever arm for a head-on hit.) One contact,
+    // not a per-point solve: enough for a correct bounce, not for a stable
+    // stack, which needs the iterative solver of issue #73.
     if (body_is_box(a) && body_is_box(b))
     {
         const collide::Box3 shape_a{a.position, a.half_extents, a.orientation};
@@ -268,19 +331,13 @@ void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
         {
             return;
         }
-        math::Vec3 centroid{};
-        math::Real deepest = math::Real{0};
-        for (const collide::Contact3& hit : hits)
-        {
-            centroid += hit.point;
-            deepest = std::fmax(deepest, hit.penetration);
-        }
-        centroid = centroid / static_cast<math::Real>(hits.size());
+        const ManifoldContact manifold =
+            reduce_manifold(hits, std::fmax(box_size(a), box_size(b)));
         // The arm is the centroid relative to each centre of mass, so an
         // off-centre touch generates torque exactly as the ground box does.
-        const Participant pa{&a, centroid - a.position};
-        const Participant pb{&b, centroid - b.position};
-        resolve_pair(pa, pb, hits.front().normal, deepest, settings);
+        const Participant pa{&a, manifold.point - a.position};
+        const Participant pb{&b, manifold.point - b.position};
+        resolve_pair(pa, pb, hits.front().normal, manifold.penetration, settings);
         return;
     }
     // A box against a sphere (M34): exactly one body is a box. Find which, and
@@ -335,14 +392,36 @@ void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
 
 bool RigidBody3D::is_valid() const
 {
-    return mass > math::Real{0} && math::is_finite(mass) &&
-           inertia.x > math::Real{0} && inertia.y > math::Real{0} &&
-           inertia.z > math::Real{0} && math::is_finite(inertia) &&
-           radius >= math::Real{0} && math::is_finite(radius) &&
-           half_extents.x >= math::Real{0} && half_extents.y >= math::Real{0} &&
-           half_extents.z >= math::Real{0} && math::is_finite(half_extents) &&
-           math::is_unit(orientation) && math::is_squarable(position) &&
-           math::is_squarable(velocity) && math::is_squarable(angular_velocity);
+    if (!(mass > math::Real{0} && math::is_finite(mass) &&
+          inertia.x > math::Real{0} && inertia.y > math::Real{0} &&
+          inertia.z > math::Real{0} && math::is_finite(inertia) &&
+          radius >= math::Real{0} && math::is_finite(radius) &&
+          half_extents.x >= math::Real{0} && half_extents.y >= math::Real{0} &&
+          half_extents.z >= math::Real{0} && math::is_finite(half_extents) &&
+          math::is_unit(orientation) && math::is_squarable(position) &&
+          math::is_squarable(velocity) && math::is_squarable(angular_velocity)))
+    {
+        return false;
+    }
+
+    // The body's own linear momentum m v and spin angular momentum (each moment
+    // times its w) must be SQUARABLE too (issue #51). A squarable velocity is
+    // not enough once the mass or a moment is huge: mass and moments 1e300 at
+    // speed and spin 1e5 validated clean while E, |L| and |p| all printed inf.
+    // Squarable rather than finite because the world reports the MAGNITUDES
+    // |p| and |L|, which square them: mass 1e300 at speed 1e-140 has a finite
+    // energy and a finite momentum, and still a |p| of inf.
+    //
+    // That also keeps the kinetic energy finite, with no check of its own:
+    // (1/2) m v.v = (1/2) (m v).v <= (1/2) |m v| |v|, the product of two
+    // squarable magnitudes, so below half the largest double, and the same for
+    // (1/2) sum I w^2 <= (1/2) |I w| |w|. Every 3D mass and moment is finite,
+    // so there is no infinity to guard. (The orbital angular momentum and the
+    // gravity and force potentials depend on the origin and on the settings,
+    // so they are not the body's own and are not bounded here.)
+    const math::Vec3 spin{inertia.x * angular_velocity.x, inertia.y * angular_velocity.y,
+                          inertia.z * angular_velocity.z};
+    return math::is_squarable(velocity * mass) && math::is_squarable(spin);
 }
 
 bool Rigid3DSettings::is_valid() const

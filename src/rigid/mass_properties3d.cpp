@@ -64,12 +64,13 @@ bool mesh_is_valid(const SolidMesh& mesh)
 
     // Closed and consistently wound (issue #34). The signed-tetrahedron sums are
     // the volume integrals only for a CLOSED surface: with a face missing, the
-    // tetrahedra from the origin no longer cancel outside the solid, so the
-    // "mass" depends on where the mesh sits (an open-top unit cube weighed 0.67
-    // at the origin and 1.67 three units below it), and the volume usually
-    // stays positive, so the volume check alone did not catch it. A closed,
-    // consistently wound mesh traverses every edge exactly once in each
-    // direction: each directed edge (u, v) appears once, and so does (v, u).
+    // tetrahedra from the apex no longer cancel outside the solid, so the
+    // "mass" depends on where the apex sits (an open-top unit cube weighed 0.67
+    // and 1.67 for two apexes three units apart, back when the apex was the
+    // world origin), and the volume usually stays positive, so the volume check
+    // alone did not catch it. A closed, consistently wound mesh traverses every
+    // edge exactly once in each direction: each directed edge (u, v) appears
+    // once, and so does (v, u).
     // This is exact, on indices, so the mesh must share its vertices (two
     // vertices at the same place with different indices are not joined).
     std::vector<std::pair<std::size_t, std::size_t>> edges;
@@ -206,20 +207,41 @@ MassProperties3D mass_properties_3d(const SolidMesh& mesh)
         return MassProperties3D{};
     }
 
-    // Signed sums over the tetrahedra (origin, a, b, c), one per triangle. Each
-    // is weighted by six times its signed volume, det = a . (b x c). A closed
-    // outward-wound mesh makes these sums equal the integrals over the enclosed
-    // solid, whichever side of the origin the mesh lies on: the parts outside
-    // the solid cancel between overlapping signed tetrahedra.
+    // The apex every tetrahedron is spanned from: the mean of the vertices, a
+    // point within the mesh's own bounding box, and NOT the world origin
+    // (issue #45). The sums below cancel the parts of the tetrahedra outside
+    // the solid, and from an apex a distance d away each term is of size
+    // d^3 (d^5 for the second moments) while the answer is of size s^3 (s^5),
+    // s the mesh's size: the relative error grew like eps (d / s)^3, so a 1 cm
+    // cube 50 m out came back with negative moments and one 1 km out was
+    // accepted with its centre of mass 0.15 m off. From the vertex mean every
+    // coordinate is at most s, whatever d is. The subtraction itself loses
+    // nothing for a mesh far from the origin (a vertex and the mean then agree
+    // to within a factor of two, so their difference is exact), and the mean's
+    // own rounding does not matter: any apex gives the same integrals, and it
+    // is added back to the centre of mass at the end.
+    math::Vec3 apex{};
+    for (const math::Vec3& vertex : mesh.vertices)
+    {
+        apex += vertex;
+    }
+    apex = apex / static_cast<math::Real>(mesh.vertices.size());
+
+    // Signed sums over the tetrahedra (apex, a, b, c), one per triangle, with
+    // a, b and c measured FROM the apex. Each is weighted by six times its
+    // signed volume, det = a . (b x c). A closed outward-wound mesh makes these
+    // sums equal the integrals over the enclosed solid, wherever the apex lies:
+    // the parts outside the solid cancel between overlapping signed
+    // tetrahedra.
     math::Real volume_times_six = 0.0;      // sum det           = 6 V
     math::Vec3 centroid_numerator{};        // sum det (a+b+c)   = 24 V c
     math::Mat3 covariance_times_120{};      // sum det (...)     = 120 C
 
     for (const MeshTriangle& triangle : mesh.triangles)
     {
-        const math::Vec3& a = mesh.vertices[triangle.v0];
-        const math::Vec3& b = mesh.vertices[triangle.v1];
-        const math::Vec3& c = mesh.vertices[triangle.v2];
+        const math::Vec3 a = mesh.vertices[triangle.v0] - apex;
+        const math::Vec3 b = mesh.vertices[triangle.v1] - apex;
+        const math::Vec3 c = mesh.vertices[triangle.v2] - apex;
         const math::Real det = math::dot(a, math::cross(b, c));
         const math::Vec3 sum = a + b + c;
         volume_times_six += det;
@@ -237,30 +259,31 @@ MassProperties3D mass_properties_3d(const SolidMesh& mesh)
     {
         return MassProperties3D{};
     }
-    const math::Vec3 center_of_mass =
-        centroid_numerator / (math::Real{24} * volume);
+    // The centre of mass relative to the apex, which is all the shift below
+    // needs; the apex is added back for the world position.
+    const math::Vec3 offset = centroid_numerator / (math::Real{24} * volume);
 
-    // Covariance about the origin, C = integral x x^T dV, then the inertia
-    // tensor about the origin, I = trace(C) I - C.
+    // Covariance about the apex, C = integral x x^T dV, then the inertia
+    // tensor about the apex, I = trace(C) I - C.
     const math::Mat3 covariance =
         covariance_times_120 * (math::Real{1} / math::Real{120});
-    const math::Mat3 inertia_origin =
+    const math::Mat3 inertia_apex =
         math::identity3() * math::trace(covariance) - covariance;
     // Parallel-axis to the centre of mass. These are geometric integrals, so
-    // the "mass" in the shift is the volume: I_com = I_origin - V (|d|^2 I - d d^T).
-    const math::Vec3 offset = center_of_mass;
+    // the "mass" in the shift is the volume: I_com = I_apex - V (|d|^2 I - d d^T),
+    // d the centre of mass relative to the apex, a distance within the mesh.
     const math::Real distance_squared = math::dot(offset, offset);
     const math::Mat3 shift =
         (math::diagonal3(math::Vec3{distance_squared, distance_squared,
                                     distance_squared}) -
          math::outer(offset, offset)) *
         volume;
-    const math::Mat3 inertia_com_geometric = inertia_origin - shift;
+    const math::Mat3 inertia_com_geometric = inertia_apex - shift;
 
     // Density scales the mass and every second moment linearly.
     const math::Real mass = mesh.density * volume;
     const math::Mat3 tensor = inertia_com_geometric * mesh.density;
-    return finalize(mass, center_of_mass, tensor);
+    return finalize(mass, apex + offset, tensor);
 }
 
 MassProperties3D combine(const MassProperties3D& a, const MassProperties3D& b)
