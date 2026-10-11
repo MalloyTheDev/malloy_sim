@@ -233,6 +233,18 @@ void resolve_walls(Particle2D& p, const collide::Aabb& bounds,
         }
     }
 }
+
+// True when every entry of both wall tallies is finite. The tallies are state a
+// step rolls back, and a VALID particle can still overflow them (issue #50):
+// mass 1e300 at speed 1e9 makes the impulse m (1 + e) |v| infinite, and at a
+// thermal wall at speed 1e5 its kinetic energy, and with it the heat, overflows.
+bool tallies_finite(const WallImpulse2D& impulse, const WallHeat2D& heat)
+{
+    return math::is_finite(impulse.min_x) && math::is_finite(impulse.max_x) &&
+           math::is_finite(impulse.min_y) && math::is_finite(impulse.max_y) &&
+           math::is_finite(heat.min_x) && math::is_finite(heat.max_x) &&
+           math::is_finite(heat.min_y) && math::is_finite(heat.max_y);
+}
 } // namespace
 
 bool Particle2D::is_valid() const
@@ -350,17 +362,18 @@ sim_core::StepResult ParticleWorld::step()
                       wall_heat_);
     }
 
-    // (4) a step that produced non-finite state must not report success.
-    for (const Particle2D& p : particles_)
+    // (4) a step that produced non-finite state must not report success. The
+    //     wall tallies are part of that state (issue #50).
+    const bool particles_valid =
+        std::all_of(particles_.begin(), particles_.end(),
+                    [](const Particle2D& p) { return p.is_valid(); });
+    if (!particles_valid || !tallies_finite(wall_impulse_, wall_heat_))
     {
-        if (!p.is_valid())
-        {
-            particles_.swap(previous_);
-            wall_impulse_ = previous_impulse;
-            wall_heat_ = previous_heat;
-            random_ = previous_random; // a failed step leaves no trace in the stream
-            return sim_core::StepResult{sim_core::StepStatus::InvalidState};
-        }
+        particles_.swap(previous_);
+        wall_impulse_ = previous_impulse;
+        wall_heat_ = previous_heat;
+        random_ = previous_random; // a failed step leaves no trace in the stream
+        return sim_core::StepResult{sim_core::StepStatus::InvalidState};
     }
 
     step_->advance();

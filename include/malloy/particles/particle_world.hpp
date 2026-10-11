@@ -100,7 +100,10 @@ public:
     //
     // The pair order is fixed so a run is repeatable (docs/04). On validation
     // failure, before or after the update, the state is left unchanged and the
-    // failing status is returned; this never throws.
+    // failing status is returned; this never throws. After the update that
+    // means a particle that is no longer valid, or a wall tally entry that is
+    // no longer finite (issue #50): a valid but very heavy particle can
+    // overflow m (1 + e) |v| or its kinetic energy at a wall.
     sim_core::StepResult step();
 
     const std::vector<Particle2D>& particles() const { return particles_; }
@@ -120,11 +123,13 @@ public:
 
     // The impulse each wall has delivered so far. Tallying it reads the bounce
     // without changing it, so every trajectory is exactly what it was before
-    // this existed. A step rolled back for non-finite state rolls this back too.
+    // this existed. A step rolled back for non-finite state rolls this back too,
+    // and a step that would make an entry non-finite is rolled back (issue
+    // #50), so every entry stays finite.
     const WallImpulse2D& wall_impulse() const { return wall_impulse_; }
 
     // The heat each wall has delivered to the gas so far (M39); rolled back with
-    // a rolled-back step, as the impulse tally is.
+    // a rolled-back step, and kept finite the same way, as the impulse tally is.
     const WallHeat2D& wall_heat() const { return wall_heat_; }
 
     // The state of the world's random number generator, seeded from

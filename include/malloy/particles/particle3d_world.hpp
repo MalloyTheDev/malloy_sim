@@ -77,7 +77,9 @@ public:
     // no orientation) and conserves momentum. The wall clamp is a reflection,
     // not an exchange, so walls carry momentum away. The pair order is fixed so
     // a run repeats (docs/04). On validation failure the state is left unchanged
-    // and the failing status returned; never throws.
+    // and the failing status returned; never throws. As in 2D, a step that
+    // leaves a particle invalid or a wall tally entry non-finite (issue #50) is
+    // rolled back.
     sim_core::StepResult step();
 
     const std::vector<Particle3D>& particles() const { return particles_; }
@@ -93,11 +95,12 @@ public:
     const ParticleSettings3D& particle_settings() const { return particle_settings_; }
 
     // The impulse each wall has delivered so far; read-only bookkeeping that
-    // changes no trajectory and is rolled back with a rolled-back step.
+    // changes no trajectory and is rolled back with a rolled-back step. Every
+    // entry stays finite (issue #50).
     const WallImpulse3D& wall_impulse() const { return wall_impulse_; }
 
     // The heat each wall has delivered to the gas so far (M39), rolled back
-    // with a rolled-back step.
+    // with a rolled-back step and kept finite the same way.
     const WallHeat3D& wall_heat() const { return wall_heat_; }
 
     // The generator's state, seeded from ParticleSettings3D::seed; it moves by

@@ -2097,6 +2097,127 @@ int main()
             }
         }
 
+        // Issue #50: the wall tallies are rolled-back state, so a step that
+        // makes one of them non-finite is refused, as one that makes a particle
+        // non-finite is. A particle of mass 1e300 is valid (finite mass,
+        // squarable velocity) and still overflows a tally. At a THERMAL wall at
+        // speed 1e5 its kinetic energy, 5e309, takes the heat to -inf while
+        // the impulse, 1e305, stays finite; at a SPECULAR wall at speed 1e9
+        // the impulse m (1 + e) |v| = 2e309 overflows while the heat stays 0.
+        // So the two kinds need both tallies checked, and running them against
+        // every wall of both worlds needs every entry checked. The particle
+        // starts 0.05 off the wall and moves 0.1 a step, so it hits in step 1.
+        // That step is refused, twice, and leaves the particle, every tally,
+        // the stream and the tick exactly as they were. The same particle with
+        // mass 1 steps fine and tallies that wall, so it is the mass alone
+        // that makes the step fail.
+        {
+            struct Kind
+            {
+                bool thermal;
+                Real speed;
+            };
+            const Kind kinds[] = {{true, 1e5}, {false, 1e9}};
+            Real WallTemperature2D::* const walls2[] = {
+                &WallTemperature2D::min_x, &WallTemperature2D::max_x,
+                &WallTemperature2D::min_y, &WallTemperature2D::max_y};
+            Real WallImpulse2D::* const impulses2[] = {
+                &WallImpulse2D::min_x, &WallImpulse2D::max_x,
+                &WallImpulse2D::min_y, &WallImpulse2D::max_y};
+            Real Vec2::* const axes2[] = {&Vec2::x, &Vec2::x, &Vec2::y, &Vec2::y};
+            Real WallTemperature3D::* const walls3[] = {
+                &WallTemperature3D::min_x, &WallTemperature3D::max_x,
+                &WallTemperature3D::min_y, &WallTemperature3D::max_y,
+                &WallTemperature3D::min_z, &WallTemperature3D::max_z};
+            Real WallImpulse3D::* const impulses3[] = {
+                &WallImpulse3D::min_x, &WallImpulse3D::max_x,
+                &WallImpulse3D::min_y, &WallImpulse3D::max_y,
+                &WallImpulse3D::min_z, &WallImpulse3D::max_z};
+            Real Vec3::* const axes3[] = {&Vec3::x, &Vec3::x, &Vec3::y,
+                                          &Vec3::y, &Vec3::z, &Vec3::z};
+            for (const Kind& kind : kinds)
+            {
+                const SimulationSettings sim{0.1 / kind.speed};
+                for (int k = 0; k < 4; ++k)
+                {
+                    const Real toward = (k % 2 == 0) ? -1.0 : 1.0; // min walls are at 0
+                    ParticleSettings s{1.0, Aabb{Vec2{0.0, 0.0}, Vec2{1.0, 1.0}}};
+                    if (kind.thermal)
+                    {
+                        s.wall_temperature.*walls2[k] = 1.0;
+                    }
+                    s.seed = 3;
+                    Vec2 at{0.5, 0.5};
+                    Vec2 v{0.0, 0.0};
+                    at.*axes2[k] = 0.5 + 0.45 * toward;
+                    v.*axes2[k] = kind.speed * toward;
+
+                    ParticleWorld light{sim, s, {Particle2D{at, v, 1.0, 0.0}}};
+                    MALLOY_CHECK_TRUE(light.step().ok());
+                    MALLOY_CHECK_TRUE(light.wall_impulse().*impulses2[k] > 0.0);
+
+                    ParticleWorld w{sim, s, {Particle2D{at, v, 1e300, 0.0}}};
+                    MALLOY_CHECK_TRUE(w.validate() == StepStatus::Ok);
+                    for (int attempt = 0; attempt < 2; ++attempt)
+                    {
+                        MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+                        const Particle2D& p = w.particles()[0];
+                        MALLOY_CHECK_TRUE(p.position.x == at.x && p.position.y == at.y);
+                        MALLOY_CHECK_TRUE(p.velocity.x == v.x && p.velocity.y == v.y);
+                        const WallImpulse2D& j = w.wall_impulse();
+                        MALLOY_CHECK_TRUE(j.min_x == 0.0 && j.max_x == 0.0 &&
+                                          j.min_y == 0.0 && j.max_y == 0.0);
+                        const auto& q = w.wall_heat();
+                        MALLOY_CHECK_TRUE(q.min_x == 0.0 && q.max_x == 0.0 &&
+                                          q.min_y == 0.0 && q.max_y == 0.0);
+                        MALLOY_CHECK_TRUE(w.random_state() == 3);
+                        MALLOY_CHECK_TRUE(w.tick_count() == 0);
+                    }
+                }
+                for (int k = 0; k < 6; ++k)
+                {
+                    const Real toward = (k % 2 == 0) ? -1.0 : 1.0;
+                    ParticleSettings3D s;
+                    s.bounds = Aabb3{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 1.0, 1.0}};
+                    if (kind.thermal)
+                    {
+                        s.wall_temperature.*walls3[k] = 1.0;
+                    }
+                    s.seed = 3;
+                    Vec3 at{0.5, 0.5, 0.5};
+                    Vec3 v{0.0, 0.0, 0.0};
+                    at.*axes3[k] = 0.5 + 0.45 * toward;
+                    v.*axes3[k] = kind.speed * toward;
+
+                    ParticleWorld3D light{sim, s, {Particle3D{at, v, 1.0, 0.0}}};
+                    MALLOY_CHECK_TRUE(light.step().ok());
+                    MALLOY_CHECK_TRUE(light.wall_impulse().*impulses3[k] > 0.0);
+
+                    ParticleWorld3D w{sim, s, {Particle3D{at, v, 1e300, 0.0}}};
+                    MALLOY_CHECK_TRUE(w.validate() == StepStatus::Ok);
+                    for (int attempt = 0; attempt < 2; ++attempt)
+                    {
+                        MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+                        const Particle3D& p = w.particles()[0];
+                        MALLOY_CHECK_TRUE(p.position.x == at.x && p.position.y == at.y &&
+                                          p.position.z == at.z);
+                        MALLOY_CHECK_TRUE(p.velocity.x == v.x && p.velocity.y == v.y &&
+                                          p.velocity.z == v.z);
+                        const WallImpulse3D& j = w.wall_impulse();
+                        MALLOY_CHECK_TRUE(j.min_x == 0.0 && j.max_x == 0.0 &&
+                                          j.min_y == 0.0 && j.max_y == 0.0 &&
+                                          j.min_z == 0.0 && j.max_z == 0.0);
+                        const auto& q = w.wall_heat();
+                        MALLOY_CHECK_TRUE(q.min_x == 0.0 && q.max_x == 0.0 &&
+                                          q.min_y == 0.0 && q.max_y == 0.0 &&
+                                          q.min_z == 0.0 && q.max_z == 0.0);
+                        MALLOY_CHECK_TRUE(w.random_state() == 3);
+                        MALLOY_CHECK_TRUE(w.tick_count() == 0);
+                    }
+                }
+            }
+        }
+
         // The energy books balance exactly: with restitution 1, no friction and
         // no gravity, only a thermal wall changes the gas's kinetic energy, so
         // KE(t) - KE(0) is the sum of the wall heats to rounding. A specular

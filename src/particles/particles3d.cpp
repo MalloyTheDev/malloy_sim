@@ -280,6 +280,18 @@ void resolve_walls(Particle3D& p, const collide::Aabb3& bounds,
         }
     }
 }
+
+// True when every entry of both wall tallies is finite: the 2D world's check
+// (issue #50), over six walls. A valid particle can overflow either tally.
+bool tallies_finite(const WallImpulse3D& impulse, const WallHeat3D& heat)
+{
+    return math::is_finite(impulse.min_x) && math::is_finite(impulse.max_x) &&
+           math::is_finite(impulse.min_y) && math::is_finite(impulse.max_y) &&
+           math::is_finite(impulse.min_z) && math::is_finite(impulse.max_z) &&
+           math::is_finite(heat.min_x) && math::is_finite(heat.max_x) &&
+           math::is_finite(heat.min_y) && math::is_finite(heat.max_y) &&
+           math::is_finite(heat.min_z) && math::is_finite(heat.max_z);
+}
 } // namespace
 
 bool Particle3D::is_valid() const
@@ -396,16 +408,18 @@ sim_core::StepResult ParticleWorld3D::step()
                       wall_heat_);
     }
 
-    for (const Particle3D& p : particles_)
+    // (5) a step that produced non-finite state, in a particle or in a wall
+    //     tally (issue #50), must not report success.
+    const bool particles_valid =
+        std::all_of(particles_.begin(), particles_.end(),
+                    [](const Particle3D& p) { return p.is_valid(); });
+    if (!particles_valid || !tallies_finite(wall_impulse_, wall_heat_))
     {
-        if (!p.is_valid())
-        {
-            particles_.swap(previous_);
-            wall_impulse_ = previous_impulse;
-            wall_heat_ = previous_heat;
-            random_ = previous_random; // a failed step leaves no trace in the stream
-            return sim_core::StepResult{sim_core::StepStatus::InvalidState};
-        }
+        particles_.swap(previous_);
+        wall_impulse_ = previous_impulse;
+        wall_heat_ = previous_heat;
+        random_ = previous_random; // a failed step leaves no trace in the stream
+        return sim_core::StepResult{sim_core::StepStatus::InvalidState};
     }
 
     step_->advance();
