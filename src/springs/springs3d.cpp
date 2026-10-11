@@ -113,8 +113,13 @@ sim_core::StepStatus SpringWorld3D::validate() const
 
         // (2) The timestep must be inside this spring's symplectic stability
         //     limit, dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2 with
-        //     omega^2 = k/mu and gamma = c/(2 mu). A NECESSARY condition for the
-        //     network, not a sufficient one (see the 2D world's derivation).
+        //     omega^2 = k/mu and gamma = c/(2 mu), evaluated as the same
+        //     quantity rationalised, 2 / (gamma + hypot(gamma, omega)): it
+        //     covers a pure damper (dt < 1/gamma), with no cancellation for a
+        //     tiny stiffness and no overflow for a huge damping (issue #43; the
+        //     2D world gives the derivation). Skipped only when the spring has
+        //     neither stiffness nor damping. A NECESSARY condition for the
+        //     network, not a sufficient one.
         // As 1 / (1/ma + 1/mb): the product ma * mb overflowed for masses
         // near 1e160 and underflowed near 1e-170, so valid bodies were
         // reported invalid (issue #36). The reciprocals stay in range.
@@ -124,13 +129,12 @@ sim_core::StepStatus SpringWorld3D::validate() const
         {
             return sim_core::StepStatus::InvalidState;
         }
-        const math::Real omega_squared = spring.stiffness / reduced;
-        if (omega_squared > math::Real{0})
+        if (spring.stiffness > math::Real{0} || spring.damping > math::Real{0})
         {
+            const math::Real omega_squared = spring.stiffness / reduced;
             const math::Real gamma = spring.damping / (math::Real{2} * reduced);
-            const math::Real limit = math::Real{2} *
-                                     (std::sqrt(gamma * gamma + omega_squared) - gamma) /
-                                     omega_squared;
+            const math::Real limit =
+                math::Real{2} / (gamma + std::hypot(gamma, std::sqrt(omega_squared)));
             if (!(dt < limit))
             {
                 return sim_core::StepStatus::InvalidSettings;

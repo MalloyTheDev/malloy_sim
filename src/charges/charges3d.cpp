@@ -71,6 +71,17 @@ std::vector<math::Vec3> Charge3DWorld::compute_electric_accelerations() const
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
+            // A switched-off coupling (k == 0, or either particle neutral)
+            // contributes nothing at ANY separation, so the pair is skipped
+            // before 1/r^3 is formed, which overflows to +inf below about
+            // 1.8e-103 apart and turns a zero coupling into NaN (issue #49).
+            // Skipping is otherwise exact: the force would have been a zero.
+            const math::Real coupling =
+                charge_settings_.k * particles_[i].charge * particles_[j].charge;
+            if (coupling == math::Real{0})
+            {
+                continue;
+            }
             const math::Vec3 delta = particles_[j].position - particles_[i].position;
             const math::Real r2 = math::dot(delta, delta) + softening_squared;
             if (!(r2 > math::Real{0}))
@@ -83,8 +94,7 @@ std::vector<math::Vec3> Charge3DWorld::compute_electric_accelerations() const
             // F on j from i is +k q_i q_j delta / r^3, pointing from i toward j
             // when the product of the charges is positive: like charges repel,
             // the entire difference from gravity.
-            const math::Real scale =
-                charge_settings_.k * particles_[i].charge * particles_[j].charge * inv_r3;
+            const math::Real scale = coupling * inv_r3;
             const math::Vec3 force = delta * scale;
 
             accelerations[j] += force / particles_[j].mass;
@@ -114,6 +124,8 @@ sim_core::StepResult Charge3DWorld::step()
     previous_ = particles_;
 
     const math::Real dt = simulation_settings_.dt;
+    // Evaluated once, from the positions at the start of the step, and used
+    // for both half kicks below.
     const std::vector<math::Vec3> accelerations = compute_electric_accelerations();
 
     const math::Real field_magnitude = math::length(charge_settings_.magnetic);
@@ -122,26 +134,36 @@ sim_core::StepResult Charge3DWorld::step()
     {
         ChargedParticle3D& particle = particles_[i];
 
-        // (1) the electric kick, an acceleration applied for a time.
-        particle.velocity += accelerations[i] * dt;
-
-        // (2) the magnetic turn. Not a kick: rotating the velocity about the
-        //     field direction is the exact solution of dv/dt = (q/m)(v x B) for
-        //     a uniform B, so the speed is untouched and the component along B
-        //     is carried, which together make the motion helical. The rotation
-        //     vector is omega dt with omega = -(q/m) B, i.e. an angle
-        //     -(q |B| / m) dt about the field axis; from_axis_angle normalizes
-        //     the axis, so the field itself is passed as the axis.
+        // The magnetic turn is not a kick: rotating the velocity about the
+        // field direction is the exact solution of dv/dt = (q/m)(v x B) for a
+        // uniform B, so the speed is untouched and the component along B is
+        // carried, which together make the motion helical. The rotation vector
+        // is omega dt with omega = -(q/m) B, i.e. an angle -(q |B| / m) dt
+        // about the field axis; from_axis_angle normalizes the axis, so the
+        // field itself is passed as the axis.
         if (field_magnitude > math::Real{0} && particle.charge != math::Real{0})
         {
+            // (1) half the electric kick, (2) the turn, (3) the other half:
+            //     the symmetric order (issue #42), whose velocity fixed point
+            //     in crossed fields is exactly perpendicular to E, so the
+            //     guiding centre does not creep along the field as it did with
+            //     kick-then-rotate. Along B the turn does nothing, so there the
+            //     two halves add up to one kick.
+            const math::Vec3 half_kick = accelerations[i] * (dt * math::Real{0.5});
             const math::Real angle =
                 -(particle.charge / particle.mass) * field_magnitude * dt;
             const math::Quat turn = math::from_axis_angle(charge_settings_.magnetic, angle);
-            particle.velocity = math::rotate(turn, particle.velocity);
+            particle.velocity = math::rotate(turn, particle.velocity + half_kick) + half_kick;
+        }
+        else
+        {
+            // Nothing turns this particle: one whole kick, so a run without a
+            // magnetic turn is bit-identical to plain semi-implicit Euler.
+            particle.velocity += accelerations[i] * dt;
         }
     }
 
-    // (3) positions, from the updated velocities.
+    // (4) positions, from the updated velocities.
     for (ChargedParticle3D& particle : particles_)
     {
         particle.position += particle.velocity * dt;

@@ -29,14 +29,19 @@ public:
 
     // Advance by exactly one fixed step:
     //
-    //   1. add the ELECTRIC acceleration times dt to every velocity, which is
-    //      the pairwise Coulomb term plus the uniform field;
+    //   1. add HALF the ELECTRIC acceleration times dt to every velocity, which
+    //      is the pairwise Coulomb term plus the uniform field, evaluated once
+    //      from the positions at the start of the step;
     //   2. ROTATE every velocity about the magnetic-field direction by the
     //      angle -(q |B| / m) dt;
-    //   3. move every particle by the updated velocity * dt.
+    //   3. add the other half of the same electric kick;
+    //   4. move every particle by the updated velocity * dt.
     //
-    // Velocities before positions, so this is the same semi-implicit Euler as
-    // every other domain (docs/04).
+    // A particle that nothing turns (B == 0, or no charge) gets the whole kick
+    // at once, which keeps such a run bit-identical to plain semi-implicit
+    // Euler. Velocities before positions, so this is the same semi-implicit
+    // Euler as every other domain (docs/04), with the turn sandwiched in the
+    // kick.
     //
     // Step 2 is the 3D form of the exact magnetic turn. A magnetic force is
     // always perpendicular to the velocity, so it does no work and cannot
@@ -50,9 +55,13 @@ public:
     // component along B is carried exactly: circular motion across the field, uniform drift along it, which
     // together are a helix. This is the physics two dimensions cannot express.
     //
-    // As in 2D this is operator splitting: the electric and magnetic parts are
-    // applied in sequence, first order in dt in their interaction, exactly as
-    // the single kick in every other domain is.
+    // As in 2D this is operator splitting, and the symmetric order is what
+    // keeps crossed fields right (issue #42): across B the fixed point of the
+    // velocity map is exactly perpendicular to E, the continuum E x B / |B|^2
+    // scaled by (theta/2) cot(theta/2) with theta = -(q |B| / m) dt, where
+    // kick-then-rotate turned it by theta/2 and so crept against qE and gained
+    // energy without bound. Along B the turn does nothing, and the two halves
+    // add up to one kick, as they would with no field at all.
     //
     // On validation failure, before or after the update, the state is left
     // unchanged and the failing status is returned; this never throws.
@@ -61,7 +70,8 @@ public:
     // The acceleration on each particle from the pairwise Coulomb interaction
     // plus the uniform electric field. Exposed for testing, and it excludes the
     // magnetic term because that one is a rotation, not an acceleration applied
-    // for a time.
+    // for a time. A pair whose coupling k q_i q_j is exactly zero contributes
+    // nothing at any separation, as in 2D (issue #49).
     std::vector<math::Vec3> compute_electric_accelerations() const;
 
     const std::vector<ChargedParticle3D>& particles() const { return particles_; }
@@ -100,10 +110,17 @@ math::Real total_kinetic_energy3d(const std::vector<ChargedParticle3D>& particle
 math::Real total_potential_energy3d(const std::vector<ChargedParticle3D>& particles,
                                     const Charge3DSettings& settings);
 
-// Kinetic plus potential. Conserved to the integrator's accuracy when the
-// magnetic field is the only thing acting, because the rotation is exact and
-// changes no speed at all; with an electric field or pairwise forces it drifts
-// at the same order as every other domain here.
+// Kinetic plus potential. Conserved to rounding when the magnetic field is the
+// only thing acting, because the rotation is exact and changes no speed at all.
+// With a uniform electric field PERPENDICULAR to B it is bounded for the whole
+// run, an oscillation of amplitude about |q| |E|^2 dt / (2 |B|) for a charge
+// released from rest, with no secular term (issue #42; see the 2D
+// total_energy for the closed form). A component of E along B, or an electric
+// field with nothing turning the particle, is the projectile case of every
+// other domain: semi-implicit Euler under a constant force, which loses
+// m |a|^2 dt^2 / 2 a step, with a the part of the acceleration that is not
+// turned. Pairwise forces make it drift at the same order as every other
+// domain here.
 math::Real total_energy3d(const std::vector<ChargedParticle3D>& particles,
                           const Charge3DSettings& settings);
 } // namespace malloy::charges

@@ -63,7 +63,9 @@ public:
     // out of range, or a separation too large to square). Identical in meaning
     // to the 2D world's, and derived the same way: the per-spring symplectic
     // stability bound dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2 with
-    // omega^2 = k/mu and gamma = c/(2 mu).
+    // omega^2 = k/mu and gamma = c/(2 mu), evaluated as
+    // 2 / (gamma + hypot(gamma, omega)) so that it covers a pure damper
+    // (dt < 2 mu / c) without cancellation or overflow (issue #43).
     sim_core::StepStatus validate() const;
 
     // Advance by exactly one fixed step, in the fixed order the 2D world uses:

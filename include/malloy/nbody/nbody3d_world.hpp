@@ -32,6 +32,10 @@ public:
     // (docs/04).
     sim_core::StepResult step();
 
+    // Pairwise gravitational accelerations for the current state, with
+    // softening (docs/04), and the same guards as the 2D world: a coincident
+    // pair with no softening contributes nothing, and so does a pair whose
+    // couplings are exactly zero (G == 0), at any separation (issue #49).
     std::vector<math::Vec3> compute_accelerations() const;
 
     const std::vector<Body3D>& bodies() const { return bodies_; }

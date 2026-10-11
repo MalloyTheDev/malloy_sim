@@ -32,9 +32,13 @@ public:
     // softening (docs/04). accelerations[i] corresponds to bodies()[i].
     //
     // A pair whose softened separation is zero (coincident bodies with
-    // softening == 0) contributes nothing rather than dividing by zero, so the
-    // result stays finite for any state that passes validate(). Softening is
-    // still the intended way to keep close encounters well behaved.
+    // softening == 0) contributes nothing rather than dividing by zero, and so
+    // does a pair whose coupling G m_j is exactly zero (G == 0), at ANY
+    // separation: it is skipped before 1/r^3 is formed, which overflows to
+    // +inf below about 1.8e-103 apart (issue #49). Real gravity at such a
+    // range is a force too large to represent, and gives a non-finite result
+    // that step() reports as InvalidState. Softening is still the intended way
+    // to keep close encounters well behaved.
     std::vector<math::Vec2> compute_accelerations() const;
 
     // Advance the simulation by exactly one fixed step. On validation failure

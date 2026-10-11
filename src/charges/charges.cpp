@@ -84,6 +84,18 @@ std::vector<math::Vec2> ChargeWorld::compute_electric_accelerations() const
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
+            // A switched-off coupling (k == 0, or either particle neutral)
+            // contributes nothing at ANY separation, so the pair is skipped
+            // before 1/r^3 is formed. Below about 1.8e-103 apart, 1/r^3
+            // overflows to +inf, and zero times inf is NaN, which failed the
+            // step for two particles that do not interact at all (issue #49).
+            // Skipping is otherwise exact: the force would have been a zero.
+            const math::Real coupling =
+                charge_settings_.k * particles_[i].charge * particles_[j].charge;
+            if (coupling == math::Real{0})
+            {
+                continue;
+            }
             const math::Vec2 delta = particles_[j].position - particles_[i].position;
             const math::Real r2 = math::dot(delta, delta) + softening_squared;
             if (!(r2 > math::Real{0}))
@@ -96,8 +108,7 @@ std::vector<math::Vec2> ChargeWorld::compute_electric_accelerations() const
             // F on j from i is +k q_i q_j delta / r^3, pointing from i toward j
             // when the product of the charges is positive. That sign is the
             // entire difference from gravity: like charges repel.
-            const math::Real scale =
-                charge_settings_.k * particles_[i].charge * particles_[j].charge * inv_r3;
+            const math::Real scale = coupling * inv_r3;
             const math::Vec2 force = delta * scale;
 
             accelerations[j] += force / particles_[j].mass;
@@ -127,32 +138,46 @@ sim_core::StepResult ChargeWorld::step()
     previous_ = particles_;
 
     const math::Real dt = simulation_settings_.dt;
+    // Evaluated once, from the positions at the start of the step, and used
+    // for both half kicks below.
     const std::vector<math::Vec2> accelerations = compute_electric_accelerations();
 
     for (std::size_t i = 0; i < particles_.size(); ++i)
     {
         ChargedParticle2D& particle = particles_[i];
 
-        // (1) the electric kick, which is an acceleration applied for a time.
-        particle.velocity += accelerations[i] * dt;
-
-        // (2) the magnetic turn, which is not. See the header: applying this as
-        //     another kick would inflate the speed by sqrt(1 + (q b dt/m)^2)
-        //     every step. Rotating is exact, so the speed is untouched.
+        // The magnetic turn is not an acceleration applied for a time. See the
+        // header: applying it as another kick would inflate the speed by
+        // sqrt(1 + (q b dt/m)^2) every step. Rotating is exact, so the speed
+        // is untouched.
         //
-        //     The sign: with b positive and a positive charge, q(v x B) is
-        //     q*b*(v.y, -v.x), which turns a particle moving along +x toward
-        //     -y. That is clockwise, hence the minus.
+        // The sign: with b positive and a positive charge, q(v x B) is
+        // q*b*(v.y, -v.x), which turns a particle moving along +x toward -y.
+        // That is clockwise, hence the minus.
         if (charge_settings_.magnetic != math::Real{0} &&
             particle.charge != math::Real{0})
         {
+            // (1) half the electric kick, (2) the turn, (3) the other half:
+            //     the symmetric order (issue #42). Kick-then-rotate has a
+            //     velocity fixed point turned by half a step's angle away from
+            //     the E x B drift, so in crossed fields the guiding centre crept
+            //     against qE and the energy grew without bound. Sandwiching the
+            //     turn puts the fixed point exactly perpendicular to E.
+            const math::Vec2 half_kick = accelerations[i] * (dt * math::Real{0.5});
             const math::Real angle =
                 -(particle.charge * charge_settings_.magnetic / particle.mass) * dt;
-            particle.velocity = rotate(particle.velocity, angle);
+            particle.velocity = rotate(particle.velocity + half_kick, angle) + half_kick;
+        }
+        else
+        {
+            // Nothing turns this particle, so the two halves would add up to
+            // one kick. Applied as one, so a run without a magnetic turn is
+            // bit-identical to plain semi-implicit Euler.
+            particle.velocity += accelerations[i] * dt;
         }
     }
 
-    // (3) positions, from the updated velocities.
+    // (4) positions, from the updated velocities.
     for (ChargedParticle2D& particle : particles_)
     {
         particle.position += particle.velocity * dt;

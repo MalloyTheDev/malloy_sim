@@ -96,7 +96,12 @@ public:
     // geometrically, and until the separation reaches the range above nothing
     // reports that either. The bound is
     // dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2 with omega^2 = k/mu
-    // and gamma = c/(2 mu), reducing to dt < 2/omega when undamped.
+    // and gamma = c/(2 mu), reducing to dt < 2/omega when undamped. It is
+    // evaluated as the same quantity rationalised,
+    // dt < 2 / (gamma + hypot(gamma, omega)), which also covers a PURE DAMPER
+    // (k == 0, c > 0), whose limit is dt < 1/gamma = 2 mu / c, and has no
+    // cancellation for a tiny stiffness and no overflow for a huge damping
+    // (issue #43). Only a spring with neither stiffness nor damping is exempt.
     //
     // The stability check is per spring, which is NECESSARY but not sufficient
     // for a network: a spring that is unstable alone is unstable in company,

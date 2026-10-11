@@ -61,6 +61,17 @@ std::vector<math::Vec3> NBody3DWorld::compute_accelerations() const
     {
         for (std::size_t j = i + 1; j < count; ++j)
         {
+            // The pull on i scales with m_j and the pull on j with m_i. A pair
+            // with both couplings zero (g == 0) contributes nothing at any
+            // separation, and is skipped before 1/r^3 is formed: below about
+            // 1.8e-103 apart that overflows to +inf, and zero times inf is NaN
+            // (issue #49). Otherwise exact, since the skipped terms are zeros.
+            const math::Real pull_on_i = g * bodies_[j].mass;
+            const math::Real pull_on_j = g * bodies_[i].mass;
+            if (pull_on_i == math::Real{0} && pull_on_j == math::Real{0})
+            {
+                continue;
+            }
             const math::Vec3 delta = bodies_[j].position - bodies_[i].position;
             const math::Real r2 = math::dot(delta, delta) + softening_squared;
             if (!(r2 > math::Real{0}))
@@ -70,8 +81,8 @@ std::vector<math::Vec3> NBody3DWorld::compute_accelerations() const
             const math::Real inv_r = math::Real{1} / std::sqrt(r2);
             const math::Real inv_r3 = inv_r * inv_r * inv_r;
 
-            accelerations[i] += delta * (g * bodies_[j].mass * inv_r3);
-            accelerations[j] -= delta * (g * bodies_[i].mass * inv_r3);
+            accelerations[i] += delta * (pull_on_i * inv_r3);
+            accelerations[j] -= delta * (pull_on_j * inv_r3);
         }
     }
 

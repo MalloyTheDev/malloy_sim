@@ -315,6 +315,35 @@ int main()
         MALLOY_CHECK_NEAR(e, 0.0, eps);
     }
 
+    // --- Issue #49: g == 0 means no gravity at ANY separation, not only at
+    //     exact coincidence. Below about 1.8e-103, 1/r^3 overflows to +inf, and
+    //     a zero coupling times inf is NaN, so two bodies 1e-110 apart failed
+    //     the step with g == 0. A pair is now skipped when its coupling g m_j
+    //     is exactly zero, before 1/r^3 is formed. ---
+    {
+        const Real gap = 1e-110; // r^3 underflows, so 1/r^3 is +inf
+        const std::vector<Body2D> b = {Body2D{Vec2{0.0, 0.0}, Vec2{1.0, 0.0}, 1.0},
+                                       Body2D{Vec2{gap, 0.0}, Vec2{-1.0, 0.0}, 1.0}};
+
+        NBodyWorld off{SimulationSettings{0.01}, NBodySettings{0.0, 0.0}, b};
+        const auto acc = off.compute_accelerations();
+        MALLOY_CHECK_VEC2_NEAR(acc[0], Vec2(0.0, 0.0), 0.0);
+        MALLOY_CHECK_VEC2_NEAR(acc[1], Vec2(0.0, 0.0), 0.0);
+        MALLOY_CHECK_TRUE(off.step().ok());
+        // Free flight: the velocities are untouched, the positions move by v dt.
+        MALLOY_CHECK_VEC2_NEAR(off.bodies()[0].velocity, Vec2(1.0, 0.0), 0.0);
+        MALLOY_CHECK_VEC2_NEAR(off.bodies()[1].velocity, Vec2(-1.0, 0.0), 0.0);
+        MALLOY_CHECK_VEC2_NEAR(off.bodies()[0].position, Vec2(0.01, 0.0), 0.0);
+
+        // The skip is for a ZERO coupling only. Real gravity at this range is
+        // a force too large to represent, and the step still fails and rolls
+        // back, as any other non-finite step does.
+        NBodyWorld on{SimulationSettings{0.01}, NBodySettings{1.0, 0.0}, b};
+        MALLOY_CHECK_TRUE(on.step().status == StepStatus::InvalidState);
+        MALLOY_CHECK_VEC2_NEAR(on.bodies()[1].position, Vec2(gap, 0.0), 0.0);
+        MALLOY_CHECK_EQ(on.tick_count(), std::uint64_t{0});
+    }
+
     // --- Issue #8: the integrator is semi-implicit (symplectic) Euler, not
     //     explicit Euler. One hand-computable step pins the order exactly:
     //     two unit masses 1 apart with G=1 and no softening give a = (+-1, 0),
@@ -687,6 +716,33 @@ int main()
             MALLOY_CHECK_TRUE(malloy::math::is_finite(w.bodies()[0].position));
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(w.bodies()[0].velocity,
                                                         Vec3{}, 0.0));
+        }
+
+        // --- Issue #49 in 3D: g == 0 contributes nothing at a separation of
+        //     1e-110, where 1/r^3 is +inf, and real gravity there still fails
+        //     the step and rolls back. Off the axes, so no component is
+        //     exactly zero by construction. ---
+        {
+            const Real gap = 1e-110;
+            const std::vector<Body3D> b = {
+                Body3D{Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 2.0, -0.5}, 1.0},
+                Body3D{Vec3{gap, gap, gap}, Vec3{-1.0, 0.5, 0.25}, 2.0}};
+
+            NBody3DWorld off{SimulationSettings{0.01}, NBodySettings{0.0, 0.0}, b};
+            const auto acc = off.compute_accelerations();
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(acc[0], Vec3{}, 0.0));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(acc[1], Vec3{}, 0.0));
+            MALLOY_CHECK_TRUE(off.step().ok());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(off.bodies()[0].velocity,
+                                                        Vec3{1.0, 2.0, -0.5}, 0.0));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(off.bodies()[1].velocity,
+                                                        Vec3{-1.0, 0.5, 0.25}, 0.0));
+
+            NBody3DWorld on{SimulationSettings{0.01}, NBodySettings{1.0, 0.0}, b};
+            MALLOY_CHECK_TRUE(on.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(on.bodies()[1].position,
+                                                        Vec3{gap, gap, gap}, 0.0));
+            MALLOY_CHECK_EQ(on.tick_count(), std::uint64_t{0});
         }
 
         // --- Determinism, and a failing step leaving the state untouched. ---

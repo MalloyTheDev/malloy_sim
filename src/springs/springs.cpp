@@ -168,7 +168,22 @@ sim_core::StepStatus SpringWorld::validate() const
         //
         // With reduced mass mu, omega^2 = k/mu and gamma = c/(2 mu), the bound
         // is dt < 2 (sqrt(gamma^2 + omega^2) - gamma) / omega^2, which reduces
-        // to the familiar dt < 2/omega when the damping is zero.
+        // to the familiar dt < 2/omega when the damping is zero. It is
+        // evaluated rationalised, as the same quantity
+        //
+        //     dt < 2 / (gamma + hypot(gamma, omega)),
+        //
+        // for three reasons (issue #43). It holds for a PURE DAMPER (k = 0,
+        // c > 0), where it gives dt < 1/gamma: semi-implicit Euler multiplies
+        // a damper's axial relative velocity by (1 - 2 gamma dt) every step,
+        // which grows past that. It has no cancellation, which made
+        // sqrt(gamma^2 + omega^2) - gamma round to zero for a tiny stiffness
+        // and refused a stable world. And hypot does not overflow where
+        // gamma^2 would for a huge damping, which made the limit +inf and let
+        // a hopeless timestep through to fail the first step as InvalidState.
+        //
+        // Only a spring with neither stiffness nor damping has no limit: it
+        // exerts no force at all.
         //
         // This is a NECESSARY condition, not a sufficient one. A network's
         // stiffness matrix is a sum of positive-semidefinite per-spring terms,
@@ -185,13 +200,12 @@ sim_core::StepStatus SpringWorld::validate() const
         {
             return sim_core::StepStatus::InvalidState;
         }
-        const math::Real omega_squared = spring.stiffness / reduced;
-        if (omega_squared > math::Real{0})
+        if (spring.stiffness > math::Real{0} || spring.damping > math::Real{0})
         {
+            const math::Real omega_squared = spring.stiffness / reduced;
             const math::Real gamma = spring.damping / (math::Real{2} * reduced);
             const math::Real limit =
-                math::Real{2} *
-                (std::sqrt(gamma * gamma + omega_squared) - gamma) / omega_squared;
+                math::Real{2} / (gamma + std::hypot(gamma, std::sqrt(omega_squared)));
             if (!(dt < limit))
             {
                 return sim_core::StepStatus::InvalidSettings;

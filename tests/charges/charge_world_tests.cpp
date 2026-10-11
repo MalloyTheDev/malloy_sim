@@ -251,19 +251,32 @@ int main()
 
     // --- E cross B drift. In crossed fields the guiding centre marches at
     //     |E|/b in the direction (E.y/b, -E.x/b), and in the continuum that
-    //     velocity depends on NEITHER the charge NOR the mass.
+    //     velocity depends on NEITHER the charge NOR the mass, and has no
+    //     component along E at all.
     //
-    //     Discretely it depends on both, and the departure is derivable rather
-    //     than a tolerance. The velocity map has a fixed point at
-    //     v_d = (I - R)^-1 R a dt, which is the continuum drift ROTATED by
-    //     half a step's angle and inflated by the same (theta/2)/sin(theta/2)
-    //     polygon factor as the cyclotron radius. Both corrections carry
-    //     theta = -q b dt / m, so the independence from q and m survives only
-    //     to order dt^2.
+    //     The step is half an electric kick, the exact turn, then the other
+    //     half (issue #42), so the velocity map is v' = R (v + a dt/2) + a dt/2,
+    //     with a = qE/m and R the turn by theta = -q b dt / m. Its fixed point
+    //     is v_d = (I - R)^-1 (I + R) a dt/2, and since (1 + e^(i theta)) /
+    //     (1 - e^(i theta)) = i cot(theta/2), that is the continuum drift
+    //     SCALED by (theta/2) cot(theta/2) and not turned at all. So, exactly:
     //
-    //     Asserted exactly, per particle, at 1e-9. The two particles below
-    //     gyrate at rates differing by a factor of three, and their drifts
-    //     differ in the seventh digit, which is the point. ---
+    //       - the drift is perpendicular to E, and the guiding centre never
+    //         moves along the field, so the particle never climbs the potential;
+    //       - the scale factor is even in theta, so a reversed charge drifts the
+    //         same way at the same speed;
+    //       - it is 1 - theta^2/12 + ..., so the speed depends on |q|/m only at
+    //         order dt^2.
+    //
+    //     Kick-then-rotate, the order before #42, has the fixed point
+    //     (I - R)^-1 R a dt instead: the continuum drift turned by theta/2, so
+    //     the guiding centre also crept against qE at |a| dt/2. For the light
+    //     particle below that is 0.12 along E over this run; the bound asserted
+    //     on it here is 1e-10.
+    //
+    //     Asserted per particle at 1e-9. The first two gyrate at rates differing
+    //     by a factor of three, and their drift speeds differ in the seventh
+    //     digit, which is the point. ---
     {
         ChargeSettings s;
         s.k = 0.0;
@@ -277,42 +290,122 @@ int main()
             Real charge;
         };
         // Released from rest, so each traces a cycloid about a drifting centre.
-        const Case cases[] = {{Vec2{0.0, 0.0}, 1.0, 1.0}, {Vec2{0.0, 40.0}, 3.0, 1.0}};
+        // The third is the first with its charge reversed: it gyrates the other
+        // way round.
+        const Case cases[] = {{Vec2{0.0, 0.0}, 1.0, 1.0},
+                              {Vec2{0.0, 40.0}, 3.0, 1.0},
+                              {Vec2{0.0, -40.0}, 1.0, -1.0}};
 
-        // Three turns of the light particle, which is exactly one of the heavy
-        // one, so both cycloids close and the displacement is the drift alone.
+        // Three turns of each light particle, which is exactly one of the heavy
+        // one, so every cycloid closes and the displacement is the drift alone:
+        // with v_n = v_d + R^n (v_0 - v_d), the sum of R^n over whole turns is
+        // zero.
         const int steps = 3 * steps_per_turn;
         const Real elapsed = static_cast<Real>(steps) * turn_dt;
 
         ChargeWorld w{SimulationSettings{turn_dt}, s,
                       {charge_at(cases[0].start, Vec2{}, cases[0].mass, cases[0].charge),
-                       charge_at(cases[1].start, Vec2{}, cases[1].mass, cases[1].charge)}};
+                       charge_at(cases[1].start, Vec2{}, cases[1].mass, cases[1].charge),
+                       charge_at(cases[2].start, Vec2{}, cases[2].mass, cases[2].charge)}};
         for (int i = 0; i < steps; ++i)
         {
             MALLOY_CHECK_TRUE(w.step().ok());
         }
 
         const Vec2 continuum{s.electric.y / s.magnetic, -s.electric.x / s.magnetic};
-        for (std::size_t i = 0; i < 2; ++i)
+        for (std::size_t i = 0; i < 3; ++i)
         {
             const Real theta =
                 -cases[i].charge * s.magnetic * turn_dt / cases[i].mass;
             const Real half = theta / 2.0;
-            const Real c = std::cos(half);
-            const Real sn = std::sin(half);
-            const Real polygon = half / sn;
-            const Vec2 drift{(continuum.x * c - continuum.y * sn) * polygon,
-                             (continuum.x * sn + continuum.y * c) * polygon};
+            const Vec2 drift = continuum * (half / std::tan(half));
 
             MALLOY_CHECK_VEC2_NEAR(w.particles()[i].position,
                                    cases[i].start + drift * elapsed, 1e-9);
+
+            // Nothing along E, which points along y here. The exact answer is
+            // zero, and what is left is rounding: 3000 position updates on
+            // coordinates below 64, each off by at most half an ulp (3.6e-15),
+            // 1.1e-11 in all, plus each velocity rounding of a few ulp of a
+            // speed below 4, which the turn carries round a gyration of radius
+            // |error| / omega rather than letting it accumulate, at most
+            // 3000 * 4 * 8.9e-16 / (1/3) = 3.2e-11. Measured: 1.6e-12.
+            MALLOY_CHECK_NEAR(w.particles()[i].position.y, cases[i].start.y, 1e-10);
         }
 
-        // The continuum claim, correctly qualified: the two drifts agree to
-        // order dt^2, which here is about 3e-6 relative.
-        MALLOY_CHECK_NEAR(w.particles()[0].position.x / elapsed, continuum.x, 1e-4);
-        MALLOY_CHECK_NEAR(
-            (w.particles()[1].position.y - 40.0) / elapsed, continuum.y, 1e-2);
+        // The reversed charge drifts exactly as far: the scale is even in theta.
+        MALLOY_CHECK_NEAR(w.particles()[2].position.x, w.particles()[0].position.x, 1e-10);
+
+        // The continuum claim, correctly qualified: the drift speeds agree with
+        // |E|/b to order dt^2, theta^2/12 relative, which is 3.3e-6 for the
+        // light particles and 3.7e-7 for the heavy one, on a speed of 2.
+        MALLOY_CHECK_NEAR(w.particles()[0].position.x / elapsed, continuum.x, 1e-5);
+        MALLOY_CHECK_NEAR(w.particles()[1].position.x / elapsed, continuum.x, 1e-6);
+    }
+
+    // --- Issue #42: in crossed fields the energy stays BOUNDED, for as long as
+    //     the run lasts. In the continuum a charge released in uniform E and b
+    //     gyrates about a centre that drifts perpendicular to E, so its
+    //     potential -q E.r is bounded and its energy is conserved.
+    //     Kick-then-rotate gained (qE)^2 dt / (2m) per unit time, without
+    //     bound: here that is 0.0133 per unit time, 13 by the end.
+    //
+    //     The half-kick order's error has a closed form. From rest,
+    //     v_n = (I - R^n) v_d, with v_d . a = 0 (above); summing the positions
+    //     and using (1 + e^(i theta)) / (1 - e^(i theta)) = i cot(theta/2) once
+    //     more, the energy error after n steps is exactly
+    //
+    //         E_n - E_0 = -m |a|^2 (dt/2)^2 cot(theta/2) sin(n theta)
+    //
+    //     with a = qE/m and theta = -q b dt / m: a pure oscillation at the
+    //     cyclotron frequency, of amplitude m |a|^2 (dt/2)^2 |cot(theta/2)|,
+    //     about |q| |E|^2 dt / (2 b), and no secular term at all.
+    //
+    //     Asserted at every one of 100000 steps (265 gyrations), with q, m, E
+    //     and b all off unity, the charge negative and E off the axes, so
+    //     nothing cancels by accident. ---
+    {
+        ChargeSettings s;
+        s.k = 0.0;
+        s.magnetic = 1.25;
+        s.electric = Vec2{0.6, -0.8};
+        const Real mass = 1.5;
+        const Real charge = -2.0;
+        const Real dt = 0.01;
+        const int steps = 100000;
+
+        const std::vector<ChargedParticle2D> start = {
+            charge_at(Vec2{3.0, -2.0}, Vec2{}, mass, charge)};
+        const Real e0 = total_energy(start, s);
+
+        const Real a2 = (charge / mass) * (charge / mass) * malloy::math::dot(s.electric, s.electric);
+        const Real theta = -charge * s.magnetic * dt / mass;
+        const Real cot_half = 1.0 / std::tan(theta / 2.0);
+        const Real amplitude = mass * a2 * (dt / 2.0) * (dt / 2.0) * std::abs(cot_half);
+        // The amplitude, from the small-angle form: |q| |E|^2 dt / (2 b) = 0.008.
+        MALLOY_CHECK_NEAR(amplitude, 0.008, 1e-6);
+
+        ChargeWorld w{SimulationSettings{dt}, s, start};
+        Real worst = 0.0;
+        Real worst_vs_closed = 0.0;
+        for (int n = 1; n <= steps; ++n)
+        {
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const Real error = total_energy(w.particles(), s) - e0;
+            const Real closed = -mass * a2 * (dt / 2.0) * (dt / 2.0) * cot_half *
+                                std::sin(static_cast<Real>(n) * theta);
+            worst = std::fmax(worst, std::abs(error));
+            worst_vs_closed = std::fmax(worst_vs_closed, std::abs(error - closed));
+        }
+        // The closed form holds to rounding. The particle drifts about 800
+        // along E x B by the end, where a position carries an ulp of 1.1e-13,
+        // and 100000 position updates can accumulate at most N times half
+        // that, 5.7e-9, which q |E| = 2 turns into 1.1e-8 of energy. Velocity
+        // rounding does not accumulate the same way: the turn carries each
+        // error round a gyration instead. Measured: 1.2e-11.
+        MALLOY_CHECK_TRUE(worst_vs_closed < 2e-8);
+        // So the error never leaves the amplitude: bounded, not drifting.
+        MALLOY_CHECK_TRUE(worst < amplitude + 2e-8);
     }
 
     // --- Coulomb is SIGNED, which is the whole difference from gravity. Like
@@ -503,6 +596,74 @@ int main()
         MALLOY_CHECK_TRUE(w.step().ok());
         // 0.7 came only from the initial velocity: nothing acts along y here.
         MALLOY_CHECK_NEAR(w.particles()[0].velocity.y, 0.7, 0.0);
+    }
+
+    // --- With no magnetic turn the electric kick is ONE full kick, bit for
+    //     bit, not the two half kicks that sandwich a turn (issue #42). So a run
+    //     with b = 0, or a neutral particle, is still exactly the plain
+    //     semi-implicit Euler of every other domain. The numbers are chosen so
+    //     the two halves round differently from the whole, and that is asserted
+    //     first, so this cannot pass vacuously. ---
+    {
+        ChargeSettings s;
+        s.k = 0.0;
+        s.electric = Vec2{0.3, -0.7}; // and b = 0
+        const Real dt = 0.1;
+        const Real mass = 0.9;
+        const Real charge = 1.3;
+        const Vec2 v0{0.1, 0.2};
+        const Vec2 x0{-0.4, 0.25};
+
+        const Vec2 a = s.electric * (charge / mass);
+        const Vec2 whole = v0 + a * dt;
+        const Vec2 halves = (v0 + a * (dt / 2.0)) + a * (dt / 2.0);
+        MALLOY_CHECK_TRUE(halves.x != whole.x || halves.y != whole.y);
+
+        ChargeWorld w{SimulationSettings{dt}, s, {charge_at(x0, v0, mass, charge)}};
+        MALLOY_CHECK_TRUE(w.step().ok());
+        MALLOY_CHECK_VEC2_NEAR(w.particles()[0].velocity, whole, 0.0);
+        MALLOY_CHECK_VEC2_NEAR(w.particles()[0].position, x0 + whole * dt, 0.0);
+    }
+
+    // --- Issue #49: a switched-off pair interaction contributes nothing at ANY
+    //     separation. Below about 1.8e-103, 1/r^3 overflows to +inf, and a zero
+    //     coupling times inf is NaN, so k = 0, or a neutral particle, still
+    //     failed the step for two particles 1e-110 apart, against the settings'
+    //     own promise that k = 0 switches the interaction off. A pair is now
+    //     skipped when k q_i q_j is exactly zero, before 1/r^3 is formed. ---
+    {
+        const Real gap = 1e-110; // r^3 underflows, so 1/r^3 is +inf
+        const std::vector<ChargedParticle2D> both_charged = {
+            charge_at(Vec2{0.0, 0.0}, Vec2{1.0, 0.0}, 1.0, 1.0),
+            charge_at(Vec2{gap, 0.0}, Vec2{-1.0, 0.0}, 1.0, 1.0)};
+        const std::vector<ChargedParticle2D> one_neutral = {
+            charge_at(Vec2{0.0, 0.0}, Vec2{1.0, 0.0}, 1.0, 0.0),
+            charge_at(Vec2{gap, 0.0}, Vec2{-1.0, 0.0}, 1.0, 1.0)};
+
+        ChargeSettings off;
+        off.k = 0.0;
+        ChargeSettings on; // k = 1
+
+        for (const ChargeWorld& start : {ChargeWorld{SimulationSettings{0.01}, off, both_charged},
+                                         ChargeWorld{SimulationSettings{0.01}, on, one_neutral}})
+        {
+            ChargeWorld w = start;
+            const auto a = w.compute_electric_accelerations();
+            MALLOY_CHECK_VEC2_NEAR(a[0], Vec2(0.0, 0.0), 0.0);
+            MALLOY_CHECK_VEC2_NEAR(a[1], Vec2(0.0, 0.0), 0.0);
+            MALLOY_CHECK_TRUE(w.step().ok());
+            // Free flight: nothing acted, so the velocities are untouched.
+            MALLOY_CHECK_VEC2_NEAR(w.particles()[0].velocity, Vec2(1.0, 0.0), 0.0);
+            MALLOY_CHECK_VEC2_NEAR(w.particles()[1].velocity, Vec2(-1.0, 0.0), 0.0);
+        }
+
+        // The skip is for a ZERO coupling only. A real one at this range is a
+        // force too large to represent, and the step still fails and rolls
+        // back, as any other non-finite step does.
+        ChargeWorld real{SimulationSettings{0.01}, on, both_charged};
+        MALLOY_CHECK_TRUE(real.step().status == StepStatus::InvalidState);
+        MALLOY_CHECK_VEC2_NEAR(real.particles()[1].position, Vec2(gap, 0.0), 0.0);
+        MALLOY_CHECK_EQ(real.tick_count(), std::uint64_t{0});
     }
 
     // --- Energy under the magnetic field alone is exactly conserved, because
@@ -848,6 +1009,145 @@ int main()
             field_only.k = 0.0;
             field_only.electric = Vec3{2.0, 0.0, 0.0};
             MALLOY_CHECK_NEAR(total_potential_energy3d(two, field_only), -10.0, 1e-12);
+        }
+
+        // --- Issue #42 in 3D: crossed fields, with the field TILTED, so the
+        //     plane of gyration is not a coordinate plane. B = (1, 2, 2), so
+        //     |B| = 3, and E = (2, -1, 0) is perpendicular to it. Released from
+        //     rest the particle stays in the plane across B, where the turn
+        //     about B is a plane rotation by theta = -(q |B| / m) dt, so the 2D
+        //     analysis carries over unchanged:
+        //
+        //       - the drift is the continuum E x B / |B|^2 scaled by
+        //         (theta/2) cot(theta/2), with nothing along E;
+        //       - the energy error is exactly
+        //         -m |a|^2 (dt/2)^2 cot(theta/2) sin(n theta), and
+        //         cot(theta/2) sin(n theta) is even in theta, so the sense of
+        //         rotation about B does not matter.
+        //
+        //     dt divides the period (q |B| / m = 6, so a turn is 2 pi / 6), and
+        //     100 whole turns are run, so the final position is the drift alone.
+        //     Kick-then-rotate gained (qE)^2 dt / (2m) = 0.0079 per unit time,
+        //     0.82 over this run, against an amplitude of 0.0013. ---
+        {
+            Charge3DSettings settings;
+            settings.k = 0.0;
+            settings.magnetic = Vec3{1.0, 2.0, 2.0};
+            settings.electric = Vec3{2.0, -1.0, 0.0};
+            const Real mass = 0.75;
+            const Real charge = 1.5;
+            const Real b = 3.0;
+            const Real dt = two_pi / (6.0 * static_cast<Real>(steps_per_turn));
+            const int steps = 100 * steps_per_turn;
+
+            const Vec3 x0{0.5, -1.0, 2.0};
+            const std::vector<ChargedParticle3D> start = {charge3(x0, Vec3{}, mass, charge)};
+            const Real e0 = total_energy3d(start, settings);
+
+            const Real a2 = (charge / mass) * (charge / mass) *
+                            malloy::math::dot(settings.electric, settings.electric);
+            const Real theta = -(charge * b / mass) * dt;
+            const Real cot_half = 1.0 / std::tan(theta / 2.0);
+            const Real amplitude = mass * a2 * (dt / 2.0) * (dt / 2.0) * std::abs(cot_half);
+            // Small-angle form: |q| |E|^2 dt / (2 |B|) = 1.5 * 5 * dt / 6.
+            MALLOY_CHECK_NEAR(amplitude, 1.5 * 5.0 * dt / 6.0, 1e-8);
+
+            Charge3DWorld world{SimulationSettings{dt}, settings, start};
+            Real worst = 0.0;
+            Real worst_vs_closed = 0.0;
+            for (int n = 1; n <= steps; ++n)
+            {
+                MALLOY_CHECK_TRUE(world.step().ok());
+                const Real error = total_energy3d(world.particles(), settings) - e0;
+                const Real closed = -mass * a2 * (dt / 2.0) * (dt / 2.0) * cot_half *
+                                    std::sin(static_cast<Real>(n) * theta);
+                worst = std::fmax(worst, std::abs(error));
+                worst_vs_closed = std::fmax(worst_vs_closed, std::abs(error - closed));
+            }
+            // Rounding only: the particle ends about 78 from its start, where an
+            // ulp is 1.4e-14, and 100000 updates can accumulate at most N times
+            // half that, 7.1e-10, which q |E| = 3.4 turns into 2.4e-9 of energy.
+            // Measured: 2.2e-12.
+            MALLOY_CHECK_TRUE(worst_vs_closed < 1e-8);
+            MALLOY_CHECK_TRUE(worst < amplitude + 1e-8);
+
+            // Whole turns, so the displacement is the drift alone, and it is
+            // exactly perpendicular to E.
+            //
+            // Across B the rounding is bounded as in 2D, by the 7.1e-10 above.
+            // ALONG B it is not: the turn leaves that component of a velocity
+            // error alone, so a few ulp a step (about 4 * 1.1e-16 * 1.5) can
+            // build up linearly and its integral quadratically, at most about
+            // N^2 dt / 2 times that, 3.5e-9. Measured: 1.8e-10, all of it along
+            // B. Along E, therefore, the bound is the tight one.
+            const Real elapsed = static_cast<Real>(steps) * dt;
+            const Vec3 continuum =
+                malloy::math::cross(settings.electric, settings.magnetic) / (b * b);
+            const Real half = theta / 2.0;
+            const Vec3 drift = continuum * (half / std::tan(half));
+            const Vec3 moved = world.particles().front().position - x0;
+            MALLOY_CHECK_TRUE(approx_equal(moved, drift * elapsed, 1e-8));
+            const Vec3 along_e = settings.electric / malloy::math::length(settings.electric);
+            MALLOY_CHECK_NEAR(malloy::math::dot(moved, along_e), 0.0, 1e-9);
+        }
+
+        // --- With no magnetic turn the electric kick is one full kick, bit for
+        //     bit, as in 2D: a 3D run with B = 0 is unchanged by issue #42. The
+        //     numbers make the two halves round differently from the whole. ---
+        {
+            Charge3DSettings settings;
+            settings.k = 0.0;
+            settings.electric = Vec3{0.3, -0.7, 0.45}; // and B = 0
+            const Real dt = 0.1;
+            const Real mass = 0.9;
+            const Real charge = 1.3;
+            const Vec3 v0{0.1, 0.2, -0.3};
+            const Vec3 x0{-0.4, 0.25, 1.5};
+
+            const Vec3 a = settings.electric * (charge / mass);
+            const Vec3 whole = v0 + a * dt;
+            const Vec3 halves = (v0 + a * (dt / 2.0)) + a * (dt / 2.0);
+            MALLOY_CHECK_FALSE(approx_equal(halves, whole, 0.0));
+
+            Charge3DWorld world{SimulationSettings{dt}, settings, {charge3(x0, v0, mass, charge)}};
+            MALLOY_CHECK_TRUE(world.step().ok());
+            MALLOY_CHECK_TRUE(approx_equal(world.particles().front().velocity, whole, 0.0));
+            MALLOY_CHECK_TRUE(approx_equal(world.particles().front().position, x0 + whole * dt, 0.0));
+        }
+
+        // --- Issue #49 in 3D: k = 0, or a neutral particle, contributes nothing
+        //     at a separation of 1e-110, where 1/r^3 is +inf; a real coupling
+        //     there still fails the step and rolls back. ---
+        {
+            const Real gap = 1e-110;
+            const std::vector<ChargedParticle3D> both_charged = {
+                charge3(Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}, 1.0, 1.0),
+                charge3(Vec3{0.0, gap, 0.0}, Vec3{-1.0, 0.0, 0.0}, 1.0, 1.0)};
+            const std::vector<ChargedParticle3D> one_neutral = {
+                charge3(Vec3{0.0, 0.0, 0.0}, Vec3{1.0, 0.0, 0.0}, 1.0, 1.0),
+                charge3(Vec3{0.0, gap, 0.0}, Vec3{-1.0, 0.0, 0.0}, 1.0, 0.0)};
+
+            Charge3DSettings off;
+            off.k = 0.0;
+            Charge3DSettings on; // k = 1
+
+            for (const Charge3DWorld& start :
+                 {Charge3DWorld{SimulationSettings{0.01}, off, both_charged},
+                  Charge3DWorld{SimulationSettings{0.01}, on, one_neutral}})
+            {
+                Charge3DWorld w = start;
+                const auto a = w.compute_electric_accelerations();
+                MALLOY_CHECK_TRUE(approx_equal(a[0], Vec3{}, 0.0));
+                MALLOY_CHECK_TRUE(approx_equal(a[1], Vec3{}, 0.0));
+                MALLOY_CHECK_TRUE(w.step().ok());
+                MALLOY_CHECK_TRUE(approx_equal(w.particles()[0].velocity, Vec3{1.0, 0.0, 0.0}, 0.0));
+                MALLOY_CHECK_TRUE(approx_equal(w.particles()[1].velocity, Vec3{-1.0, 0.0, 0.0}, 0.0));
+            }
+
+            Charge3DWorld real{SimulationSettings{0.01}, on, both_charged};
+            MALLOY_CHECK_TRUE(real.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_TRUE(approx_equal(real.particles()[1].position, Vec3{0.0, gap, 0.0}, 0.0));
+            MALLOY_CHECK_EQ(real.tick_count(), std::uint64_t{0});
         }
     }
 

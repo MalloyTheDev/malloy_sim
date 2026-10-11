@@ -595,8 +595,10 @@ int main()
         MALLOY_CHECK_TRUE(pair_world(8.1e6, 0.0).validate() ==
                           StepStatus::InvalidSettings);
 
-        // Zero stiffness has no limit at all: there is no oscillation to be
-        // unstable.
+        // Zero stiffness AND zero damping has no limit at all: nothing
+        // oscillates and nothing decays, so nothing can overshoot. Zero
+        // stiffness alone is not enough; a pure damper has a limit of its own
+        // (issue #43, below).
         MALLOY_CHECK_TRUE(pair_world(0.0, 0.0).validate() == StepStatus::Ok);
 
         // Damping TIGHTENS the bound rather than helping, which is the part
@@ -618,6 +620,119 @@ int main()
                       {body_at(Vec2{0.0, 0.0}, Vec2{}, 1.0),
                        body_at(Vec2{1.0, 0.0}, Vec2{}, 1.0)}};
         MALLOY_CHECK_TRUE(u.validate() == StepStatus::Ok);
+    }
+
+    // --- Issue #43: a pure damper (stiffness 0, damping above 0) has a limit
+    //     too, and the gate now checks it. Semi-implicit Euler multiplies a
+    //     damper's axial relative velocity by (1 - 2 gamma dt) every step, with
+    //     gamma = c / (2 mu), so it is stable only for dt < 1/gamma = 2 mu / c,
+    //     the omega -> 0 limit of the spring's own bound. The gate ran only
+    //     when the stiffness was positive, so a damper past that limit grew
+    //     geometrically while every step reported Ok: c = 100 at dt = 0.1
+    //     multiplied the relative velocity by -19 a step and reached a kinetic
+    //     energy of 5e101 in 40 steps.
+    //
+    //     The bound is now evaluated as 2 / (gamma + hypot(gamma, omega)), the
+    //     same quantity rationalised. It has neither the cancellation of
+    //     sqrt(gamma^2 + omega^2) - gamma, which rounds to zero for a tiny
+    //     stiffness and refused a stable world, nor the overflow of gamma^2 for
+    //     a huge damping, which made the limit infinite and let the first step
+    //     fail as InvalidState. Checked in 2D and 3D, which share the gate. ---
+    {
+        // Two unit masses moving apart at a relative speed of 1, so mu = 0.5.
+        const auto pair2 = [](Real k, Real c, Real dt) {
+            SpringNetwork n;
+            n.add(make_spring(0, 1, 1.0, k, c));
+            return SpringWorld{SimulationSettings{dt}, n,
+                               {body_at(Vec2{0.0, 0.0}, Vec2{-0.5, 0.0}, 1.0),
+                                body_at(Vec2{1.0, 0.0}, Vec2{0.5, 0.0}, 1.0)}};
+        };
+        const auto pair3 = [](Real k, Real c, Real dt) {
+            SpringNetwork n;
+            n.add(make_spring(0, 1, 1.0, k, c));
+            SpringBody3D first;
+            first.mass = 1.0;
+            first.velocity = Vec3{0.0, 0.0, -0.5};
+            SpringBody3D second;
+            second.mass = 1.0;
+            second.position = Vec3{0.0, 0.0, 1.0};
+            second.velocity = Vec3{0.0, 0.0, 0.5};
+            return SpringWorld3D{SimulationSettings{dt}, n, {first, second}};
+        };
+
+        // A pure damper with c = 100: the limit is 2 mu / c = 0.01 exactly,
+        // checked from both sides.
+        MALLOY_CHECK_TRUE(pair2(0.0, 100.0, 0.0099).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair2(0.0, 100.0, 0.0101).validate() == StepStatus::InvalidSettings);
+        MALLOY_CHECK_TRUE(pair3(0.0, 100.0, 0.0099).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair3(0.0, 100.0, 0.0101).validate() == StepStatus::InvalidSettings);
+
+        // The issue's reproduction, dt = 0.1, is refused at the first step and
+        // leaves the state untouched.
+        {
+            SpringWorld w = pair2(0.0, 100.0, 0.1);
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidSettings);
+            MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(0.5, 0.0), 0.0);
+            MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{0});
+
+            SpringWorld3D w3 = pair3(0.0, 100.0, 0.1);
+            MALLOY_CHECK_TRUE(w3.step().status == StepStatus::InvalidSettings);
+            MALLOY_CHECK_EQ(w3.tick_count(), std::uint64_t{0});
+        }
+
+        // Just inside the limit the damper damps, by exactly the factor the
+        // bound comes from: 1 - 2 gamma dt = 1 - 100 * 0.0099 / 0.5 = -0.98, so
+        // the relative velocity alternates in sign and shrinks to 0.98^100 =
+        // 0.133 of itself in 100 steps. Rounding on a velocity of order 1 over
+        // 100 steps is far inside the tolerance.
+        {
+            SpringWorld w = pair2(0.0, 100.0, 0.0099);
+            const Real factor = 1.0 - 100.0 * 0.0099 / 0.5;
+            Real expected = 1.0; // 0.5 - (-0.5)
+            for (int i = 0; i < 100; ++i)
+            {
+                MALLOY_CHECK_TRUE(w.step().ok());
+                expected *= factor;
+            }
+            const Real relative = w.bodies()[1].velocity.x - w.bodies()[0].velocity.x;
+            MALLOY_CHECK_NEAR(relative, expected, 1e-12);
+            MALLOY_CHECK_TRUE(std::abs(relative) < 0.14);
+        }
+
+        // A nearly pure damper: k = 1e-17, c = 1, so gamma = 1 and
+        // omega^2 = 2e-17, and the limit is 2 / (1 + hypot(1, 4.5e-9)), which
+        // is 1 to double precision. The old form computed
+        // sqrt(1 + 2e-17) - 1, which rounds to exactly 0, and so refused this
+        // perfectly stable world at every timestep.
+        MALLOY_CHECK_TRUE(pair2(1e-17, 1.0, 0.5).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair2(1e-17, 1.0, 1.01).validate() == StepStatus::InvalidSettings);
+        MALLOY_CHECK_TRUE(pair3(1e-17, 1.0, 0.5).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair3(1e-17, 1.0, 1.01).validate() == StepStatus::InvalidSettings);
+
+        // A huge damping: c = 1e160 gives gamma = 1e160, whose square overflows.
+        // The old limit was then +inf, so validate() passed and the first step
+        // failed as InvalidState. The limit is about 1/gamma = 1e-160, so a
+        // timestep of 0.01 is a SETTING that is wrong, and is refused as one,
+        // before anything moves...
+        {
+            SpringWorld w = pair2(1.0, 1e160, 0.01);
+            MALLOY_CHECK_TRUE(w.validate() == StepStatus::InvalidSettings);
+            MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidSettings);
+            MALLOY_CHECK_VEC2_NEAR(w.bodies()[1].velocity, Vec2(0.5, 0.0), 0.0);
+
+            SpringWorld3D w3 = pair3(1.0, 1e160, 0.01);
+            MALLOY_CHECK_TRUE(w3.validate() == StepStatus::InvalidSettings);
+            MALLOY_CHECK_TRUE(w3.step().status == StepStatus::InvalidSettings);
+        }
+        // ...while a timestep inside it is accepted, so the gate is a bound and
+        // not a blanket refusal of large damping.
+        MALLOY_CHECK_TRUE(pair2(1.0, 1e160, 5e-161).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair3(1.0, 1e160, 5e-161).validate() == StepStatus::Ok);
+
+        // And with neither stiffness nor damping there is still no limit, at
+        // any timestep.
+        MALLOY_CHECK_TRUE(pair2(0.0, 0.0, 1.0e3).validate() == StepStatus::Ok);
+        MALLOY_CHECK_TRUE(pair3(0.0, 0.0, 1.0e3).validate() == StepStatus::Ok);
     }
 
     // --- Issue #16: a position or velocity whose SQUARE overflows is refused.

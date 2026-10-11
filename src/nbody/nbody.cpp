@@ -71,21 +71,32 @@ std::vector<math::Vec2> NBodyWorld::compute_accelerations() const
             {
                 continue;
             }
+            // A switched-off coupling (g == 0) contributes nothing at ANY
+            // separation, so it is skipped before 1/r^3 is formed. Below about
+            // 1.8e-103 apart, 1/r^3 overflows to +inf, and zero times inf is
+            // NaN, which failed the step for two bodies that do not interact
+            // at all (issue #49). Skipping a pair whose coupling is zero is
+            // otherwise exact: its contribution would have been a zero, and
+            // adding a zero changes nothing.
+            const math::Real coupling = g * bodies_[j].mass;
+            if (coupling == math::Real{0})
+            {
+                continue;
+            }
             const math::Vec2 delta = bodies_[j].position - bodies_[i].position;
             const math::Real r2 = math::dot(delta, delta) + softening_squared;
             // Coincident bodies with no softening give r2 == 0, where the
             // inverse-cube law is undefined: 1/sqrt(0) is +inf, and inf times a
-            // delta that is exactly zero is NaN. Contribute nothing instead,
-            // which is also the correct answer when g == 0. Softening remains
-            // the documented way to keep close encounters finite (docs/04).
-            // The negated form also rejects a NaN r2.
+            // delta that is exactly zero is NaN. Contribute nothing instead.
+            // Softening remains the documented way to keep close encounters
+            // finite (docs/04). The negated form also rejects a NaN r2.
             if (!(r2 > math::Real{0}))
             {
                 continue;
             }
             const math::Real inv_r = math::Real{1} / std::sqrt(r2);
             const math::Real inv_r3 = inv_r * inv_r * inv_r;
-            accelerations[i] += g * bodies_[j].mass * delta * inv_r3;
+            accelerations[i] += coupling * delta * inv_r3;
         }
     }
     return accelerations;
