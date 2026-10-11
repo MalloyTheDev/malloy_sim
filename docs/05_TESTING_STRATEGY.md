@@ -57,14 +57,19 @@ in their domain's library (ADR 0009), so their tests do too.
 
 Each test executable should return 0 on success, return nonzero on failure, print useful failure messages, and link only the module it tests.
 
-CTest also runs five app checks, registered after the executables are counted
-(`CMakeLists.txt`): the real terminal app is run on an empty file, a
-comment-only file, an empty `charges` and an empty `charges3d` scenario, each of
-which it must refuse with "defines nothing to simulate", and on a scenario
-whose path lies outside the ANSI code page, which it must open. They match the
-output only: CTest ignores the exit code of a test with
-`PASS_REGULAR_EXPRESSION`, and no CTest yet runs a template through the app
-([#65](https://github.com/MalloyTheDev/malloy_sim/issues/65)).
+CTest also runs sixteen app checks, registered after the executables are
+counted (`CMakeLists.txt`). Each goes through `cmake/run_app_check.cmake`,
+which requires the exit code AND the output (issue #65), since
+`PASS_REGULAR_EXPRESSION` alone makes CTest ignore the exit code. The real
+terminal app is run:
+- on an empty file, a comment-only file, an empty `charges` and an empty
+  `charges3d` scenario, each of which it must refuse with exit 1 and "defines
+  nothing to simulate";
+- on a scenario whose path lies outside the ANSI code page, which it must open;
+- on one shipped template of every scenario type, which must exit 0 and print
+  its final report;
+- on `applied_force.scn`, whose final energy pins the app's own `rigid3d` E
+  column.
 
 ## Test helpers
 
@@ -200,8 +205,9 @@ The scenario file is the one untrusted input. Besides the hostile-input battery
 in `malloy_scenario_tests` (control bytes, non-finite and overflowing numbers,
 enormous tokens and lines, the resource caps at their boundaries, all 256 byte
 values through every place a token is echoed), two libFuzzer targets run the
-parser and the whole app under ASan and UBSan. They are built only with clang
-and run only by hand; `docs/06` has the recipe.
+parser and the whole app under ASan and UBSan. They are built only with clang;
+CI runs each for 30 seconds on every push and pull request, and `docs/06` has
+the recipe for longer runs.
 
 ## When to migrate to Catch2
 

@@ -40,7 +40,7 @@ across ten scenario types, and every domain runs in two dimensions and three:
 - rigid bodies (rigid, rigid3d): in 2D, discs and (M36) oriented boxes with
   contact response, gravity, halfplane ground, friction and immovable bodies;
   in 3D, quaternion rotation, a constant applied torque and force (the force
-  has no scenario key yet, #47), spheres and
+  set with the `force` key), spheres and
   oriented boxes against ground planes and against each other (every movable
   pair), and mass properties computed from spheres, boxes and triangle meshes;
 - spring networks (springs, springs3d);
@@ -50,9 +50,8 @@ The classical mechanics track is complete, M38 opened thermodynamics, and
 nothing further is scheduled: the next milestones are chosen from open GitHub
 issues labelled "milestone candidate" (docs/07_POST_M5_ROADMAP.md). Known open
 defects are issues too; read the relevant ones before claiming a behaviour.
-In particular, a box that lands anything but flat never comes to rest (#41),
-static friction creeps on a slope (#44), and the charge integrator drifts in
-crossed electric and magnetic fields (#42).
+In particular, a box does not fully come to rest in 3D (#41, #83), and static
+friction creeps on a slope (#44).
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to
@@ -85,7 +84,8 @@ cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 
-There is no CI, so run them yourself before calling anything done.
+CI runs them on every push, but run them yourself before calling anything
+done.
 
 Your task is to work only on the requested milestone.
 

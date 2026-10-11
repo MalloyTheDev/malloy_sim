@@ -32,8 +32,8 @@ What the build uses, all in force at M39:
 - `target_compile_features(... cxx_std_20)` on `malloy_project_options`;
 - `CMAKE_EXPORT_COMPILE_COMMANDS ON`;
 - on MSVC, `/W4 /WX /permissive- /fp:precise` on `malloy_project_warnings`;
-- on GCC and Clang, `-Wall -Wextra -Wpedantic -ffp-contract=off` (warnings
-  are not errors there; [#66](https://github.com/MalloyTheDev/malloy_sim/issues/66));
+- on GCC and Clang, `-Wall -Wextra -Wpedantic -Werror -ffp-contract=off`
+  (warnings are errors there too since issue #66);
 - three options: `MALLOY_BUILD_APPS` and `MALLOY_BUILD_TESTS` (both ON) and
   `MALLOY_BUILD_FUZZERS` (OFF; see Fuzzing below).
 
@@ -52,14 +52,19 @@ ctest --preset windows-msvc-debug
 ```
 
 The same three commands with `windows-msvc-release` give the optimized build.
-CTest runs 19 tests: the 14 test executables, plus five checks that run the
-terminal app itself (four inputs it must refuse, and one scenario path outside
-the ANSI code page that it must open). The app checks are registered after the
+CTest runs 30 tests: the 14 test executables, plus sixteen checks that run the
+terminal app itself and require both its exit code and its output (four inputs
+it must refuse, one scenario path outside the ANSI code page that it must open,
+one shipped template of every scenario type, and the force template's energy
+column). The app checks are registered after the
 test-executable count is taken, so they do not change it (`docs/05`).
 
-Nothing runs these commands automatically. There is no CI: the tests, the
-template checks and the fuzzers are run by hand, and `main` is unprotected
-([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
+CI (`.github/workflows/ci.yml`, issue #66) runs these commands on every push
+and pull request to `main`: the Debug and Release presets with every CTest test
+on the `windows-2025-vs2026` runner, and a 30-second libFuzzer run of each fuzz
+target under ASan and UBSan on `ubuntu-26.04`. It has read-only permissions,
+needs no secrets, and pins every action to a commit SHA. Branch protection on
+`main` is not set.
 
 ## MSVC hardening
 
@@ -89,9 +94,8 @@ Release pair loop is what the simulator spends its time on. Release build,
 - `_MSVC_STL_HARDENING=1` turns a standard-library precondition violation
   (`front()` of an empty vector, an index past the end) into a fail-fast.
   Debug builds already make the same checks through iterator debugging, in
-  every test run; the parser bounds its input, and the fuzz targets below run
-  the parser and the app under ASan and UBSan when someone builds and runs
-  them.
+  every test run; the parser bounds its input, and CI runs the fuzz targets
+  below under ASan and UBSan on every push.
 - `/sdl` would add only runtime checks: every warning it promotes (C4146,
   C4996 and the rest) is already an error under `/W4 /WX`.
 
@@ -184,11 +188,12 @@ out/fuzz/malloy_app_fuzzer out/fuzz/app_corpus scenarios -max_total_time=60 -tim
   path instead of the corpus directories, with `UBSAN_OPTIONS=print_stacktrace=1`
   set to see where undefined behaviour happened.
 
-Nothing runs the fuzzers automatically, and a fuzzer binary left in `out/fuzz`
-from an earlier build does not cover parsing added since, so rebuild from the
-current tree before a run. The parser fuzzer checks that counts are
-non-negative, not the documented resource caps
-([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
+CI runs both fuzzers briefly on every push. A fuzzer binary left in
+`out/fuzz` from an earlier build does not cover parsing added since, so rebuild
+from the current tree before a local run. The parser fuzzer asserts every
+documented resource cap on a successful parse (issue #66), though its copy of
+the work formula predates the weighted budget of issue #46
+([#84](https://github.com/MalloyTheDev/malloy_sim/issues/84)).
 
 ## VS Code workflow
 

@@ -63,14 +63,13 @@ them.
 Every world advances with semi-implicit (symplectic) Euler: velocities first,
 then positions from the updated velocities. The specializations:
 
-- **Charges** (2D and 3D): the electric kick, then an EXACT rotation of the
-  velocity by the magnetic field, then the move. A magnetic field alone
-  preserves every speed to rounding error, with no error of any order in dt.
-  Known defect: this kick-then-rotate (Lie) splitting makes motion in crossed E
-  and B fields drift against the
-  electric force, gaining energy without bound at about `(qE)^2 dt / (2m)` per
-  unit time; no shipped template uses an electric field, so none shows it
-  ([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)).
+- **Charges** (2D and 3D): half the electric kick, an EXACT rotation of the
+  velocity by the magnetic field, the other half of the kick, then the move
+  (the Boris order, issue #42). A magnetic field alone preserves every speed to
+  rounding error, with no error of any order in dt. In crossed E and B fields
+  the drift is exactly perpendicular to E, and the energy error is a bounded
+  oscillation with no secular growth. A particle the field does not turn gets
+  one whole kick, as plain semi-implicit Euler.
 - **3D rigid bodies**: the angular velocity advances by FORWARD Euler on Euler's
   equations in the body frame, the orientation from the updated angular
   velocity, and the quaternion is renormalized every step.
@@ -89,7 +88,8 @@ normal impulse that reverses the closing speed scaled by the restitution, and
 then a Coulomb friction impulse computed from the velocity that remains,
 clamped to the friction coefficient times the normal impulse. A box contact
 manifold (box on ground, box against box) is reduced to one contact at its
-centroid with the deepest penetration.
+penetration-weighted centroid (the plain mean when its depths agree to within
+rounding), with the deepest penetration (issue #41).
 
 Three fixed-step consequences follow from that design. The first is derived and
 documented; the other two are open defects.
@@ -101,12 +101,12 @@ documented; the other two are open defects.
   rigid body on a slope inside the friction cone still creeps down it, at a steady
   `g sin(theta) dt` per unit time
   ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
-- **Boxes do not settle.** The centroid reduction and a translation-only
-  positional correction together make a box that lands anything but flat rock
-  indefinitely and gain energy, even at restitution 0, in 2D and 3D
-  ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)). The symmetric
-  box-drop templates do not show it. The real fix is a per-point iterative
-  contact solver, a milestone candidate
+- **Boxes do not fully settle.** One contact cannot stop several corners at
+  once. Since the penetration-weighted reduction (issue #41) a tilted box
+  rights itself and a 2D box comes to rest, but a 3D box still rocks at the
+  scale of one step's gravity ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)), and at restitution 1 a nudged
+  box gains energy without bound ([#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)). The real fix is a
+  per-point iterative contact solver, a milestone candidate
   ([#73](https://github.com/MalloyTheDev/malloy_sim/issues/73)).
 
 ## Kinetic theory (M38)
@@ -282,12 +282,11 @@ Every body type now requires `math::is_squarable` on its position and velocity,
 so that window is closed. The same reasoning bounds `softening` in the N-body
 and charge domains, and the endpoint separation of a spring.
 
-Two neighbouring windows are still open. A rigid body's mass and inertia are
-not bounded the same way, so a huge one passes validation while every energy
-prints `inf` ([#51](https://github.com/MalloyTheDev/malloy_sim/issues/51)); and
-a particle world's wall tallies can overflow while its particles stay valid,
-so the step is not rolled back
-([#50](https://github.com/MalloyTheDev/malloy_sim/issues/50)).
+Two neighbouring windows have since closed as well. A rigid body's own kinetic
+energy (2D), or its momentum and spin (3D), must now be finite or squarable, so
+a huge mass or inertia is refused rather than printing `inf` (issue #51); and a
+particle step whose wall tallies overflow is rolled back like any other
+non-finite state (issue #50).
 
 ## Validation rules
 

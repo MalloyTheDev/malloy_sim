@@ -7,6 +7,30 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Security
 
+- Issue #46: the work budget charged every pair test one unit, but pair tests
+  differ in cost by two orders of magnitude. A 3D box pair runs the
+  separating-axis test and clips a contact manifold, allocating as it goes, so
+  a 4828-byte file of 100 boxes sat inside the budget and ran for about 2.35
+  hours in Release.
+  - **Units.** The budget now counts work units of about 10 ns of Release
+    time.
+  - **Weights.** The rigid domains weight each pair and each ground-plane test
+    by its kind. The weights come from worst-case measurements with every pair
+    overlapping on every step:
+    - in 3D: box-box 250, box-sphere 25, sphere pair 10, box-plane 40,
+      sphere-plane 4;
+    - in 2D: box-box 40, any other pair 5, box-ground 20, disc-ground 4.
+  - **2D nbody.** It evaluates every ordered pair, so it is now counted as
+    N(N-1), not N(N-1)/2, which had let it run twice its budget.
+  - **Result.** 1e11 units is now at most about 20 minutes in Release (caged
+    piles at the limit ran 5 to 17 minutes), and up to about three hours in
+    Debug. The issue's file is refused.
+  - **Templates.** Every template's output is unchanged, and each is at least
+    3000 times inside the budget.
+  - **Tests.** Both sides of the limit are checked for ten mixes of bodies.
+  - **Still open.** The fuzzers' own copies of the formula still predate it
+    (#84).
+
 - Issue #37: the MSVC build now applies Control Flow Guard (`/guard:cf`, at
   compile and link) and CET shadow-stack compatibility (`/CETCOMPAT`) to every
   target in every configuration; the Release app went from
@@ -80,6 +104,41 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Added
 
+- Issue #47: M28's constant applied force could not be set from a scenario.
+  - **The key.** `force <fx> <fy> <fz>` for `type rigid3d` sets it, read
+    exactly as `torque` is: one world-frame force on every body, and a later
+    line replacing an earlier one.
+  - **Energy.** The app's `rigid3d` E column, and the `total_energy` and
+    `potential` check quantities, now include the force potential -(F . r). E
+    is then the quantity a free body conserves under the force. An app check
+    pins that column.
+  - **New template `applied_force.scn`:** a cube and a ball four times as
+    heavy, pushed by the same force. Its checks cover:
+    - p = F t for each body;
+    - the semi-implicit position law x = a dt^2 n (n + 1) / 2;
+    - a spin the force leaves exactly alone;
+    - the energy, conserved but for the integrator's derived drift.
+  - Thirty-one templates now.
+- Issue #66: continuous integration (`.github/workflows/ci.yml`).
+  - **Windows:** MSVC Debug and Release with every CTest test, on
+    `windows-2025-vs2026`, using the existing presets.
+  - **Fuzzing:** a 30-second libFuzzer run of each fuzz target under ASan and
+    UBSan, with clang 21 on `ubuntu-26.04`.
+  - **Safety:** read-only permissions, actions pinned to commit SHAs, and no
+    secrets.
+  - **Stricter checks:** the parse fuzzer now asserts every documented resource
+    cap, and GCC and Clang builds treat warnings as errors. Two ground lists in
+    the rigid settings are value-initialized so the rigid tests build clean
+    under that.
+- Issue #65: every app check now runs through `cmake/run_app_check.cmake`.
+  - It requires both the exit code and the output, so a refusal printed with
+    exit 0 now fails.
+  - Ten new checks run one shipped template per scenario type through the app
+    and require exit 0 and the final step report.
+  - CTest runs 30 tests.
+- Issue #68: tests now pin the box contact reduction (contact point, lever arm
+  and correction depth) with tilted, unequal-depth landings and box-box
+  contacts in 2D and 3D, so it cannot regress silently.
 - Issue #30: fuzzing stopped at `parse_scenario`, so nothing exercised what the
   app does with a parsed file, where the empty-charges crash (#24) lived. A
   second target, `malloy_app_fuzzer` (`fuzz/app_fuzzer.cpp`), runs the terminal
@@ -146,6 +205,75 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #42: in crossed electric and magnetic fields, a charge's guiding centre
+  crept against the electric force and its energy grew without bound, in 2D
+  and 3D.
+  - **The new step.** Both charge worlds now split it symmetrically: half the
+    electric kick, the exact magnetic turn, then the other half. This is the
+    Boris order, with the rotation exact.
+  - **The drift.** The E x B drift is now exactly perpendicular to E and the
+    same for either sign of charge.
+  - **The energy.** For a charge released from rest, the energy error is
+    exactly -m |a|^2 (dt/2)^2 cot(theta/2) sin(n theta): a bounded oscillation
+    with no drift.
+  - **Unchanged runs.** A particle the field does not turn still gets one
+    whole kick, so runs with B = 0 or no electric force, including
+    `cyclotron.scn` and `magnetic_helix.scn`, are bit-identical.
+  - This is a deliberate integrator change.
+- Issue #43: a pure spring damper (stiffness 0, damping above 0) skipped the
+  timestep stability check, so a large dt diverged while every step reported Ok.
+  - **The gate.** It now evaluates the same bound in rationalised form,
+    `dt < 2 / (gamma + hypot(gamma, omega))`, and is skipped only when stiffness
+    and damping are both zero. A pure damper is limited to dt < 2 mu / c.
+  - **Numerics.** A tiny stiffness no longer cancels to a zero limit that
+    refused stable worlds. A huge damping is refused by `validate()` instead of
+    failing the first step.
+- Issue #49: a switched-off pair interaction (G = 0, k = 0, or a neutral
+  charge) still failed a step for two bodies closer than about 1.8e-103,
+  because zero times an overflowed 1/r^3 is NaN.
+  - The nbody and charge worlds now skip a pair whose coupling is exactly zero,
+    in 2D and 3D.
+  - Results are otherwise bit-identical.
+- Issue #41 (partly): a box resting on the ground never settled and gained
+  energy, even at restitution 0, in 2D and 3D.
+  - **The cause.** Its contact manifold was reduced to the plain mean of its
+    points, which on a tilted face sits toward the raised side. So the impulse
+    tipped the box further, and the translation-only correction lifted it.
+  - **The fix.** The contact now sits at the penetration-weighted centroid,
+    for a box on the ground and against a box, in both dimensions. A manifold
+    whose depths agree to within rounding (1e-9 of the box size) keeps the
+    plain mean.
+  - **The effect.**
+    - The 2D nudged box now comes to rest (3e-10 J late, from 8.3e-4 J).
+    - The 3D one peaks at 1.05 times its start instead of 2.5, with late
+      kinetic energy 15 times lower.
+  - **Still open.** A 3D rock at the scale of one step's gravity remains for
+    the per-point solver (#73). Restitution 1 still pumps energy (#83), so the
+    issue stays open.
+  - Every template's output is unchanged.
+- Issue #45: `SolidMesh` mass properties lost precision with distance from the
+  origin, because the signed tetrahedra were spanned from the world origin.
+  - **Before:** a 1 cm cube 1 km out was accepted with its centre of mass
+    0.15 m off.
+  - **Now:** the tetrahedra are spanned from the mean of the vertices, leaving
+    only the rounding already in the vertices.
+- Issue #51: a rigid body with a huge mass or inertia passed validation while
+  every energy printed inf.
+  - **2D:** a body's own kinetic energy must now be finite. Static and
+    kinematic bodies stay legal.
+  - **3D:** a body's momentum and spin must be squarable, since |p| and |L|
+    are reported.
+- Issue #50: a particle step whose wall impulse or heat tally overflowed
+  reported Ok. It is now rolled back like any other non-finite state, in 2D and
+  3D.
+- Issue #48: in 2D, box against disc is not built yet, and a `rigid_box` and a
+  colliding `rigid_body` or `rigid_static` in one file passed through each
+  other without a word.
+  - The parser now refuses such a file on the line where the second kind first
+    appears, naming the first one's line.
+  - Bodies of radius 0 collide with nothing and may still share a file with
+    boxes.
+  - The pair itself remains its own milestone.
 - Issue #27: the `MALLOY_BUILD_FUZZERS` build instrumented only the fuzzer's
   entry point, so libFuzzer was blind to the parser it was meant to steer
   through (406 coverage counters), and on Windows it did not link at all. Every

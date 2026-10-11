@@ -31,8 +31,8 @@ collide. M36 and M37 brought the box back to the plane: 2D box against box, and
 a 2D box on the ground.
 
 What remains of the 3D arc is listed in `docs/07_POST_M5_ROADMAP.md`: immovable
-3D bodies, a per-point contact solver (a box that lands anything but flat does
-not yet come to rest, [#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)),
+3D bodies, a per-point contact solver (a tilted box rights itself but does
+not yet fully come to rest in 3D, [#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)),
 and rendering, each its own milestone.
 
 That destination is why some of the current code looks the way it does: the
@@ -70,9 +70,10 @@ ctest --preset windows-msvc-debug
 
 All 14 test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
-completion. CTest runs 19 tests in all: the executables plus five checks that
-run the app itself. Nothing runs them automatically; there is no CI
-([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
+completion. CTest runs 30 tests in all: the executables plus sixteen checks
+that run the app itself. CI runs the Debug and Release builds with every test,
+and a short fuzz run, on every push and pull request to `main`
+(`.github/workflows/ci.yml`).
 
 To run one template:
 

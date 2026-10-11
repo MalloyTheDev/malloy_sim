@@ -81,8 +81,10 @@ thermodynamics (M38-M39). The table under "Milestones complete" lists each one.
 
 The project builds clean under MSVC (`/W4 /WX /permissive-`, with Control Flow
 Guard and CET shadow-stack compatibility on every target), and all
-14 test executables pass via CTest, along with five checks that run the terminal
-app itself (19 CTest tests in all). The terminal app runs any of the ten scenario
+14 test executables pass via CTest, along with sixteen checks that run the
+terminal app itself and require both its exit code and its output (30 CTest
+tests in all). CI runs the Debug and Release builds with every test, and a
+short fuzz run, on every push and pull request to `main`. The terminal app runs any of the ten scenario
 types from a text file, or two built-in N-body scenarios when given no argument,
 and reports each domain's diagnostics alongside an ASCII view of the bodies.
 
@@ -306,37 +308,19 @@ exit code 1. With no argument, the app runs the built-in scenarios shown above.
 Open defects that a run of the shipped binary can hit. Each is tracked on
 GitHub, and this list shrinks as they close.
 
-- **A box on the ground never settles.** Unless it lands perfectly flat, a box
-  resting on a ground plane keeps rocking and gains energy, even at restitution
-  0 and in both 2D and 3D. `box_drop.scn` and `box_drop2d.scn` avoid it only
-  because their drops are symmetric
-  ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)).
-- **Crossed E and B fields drift and gain energy.** In uniform electric and
-  magnetic fields together, a charge's guiding centre drifts against the
-  electric force and its energy grows without bound, in 2D and 3D. Runs with no
-  electric force, including `cyclotron.scn` and `magnetic_helix.scn`, are
-  unaffected ([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)).
-- **A pure spring damper is not stability-checked.** A spring with stiffness 0
-  and damping above 0 skips the timestep stability check, so a `dt` that is too
-  large diverges while every step reports success
-  ([#43](https://github.com/MalloyTheDev/malloy_sim/issues/43)).
+- **A box on the ground does not fully settle.** A box that lands tilted now
+  rights itself, and in 2D comes to rest, but in 3D it keeps rocking at the
+  scale of one step's gravity until the per-point contact solver lands
+  ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41), [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73)). At restitution 1 a nudged box gains
+  energy without bound ([#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)).
 - **Static friction creeps on slopes.** A rigid body inside the friction cone on
   an incline still slides down it at a steady speed of g sin(theta) dt, because
   contacts are resolved after the position update
   ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
-- **The work budget undercounts box pairs.** The parser bounds a scenario's work
-  by counting pair tests, but charges every pair the same, and a 3D box pair
-  costs 10 to 40 times a cheap one, so a small `rigid3d` file of boxes inside
-  the budget can still run for hours
-  ([#46](https://github.com/MalloyTheDev/malloy_sim/issues/46)).
-- **No `force` scenario key.** M28's constant applied force is reachable only
-  through the library API (`Rigid3DSettings::force`): no key, no template, and
-  the app's `rigid3d` energy column leaves out its potential
-  ([#47](https://github.com/MalloyTheDev/malloy_sim/issues/47)).
-- **2D box against disc is not implemented.** In a `rigid` scenario, a box
-  (`rigid_box`) and a disc (`rigid_body` or `rigid_static`) pass through each
-  other silently, with no error or warning
-  ([#48](https://github.com/MalloyTheDev/malloy_sim/issues/48)).
+- **2D box against disc is not implemented.** A `rigid` scenario that declares
+  both a box (`rigid_box`) and a disc that collides (`rigid_body` or
+  `rigid_static` with a radius above 0) is refused when it is loaded, until the
+  pair exists ([#48](https://github.com/MalloyTheDev/malloy_sim/issues/48)).
 - **Small header values print as zero.** Run headers and view extents use eight
   fixed decimals, so a value below 5e-9 (for example `dt 1e-9`) prints as 0
   ([#61](https://github.com/MalloyTheDev/malloy_sim/issues/61)).
@@ -416,8 +400,8 @@ Intended, not yet built, and never added speculatively
 - **quantum**, further out still, and meant to start as a separate repository
   or an isolated prototype
 - an iterative, per-point contact solver, which a resting box or a stack needs
-  (box contacts are resolved today as one contact at the centroid of the
-  manifold: a bounce, not a stack), and box against disc in 2D
+  (box contacts are resolved today as one contact at the penetration-weighted
+  centroid of the manifold: a bounce, not a stack), and box against disc in 2D
 - persistent forces and force/torque accumulators (gravity, the 3D torque and
   the 3D force are each a single constant setting, not a registered force
   producer), including persistent per-particle forces or springs on particles

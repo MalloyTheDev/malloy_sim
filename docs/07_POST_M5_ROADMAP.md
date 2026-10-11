@@ -66,7 +66,7 @@ started until it is explicitly asked for, and it gets a number only then.
 |---|---|---|
 | [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73) | per-point iterative contact solver for box manifolds (resting and stacking) | 1, 4 |
 | [#74](https://github.com/MalloyTheDev/malloy_sim/issues/74) | immovable 3D bodies (parity with 2D `rigid_static`) | 4 |
-| [#48](https://github.com/MalloyTheDev/malloy_sim/issues/48) | box against disc in 2D (also an open bug: the pair passes through silently) | 1 |
+| [#48](https://github.com/MalloyTheDev/malloy_sim/issues/48) | box against disc in 2D (until then, a 2D file that mixes the two is refused) | 1 |
 | [#75](https://github.com/MalloyTheDev/malloy_sim/issues/75) | a piston (moving wall) to do work on a gas | 3 |
 | [#76](https://github.com/MalloyTheDev/malloy_sim/issues/76) | per-wall accommodation coefficients (partially diffuse thermal walls) | 3 |
 | [#77](https://github.com/MalloyTheDev/malloy_sim/issues/77) | a local temperature and density profile measurement | 3 |
@@ -78,11 +78,9 @@ started until it is explicitly asked for, and it gets a number only then.
 | [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82) | package the libraries for reuse by other projects | 2 |
 
 Open bugs are issues too. The ones that qualify claims made in these documents
-are noted where the claim is made: boxes that never settle
-([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)), static friction
-that creeps ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)), and
-crossed-field drift in the charge integrator
-([#42](https://github.com/MalloyTheDev/malloy_sim/issues/42)). Fixing a bug is
+are noted where the claim is made: boxes that do not fully settle
+([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41), [#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)) and static
+friction that creeps ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)). Fixing a bug is
 not a milestone, but a fix that changes an integrator or a template's numbers
 is a deliberate change recorded in `CHANGELOG.md`.
 
@@ -137,8 +135,8 @@ not stand. That is where sequential-impulse iteration and then a constraint
 solver start pulling, and a constraint solver is where a `Constraint` base class
 grows. Rule 12 exists to stop exactly that, so it is named here and deferred
 rather than left to drift in. The box contacts of M30 to M37 sharpened it: even
-one box on a floor does not come to rest
-([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)). The per-point
+one box on a floor does not fully come to rest
+([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41), [#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)). The per-point
 solver is candidate [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73).
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
@@ -190,10 +188,10 @@ two fuzz targets (`docs/05`, `docs/06`). The open hardening work is tracked as
 issues, among them one shared `# check` evaluator so a user's own scenario
 checks can run ([#64](https://github.com/MalloyTheDev/malloy_sim/issues/64)),
 checks that cannot detect the behaviour they document
-([#67](https://github.com/MalloyTheDev/malloy_sim/issues/67)), template
-coverage gaps ([#70](https://github.com/MalloyTheDev/malloy_sim/issues/70)),
-and continuous integration, of which there is none
-([#66](https://github.com/MalloyTheDev/malloy_sim/issues/66)).
+([#67](https://github.com/MalloyTheDev/malloy_sim/issues/67)), and template
+coverage gaps ([#70](https://github.com/MalloyTheDev/malloy_sim/issues/70)). Continuous
+integration has run the builds, every test and a short fuzz run on every push
+since issue #66.
 
 ## Track 3: wider domains (direction, not commitment)
 
@@ -244,9 +242,9 @@ sphere against sphere                   [done, M24]
 a general inertia tensor               [done, M25: compound spheres, parallel axis, diagonalized]
 a box mass primitive, and combine      [done, M26: three moments, tilt, compound assembly]
 mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume integrals]
-a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator; no scenario key yet, #47]
-an oriented box against a plane        [done, M30: penetrating corners, one centroid contact]
-box against box (SAT, edge-edge)       [done, M33: the clipped manifold resolved as one centroid contact, a bounce]
+a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator; the `force` key since #47]
+an oriented box against a plane        [done, M30: penetrating corners, one penetration-weighted centroid contact]
+box against box (SAT, edge-edge)       [done, M33: the clipped manifold resolved as one weighted centroid contact, a bounce]
 box against a sphere                    [done, M34: the box's nearest point to the sphere centre, the last movable pair in 3D]
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 immovable 3D bodies                     [candidate, #74]
