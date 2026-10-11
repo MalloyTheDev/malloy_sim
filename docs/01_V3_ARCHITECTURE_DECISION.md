@@ -9,7 +9,7 @@ The V3 architecture is:
 
 ```text
 C++20 + CMake + VS Code + MSVC
-terminal-first
+terminal-first (the build base, not the final product)
 simulation-first
 2D first
 no graphics before the rendering milestone

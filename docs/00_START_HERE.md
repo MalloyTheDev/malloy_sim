@@ -2,9 +2,9 @@
 
 **MalloySim C++** is an all-in-one science physics simulation in C++20, meant
 to be seen: its destination is a simulator rendered in 3D, with a GUI, UI and
-UX. It is built simulation-first, so the terminal is its interface until the
-rendering milestone, and its domain libraries are meant to be the foundation of
-other science projects. It grows one finished physics domain at a time, each shipping tested scenario templates, with no engine kernel and no
+UX. It is built simulation-first: the terminal app is the base it is built
+and verified on until the rendering milestone, not the final product, and its
+domain libraries are meant to be the foundation of other science projects. It grows one finished physics domain at a time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
 M1-M39 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,

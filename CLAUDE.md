@@ -24,8 +24,9 @@ all-in-one goal compatible with rules 11 to 13 below.
 Simulation-first, and terminal-first for now. MalloySim is meant to be SEEN:
 the destination is a simulator rendered in 3D, with a GUI, UI and UX on top.
 The simulation comes first only because the system has to exist, and be proven
-correct, before an interface is built over it; until the rendering milestone
-the terminal app is the interface. Depth over breadth: a domain is not finished
+correct, before an interface is built over it. The terminal app is the base
+the project is built and verified on, and it will NOT be the final product.
+Depth over breadth: a domain is not finished
 because it runs, it is finished when it validates its input, conserves what it
 should, holds determinism, and ships tested templates.
 
@@ -64,7 +65,8 @@ Quantum remains a further destination and has not started
 **It is meant to be rendered.** Showing the simulation in 3D is the point of
 the 3D arc, not an optional extra: rendering, and then a GUI, UI and UX, are
 planned, each its own milestone, built over the finished simulation. Until
-then the terminal and the ASCII view are the interface (ADR 0002).
+then the terminal app and the ASCII view are the working base, not the
+product (ADR 0002).
 
 **Its libraries are foundations.** The domain libraries are meant to be reused
 as the base of other science projects, linked on their own. That is one more
@@ -173,7 +175,7 @@ M5: terminal N-body demo               [done]
 11. Do not create speculative abstractions.
 12. Do not create `ISimulation`, `WorldBase`, `Engine`, `Scheduler`, `EventBus`, `ServiceLocator`, or plugin systems. All-in-one is reached with concrete worlds and a dispatch key, never with a base class.
 13. Keep `malloy_sim_core` tiny. Adding a domain must not grow it.
-14. Keep the terminal app dumb.
+14. Keep the terminal app dumb. It is the development base, not the final product, so nothing a later GUI would need may live only in it.
 15. Put reusable physics logic in libraries, not in `main.cpp`.
 16. A domain is not done until it has validation, an invariant checked by tests, malformed-input tests, and at least one scenario template.
 17. `SpringWorld` is a local composition boundary, not the engine-wide force architecture (`docs/decisions/0008-spring-world-is-a-local-composition-boundary.md`). Do not generalise it into a shared force-provider API until several genuinely different force producers exist. If a third domain independently needs the same translational integration path, reassess extracting a shared integrator.

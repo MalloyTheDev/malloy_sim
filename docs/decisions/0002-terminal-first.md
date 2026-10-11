@@ -20,7 +20,8 @@ the destination. MalloySim is meant to be rendered in 3D, with a GUI, UI and
 UX on top, each its own milestone. Terminal first means the simulation is built
 and proven before any of that is built over it, so the interface never shapes
 the physics and every physical claim is checkable without a window. The
-decision above stands until the rendering milestone.
+terminal app is the base the project is built on; it will not be the final
+product. The decision above stands until the rendering milestone.
 
 ## Rationale
 

@@ -7,7 +7,8 @@ ready-to-run templates so you can pick a scenario and get correct physics
 immediately. It is meant to be seen: the destination is a simulator rendered
 in 3D, with a GUI, UI and UX on top. It is built simulation-first, because the
 system has to exist and be proven correct before an interface is built over
-it, so for now the terminal is the interface.
+it. The terminal app is only the base it is built and verified on: it will not
+be the final product.
 
 It is built as many concrete domain simulations behind a thin shared shell
 rather than as one generic engine
@@ -98,7 +99,7 @@ and reports each domain's diagnostics alongside an ASCII view of the bodies.
 | `malloy_rigid` | STATIC | `RigidBody2D`/`RigidWorld`: mass properties, pose integration, impulses, disc-disc and box-box contacts, disc and box contacts with ground halfplanes, uniform gravity, friction; `RigidBody3D`/`Rigid3DWorld`: rotation free or under a constant torque, a constant applied force, sphere and box contacts with ground planes and with each other, and 3D mass properties from geometry (spheres, boxes, meshes, `combine`) |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, deterministic force accumulation, `SpringWorld` and `SpringWorld3D` |
 | `malloy_charges` | STATIC | `ChargedParticle2D`/`ChargeWorld` and `ChargedParticle3D`/`Charge3DWorld`: signed Coulomb pairs, uniform E and B fields (B a scalar out of the plane in 2D, a vector in 3D) |
-| `malloy_nbody_terminal` | EXECUTABLE | the terminal app: runs any scenario file, or the built-in N-body demo |
+| `malloy_nbody_terminal` | EXECUTABLE | the terminal app, the development base (not the final product): runs any scenario file, or the built-in N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
 
@@ -408,8 +409,8 @@ Intended, not yet built, and never added speculatively
   `Vec3`, `Quat` and `Mat3`, a 3D form of every domain, mass properties from
   geometry, a constant torque and force, and collisions between any two 3D
   primitives (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
-  Until then the terminal is the interface, and the M8 debug view stays ASCII
-  text
+  Until then the terminal app is the working base, and the M8 debug view
+  stays ASCII text
 - **quantum**, further out still, and meant to start as a separate repository
   or an isolated prototype
 - an iterative, per-point contact solver, which a resting box or a stack needs

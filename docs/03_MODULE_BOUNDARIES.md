@@ -135,6 +135,10 @@ Not responsible for collisions, induced or time-varying fields, radiation, or sc
 
 ## `malloy_nbody_terminal`
 
+The development base: the app the simulation is built and verified through
+until the rendering milestone. It is not the final product, so nothing a later
+GUI would need may live only here.
+
 Responsible for hardcoded demo setup (the built-in scenarios it runs with no argument), reading a single positional scenario path from argv, refusing a file that fails to parse or defines nothing to simulate, dispatching to one concrete runner per scenario type with a plain switch, calling library APIs, fixed number of steps, formatted terminal output (one diagnostics line per report, with the seed in the run header when a wall is thermal), view framing policy (which viewport each frame shows, and the orthographic flattening of 3D positions onto the xy plane), and returning nonzero on a parse, validation or step failure.
 
 Not responsible for reusable physics logic, flags or a CLI parser, or evaluating `# check` lines ([#64](https://github.com/MalloyTheDev/malloy_sim/issues/64)).
