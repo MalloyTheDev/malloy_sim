@@ -39,7 +39,12 @@ All notable changes to MalloySim are recorded here. The format follows
   a step does (plus a test per body per ground plane in the rigid domains, and
   linear work for springs), at 1e11: about a quarter of an hour at the measured
   7 ns per pair, against 3e7 for the largest shipped template. Output volume is
-  bounded too, at 1e5 reports. The 41-byte file is now refused at once.
+  bounded too, at 1e5 reports. The 41-byte file is now refused at once. The
+  reports count toward the work as well as the steps, since each report's
+  diagnostics cost about a step (an O(N^2) potential in nbody and charges):
+  counted by steps alone, a `steps 0` file of 1e5 bodies was no work at all
+  while its one report ran 5e9 pair tests (found while building the
+  app-level fuzzer of issue #30).
 - Issue #26: ground planes (`ground`, `plane3`) were counted by no cap. Three
   million planes (54 MB) parsed into 372 MB and ran at 0.21 s a step for one
   box. Planes now have their own cap of 1000, checked as each is read, and

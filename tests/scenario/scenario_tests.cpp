@@ -2093,21 +2093,33 @@ int main()
             MALLOY_CHECK_TRUE(r.error.find("plane") != std::string::npos);
         }
 
-        // Issue #25: the WORK budget, steps times pair tests per step, at most
-        // 1e11. 1000 bodies make 499500 pairs plus 1000 bodies, 500500 per step:
-        // 199800 steps is 9.99999e10, inside; 199801 is just over.
+        // Issue #25: the WORK budget, steps plus reports, times pair tests per
+        // step, at most 1e11 (a report's diagnostics cost about a step). 1000
+        // bodies make 499500 pairs plus 1000 bodies, 500500 per step. With
+        // output_every 0 there is one report, so 199799 steps is 199800 x 500500
+        // = 9.99999e10, inside; 199800 is just over.
         {
             std::ostringstream bodies;
             for (int i = 0; i < 1000; ++i)
             {
                 bodies << "body 1 " << i << " 0 0 0\n";
             }
-            std::istringstream inside("type nbody\noutput_every 0\nsteps 199800\n" + bodies.str());
+            std::istringstream inside("type nbody\noutput_every 0\nsteps 199799\n" + bodies.str());
             MALLOY_CHECK_TRUE(parse_scenario(inside).ok);
-            std::istringstream over("type nbody\noutput_every 0\nsteps 199801\n" + bodies.str());
+            std::istringstream over("type nbody\noutput_every 0\nsteps 199800\n" + bodies.str());
             const ScenarioParseResult r = parse_scenario(over);
             MALLOY_CHECK_FALSE(r.ok);
             MALLOY_CHECK_TRUE(r.error.find("work budget") != std::string::npos);
+
+            // The reports count: 99999 steps alone are 5.005e10, inside, but a
+            // report every step adds 100000 reports (the most allowed), and
+            // their diagnostics bring the work to 1.001e11, over. Counted by
+            // steps alone, this used to pass.
+            std::istringstream reporting("type nbody\noutput_every 1\nsteps 99999\n" +
+                                         bodies.str());
+            const ScenarioParseResult rr = parse_scenario(reporting);
+            MALLOY_CHECK_FALSE(rr.ok);
+            MALLOY_CHECK_TRUE(rr.error.find("work budget") != std::string::npos);
 
             // The 41-byte file the issue reported: 99856 particles for the
             // default 1000 steps is about 5e12 pair tests.

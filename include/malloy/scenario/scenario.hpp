@@ -382,7 +382,8 @@ struct ScenarioParseResult
 //   entities             at most 1e5 bodies, particles, charges, spring bodies
 //                        and springs in total, checked as each line is read
 //   ground planes        at most 1000 `ground` or `plane3` lines
-//   work                 steps times the pair tests a step does, at most 1e11:
+//   work                 steps plus reports, times the pair tests a step does
+//                        (a report's diagnostics cost about a step), at most 1e11:
 //                        N(N-1)/2 pairs plus N per body and N per ground plane
 //                        for the pairwise domains, N + springs for springs
 //   reports              at most 1e5 (steps / output_every + 1); output_every

@@ -1206,21 +1206,28 @@ ScenarioParseResult parse_scenario(std::istream& input)
     }
 
     // The work budget and the report cap (issue #25). Both depend on values
-    // that may sit on different lines, so neither names one.
+    // that may sit on different lines, so neither names one. A report costs
+    // about a step too, since its diagnostics include an O(N^2) potential in
+    // the nbody and charges domains, so the work counts the reports as well as
+    // the steps: otherwise a `steps 0` file of 1e5 bodies counted as no work,
+    // while its one report ran 5e9 pair tests.
     const std::size_t springs =
         scenario.spring_network.springs().size() + scenario.spring_network3d.springs().size();
-    const double work = static_cast<double>(scenario.steps) *
+    const long long reports =
+        scenario.output_every > 0
+            ? static_cast<long long>(scenario.steps) / scenario.output_every + 1
+            : 1;
+    const double work = (static_cast<double>(scenario.steps) + static_cast<double>(reports)) *
                         step_work(scenario, total_entities - springs, springs);
     if (work > max_work)
     {
         return ScenarioParseResult{
             false,
-            "scenario exceeds the work budget: steps times pair tests per step must be "
-            "at most 1e11 (fewer steps or fewer bodies)",
+            "scenario exceeds the work budget: steps plus reports, times pair tests "
+            "per step, must be at most 1e11 (fewer steps or fewer bodies)",
             {}};
     }
-    if (scenario.output_every > 0 &&
-        static_cast<long long>(scenario.steps) / scenario.output_every + 1 > max_reports)
+    if (reports > max_reports)
     {
         return ScenarioParseResult{
             false,
