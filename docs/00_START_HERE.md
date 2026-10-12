@@ -7,11 +7,11 @@ and verified on until the rendering milestone, not the final product, and its
 domain libraries are meant to be the foundation of other science projects. It grows one finished physics domain at a time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M39 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
+M1-M40 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
 particles, rigid, springs and charges libraries are built, and the terminal app
 runs all ten scenario types. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and all five of
-them run in three dimensions as well as two. Thirty templates in `scenarios/`
+them run in three dimensions as well as two. Thirty-three templates in `scenarios/`
 cover all ten types. See `README.md` and `CHANGELOG.md`.
 
 ## Where this is going
@@ -30,10 +30,10 @@ domain now runs in space as well as the plane, and any two 3D primitives
 collide. M36 and M37 brought the box back to the plane: 2D box against box, and
 a 2D box on the ground.
 
-What remains of the 3D arc is listed in `docs/07_POST_M5_ROADMAP.md`: immovable
-3D bodies, a per-point contact solver (a tilted box rights itself but does
-not yet fully come to rest in 3D, [#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)),
-and rendering, each its own milestone.
+M40 gave both rigid worlds a per-point iterative contact solver, so a box that
+lands tilted comes to rest and short stacks stand (ADR 0011). What remains of
+the 3D arc is listed in `docs/07_POST_M5_ROADMAP.md`: immovable 3D bodies and
+rendering, each its own milestone.
 
 That destination is why some of the current code looks the way it does: the
 scalar angle and scalar inertia in `RigidBody2D` are 2D specializations of the
@@ -55,7 +55,7 @@ alternative to them. See
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 11. `docs/09_MISTAKES_TO_AVOID.md`
 12. `docs/10_CHANGELOG_TEMPLATE.md`
-13. `docs/decisions/` (ADRs 0001-0010)
+13. `docs/decisions/` (ADRs 0001-0011)
 
 `CHANGELOG.md` is the record of what each milestone actually shipped, and the
 open GitHub issues are the record of known defects and milestone candidates.
@@ -83,20 +83,20 @@ out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe scenarios/heat_cond
 
 ## What's next
 
-M1-M39 are done. The classical mechanics track is complete, including the
+M1-M40 are done. The classical mechanics track is complete, including the
 rigid-body contact response that M11 promised and never numbered, which became
 M14, and every domain has its 3D form. M38 then opened thermodynamics, reading a
 box of colliding particles as a gas: its temperature, the pressure on its walls,
 and its relaxation to Maxwell-Boltzmann. M39 gave its walls a temperature, so
 heat flows through the gas, using the project's first random numbers: seeded,
-fully specified and owned by the particle domain (ADR 0010). Five finished
-domains sit behind multi-domain dispatch, across ten scenario types.
+fully specified and owned by the particle domain (ADR 0010). M40 returned to
+the rigid domain with a per-point iterative contact solver (ADR 0011). Five
+finished domains sit behind multi-domain dispatch, across ten scenario types.
 
 Nothing further is scheduled. The candidates for the next milestone are open
 issues labelled `milestone candidate`, listed in
 `docs/07_POST_M5_ROADMAP.md`: 3D rendering and then a GUI, UI and UX (the
-destination), packaging the libraries for other projects, a per-point contact
-solver, immovable 3D bodies, box against disc in 2D, a piston, accommodation
+destination), packaging the libraries for other projects, immovable 3D bodies, box against disc in 2D, a piston, accommodation
 coefficients, a temperature profile, a particle broadphase, gravity for
 springs, and a shared `# check` evaluator. Work stays gated one milestone at a
 time, started only when asked.

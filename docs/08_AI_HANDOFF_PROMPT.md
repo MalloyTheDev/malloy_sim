@@ -24,11 +24,11 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0010)
+- docs/decisions/ (ADRs 0001-0011)
 
 Current status:
 
-M1-M39 are complete. Five finished domains sit behind one scenario `type` key,
+M1-M40 are complete. Five finished domains sit behind one scenario `type` key,
 across ten scenario types, and every domain runs in two dimensions and three:
 
 - gravity (nbody, nbody3d);
@@ -43,6 +43,8 @@ across ten scenario types, and every domain runs in two dimensions and three:
   set with the `force` key), spheres and
   oriented boxes against ground planes and against each other (every movable
   pair), and mass properties computed from spheres, boxes and triangle meshes;
+  since M40 both worlds solve every contact point iteratively, so boxes come to
+  rest and short stacks stand (ADR 0011);
 - spring networks (springs, springs3d);
 - charged particles in electric and magnetic fields (charges, charges3d).
 
@@ -50,8 +52,6 @@ The classical mechanics track is complete, M38 opened thermodynamics, and
 nothing further is scheduled: the next milestones are chosen from open GitHub
 issues labelled "milestone candidate" (docs/07_POST_M5_ROADMAP.md). Known open
 defects are issues too; read the relevant ones before claiming a behaviour.
-In particular, a box does not fully come to rest in 3D (#41, #83), and static
-friction creeps on a slope (#44).
 
 Do not start any further milestone unless I explicitly ask, and then work only
 on that one milestone, one at a time. The all-in-one goal is not a license to

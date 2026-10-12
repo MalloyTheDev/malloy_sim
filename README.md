@@ -53,7 +53,8 @@ computed from geometry (spheres, boxes, compound bodies and arbitrary closed
 triangle meshes); and the start of thermodynamics: the kinetic theory of a
 hard-disk gas (its temperature, wall pressure and relaxation to
 Maxwell-Boltzmann) and thermal walls that conduct heat through it, drawing from
-a seeded generator (milestones M1-M39).
+a seeded generator; and a per-point iterative contact solver, so a box comes to
+rest and short stacks stand (milestones M1-M40).
 
 ## Locked baseline
 
@@ -72,12 +73,13 @@ a seeded generator (milestones M1-M39).
 
 ## Status
 
-All milestones M1-M39 are complete. After the locked M1-M5 roadmap came N-body
+All milestones M1-M40 are complete. After the locked M1-M5 roadmap came N-body
 diagnostics, scenario loading and the ASCII view (M6-M8); the classical
 mechanics track (M9-M37), which took in charged particles (M18), a 3D form for
 every domain and collisions between any two 3D primitives (M19-M34), particle
 friction (M35) and 2D boxes (M36-M37); and the first two milestones of
-thermodynamics (M38-M39). The table under "Milestones complete" lists each one.
+thermodynamics (M38-M39); and the per-point contact solver for rigid bodies
+(M40). The table under "Milestones complete" lists each one.
 
 The project builds clean under MSVC (`/W4 /WX /permissive-`, with Control Flow
 Guard and CET shadow-stack compatibility on every target), and all
@@ -98,7 +100,7 @@ and reports each domain's diagnostics alongside an ASCII view of the bodies.
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | 2D `Circle`, `Aabb`, `Obb2`, `Halfplane`; 3D `Sphere`, `Plane3`, `Aabb3`, `Box3`; overlap tests and contacts (normal, depth, point), separating-axis tests for box pairs, and clipped contact manifolds for a box on a plane or on another box |
 | `malloy_particles` | STATIC | `Particle2D`/`ParticleWorld` and `Particle3D`/`ParticleWorld3D`: contacts with restitution and Coulomb friction, box walls, gravity, per-wall impulse and heat tallies, thermal walls drawing from a seeded `SplitMix64`; gas statistics (`temperature`, `pressure`, `speed_ratio`, `slow_fraction`) and the `lattice_gas` start in `thermo.hpp` |
-| `malloy_rigid` | STATIC | `RigidBody2D`/`RigidWorld`: mass properties, pose integration, impulses, disc-disc and box-box contacts, disc and box contacts with ground halfplanes, uniform gravity, friction; `RigidBody3D`/`Rigid3DWorld`: rotation free or under a constant torque, a constant applied force, sphere and box contacts with ground planes and with each other, and 3D mass properties from geometry (spheres, boxes, meshes, `combine`) |
+| `malloy_rigid` | STATIC | `RigidBody2D`/`RigidWorld`: mass properties, pose integration, impulses, disc-disc and box-box contacts, disc and box contacts with ground halfplanes, uniform gravity, friction; `RigidBody3D`/`Rigid3DWorld`: rotation free or under a constant torque, a constant applied force, sphere and box contacts with ground planes and with each other, and 3D mass properties from geometry (spheres, boxes, meshes, `combine`); since M40 both worlds solve every contact point with a warm-started, iterative solver (ADR 0011) |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, deterministic force accumulation, `SpringWorld` and `SpringWorld3D` |
 | `malloy_charges` | STATIC | `ChargedParticle2D`/`ChargeWorld` and `ChargedParticle3D`/`Charge3DWorld`: signed Coulomb pairs, uniform E and B fields (B a scalar out of the plane in 2D, a vector in 3D) |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal app, the development base (not the final product): runs any scenario file, or the built-in N-body demo |
@@ -175,7 +177,9 @@ measurement on an existing domain rather than a new one: a box of colliding
 particles read as a gas, with no new `type` key. M39 gave its walls a
 temperature, which needed the project's first random numbers, seeded and owned
 by the particle world
-(`docs/decisions/0010-randomness-is-seeded-and-owned-by-its-domain.md`). Work is
+(`docs/decisions/0010-randomness-is-seeded-and-owned-by-its-domain.md`). M40
+returned to the rigid domain with a per-point iterative contact solver
+(`docs/decisions/0011-contacts-are-solved-per-point-iteratively.md`). Work is
 gated one milestone at a time; see `docs/07_POST_M5_ROADMAP.md`.
 
 ## Build
@@ -308,15 +312,10 @@ exit code 1. With no argument, the app runs the built-in scenarios shown above.
 Open defects that a run of the shipped binary can hit. Each is tracked on
 GitHub, and this list shrinks as they close.
 
-- **A box on the ground does not fully settle.** A box that lands tilted now
-  rights itself, and in 2D comes to rest, but in 3D it keeps rocking at the
-  scale of one step's gravity until the per-point contact solver lands
-  ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41), [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73)). At restitution 1 a nudged box gains
-  energy without bound ([#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)).
-- **Static friction creeps on slopes.** A rigid body inside the friction cone on
-  an incline still slides down it at a steady speed of g sin(theta) dt, because
-  contacts are resolved after the position update
-  ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
+- **Large rigid scenes run few steps.** The work budget must charge every
+  rigid pair as a worst-case contact, because a crafted file can make every
+  pair overlap at once, so 1000 spheres at restitution above 0 get about 74
+  steps ([#85](https://github.com/MalloyTheDev/malloy_sim/issues/85)).
 - **2D box against disc is not implemented.** A `rigid` scenario that declares
   both a box (`rigid_box`) and a disc that collides (`rigid_body` or
   `rigid_static` with a radius above 0) is refused when it is loaded, until the
@@ -376,6 +375,7 @@ being refused, are on the
 | M37 | a 2D box resting on a ground plane | ✅ Done |
 | M38 | a hard-disk gas: temperature, wall pressure, relaxation | ✅ Done |
 | M39 | thermal walls: heat flow through a gas, seeded randomness | ✅ Done |
+| M40 | a per-point iterative contact solver: resting boxes and short stacks | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -399,9 +399,8 @@ Intended, not yet built, and never added speculatively
   stays ASCII text
 - **quantum**, further out still, and meant to start as a separate repository
   or an isolated prototype
-- an iterative, per-point contact solver, which a resting box or a stack needs
-  (box contacts are resolved today as one contact at the penetration-weighted
-  centroid of the manifold: a bounce, not a stack), and box against disc in 2D
+- box against disc in 2D, immovable 3D bodies, and a broadphase with a
+  contact-work budget for large rigid scenes
 - persistent forces and force/torque accumulators (gravity, the 3D torque and
   the 3D force are each a single constant setting, not a registered force
   producer), including persistent per-particle forces or springs on particles

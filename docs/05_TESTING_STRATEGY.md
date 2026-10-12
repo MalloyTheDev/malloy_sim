@@ -106,7 +106,10 @@ Every milestone since M9 has been checked by mutation: a deliberate defect is pu
 (a dropped term, a flipped sign, a swapped operand, a skipped validation), the
 whole suite is run, and a test must fail. The defect is then reverted. Each
 milestone's `CHANGELOG.md` entry lists its mutations and what caught them; M39
-ran thirty-seven, all caught, three at compile time.
+ran thirty-seven, all caught, three at compile time. M40 added an acceptance
+block to the rigid tests, 167 criteria each with a tolerance derived from the
+solver's documented constants, and checked it against 25 mutations of the
+solver.
 
 A mutation that survives is one of two things, and the entry says which. Either
 it is a true equivalent (the program's behaviour cannot differ), or it is a

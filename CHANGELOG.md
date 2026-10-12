@@ -1239,6 +1239,151 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M40] - 2026-10-12  (a per-point iterative contact solver)
+
+### Added
+
+- **A per-point iterative contact solver in both rigid worlds** (issue #73,
+  ADR 0011). Every manifold point is solved by sequential impulses: the normal
+  impulse accumulated and kept at 0 or above, the friction impulse accumulated
+  and kept within friction times that point's accumulated normal impulse.
+  - **The step order changes.**
+    - Contacts are detected at the start-of-step poses, with a speculative
+      margin of 1e-4 of the smaller body's size.
+    - An impact phase gives restitution, only to points approaching faster
+      than 4 dt (|g| + |F| / m_min) at the middle of the step.
+    - The forcing is unchanged.
+    - A rest phase is warm-started from the last step's impulses.
+    - Positions are integrated from the solved velocities.
+    - A nonlinear Gauss-Seidel projection removes the remaining penetration
+      without touching the velocities or the world angular momentum.
+  - **Iteration** stops at a tolerance (1e-8 of the velocity scale at rest,
+    1e-12 for an impact) or at 100 sweeps. The state decides the count, so a run
+    repeats exactly.
+  - **The warm-start impulses are world state:** read-only through
+    `warm_contacts()`, snapshotted with the bodies, and restored by a
+    rolled-back step.
+  - **3D friction** is projected onto its disc in the tangent effective-mass
+    metric, Coulomb's maximum-dissipation law, so a box sliding diagonally
+    keeps its direction.
+  - **Code shape:** every parameter is a named constant with its derivation, and
+    no scenario key or settings field was added. The contact points are plain
+    structs local to each world's source file: no Constraint type, no solver
+    interface, and `malloy_sim_core` unchanged.
+- **Margin-aware contact queries** in `malloy_collide`. Each query gains an
+  overload that keeps points within a gap. The plain queries are bit-identical,
+  tested on 4000 random cases.
+- **The 3D box-box face preference.** The separating-axis test prefers a face
+  axis over an edge axis within 5 per cent.
+  - **Proof:** a randomized test of 100,000 configurations at scales from 1e-6
+    to 1e6, half of them near-flat stacks, found every point inside both boxes
+    to rounding. That proof is what removed an earlier version in issue #22.
+  - **Effect:** a twisted five-box stack drifts 0.09 mm in 10 s with it, and
+    4.5 mm without.
+- **The `box_stack.scn` (rigid3d) and `box_stack2d.scn` (rigid) templates:**
+  three staggered boxes of different sizes and masses that stand. Thirty-three
+  templates now.
+- **An acceptance block in the rigid tests** of 167 criteria (AC-1 to AC-17, 2D
+  and 3D), each tolerance derived from the solver's documented constants. It
+  covers:
+  - rest after a tilted landing;
+  - no energy gain at restitution 0 or 1;
+  - per-step dissipation;
+  - a complementarity certificate;
+  - restitution per point;
+  - symmetric drops;
+  - near-flat landings;
+  - stacks, and mass ratios;
+  - slope holding and Coulomb sliding;
+  - momentum;
+  - determinism and the documented order;
+  - rollback of the warm-start cache;
+  - projection by positions alone.
+
+### Fixed
+
+- **Issue #41:** a box that lands tilted now comes to rest. Late kinetic energy
+  falls from 5.6e-5 J to about 1e-20 J, in 2D and 3D.
+- **Issue #83:** at restitution 1, a nudged box no longer gains energy without
+  bound. It was 442 times its start in 3D; it now stays within the one-step lift
+  bound and comes to rest.
+- **Issue #44:** static friction holds. A box inside the friction cone on a 20
+  degree slope moves at most 2.6e-11 m in 10 s, against 0.072 m before.
+- **The micro-bounce is gone.** A resting box has zero velocity: box_drop's |p|
+  was 2.67e-3 and is now 0.
+- **Issue #84:** the fuzzers' copies of the work formula are replaced by
+  `step_work`, which `malloy_scenario` now exports.
+
+### Changed
+
+- **The work budget** charges every rigid pair and plane test at its measured
+  worst case under the solver: every point solved at the 100-sweep cap, in both
+  phases when restitution is above 0.
+  - In 3D: box-box 45860, box-plane 45600, box-sphere 5755, sphere pair and
+    sphere-plane 2695. In 2D: box-box 2835, box-ground 5575, disc pair 1410,
+    disc-ground 1395.
+  - Each is halved, roughly, at restitution 0. A body costs 15 units a step in
+    3D and 10 in 2D.
+  - This makes the budget, not memory, the limit on large rigid scenes. A
+    follow-up proposes a broadphase and a runtime contact-work budget (#85).
+- **A new parser cap: at most 2000000 potential contact points.** It is derived
+  from the solver's structures (1 KiB per point at its peak, against a 2 GiB
+  ceiling), counted as each line is read, and refused on the line that crosses
+  it.
+- **Template checks that moved were re-pinned,** on exact laws where one exists:
+  - `flat_ground` momentum_x is now exactly m g sin cos t, 4.7088;
+  - `rolling_and_slipping` momentum_x is exactly 34/3 and its energy 56.93;
+  - `dropped_bodies` pins derivable early checks instead of a chaotic late
+    energy;
+  - `box_drop` and `box_drop2d` pin exact rest.
+  - Every contact-free template is bit-identical.
+
+### Invariants
+
+**Existing tests re-derived:**
+- the rigid tests that pinned the single-contact reduction were re-derived from
+  the per-point solution, never loosened without a derivation;
+- the collide tests cover the margin queries (bit-identical at margin 0) and the
+  face preference's containment.
+
+**Templates:** all 33 run identically in Debug and Release, and each documented
+expected output matches a real run.
+
+### Mutation testing
+
+The solver, its tests and the templates were mutation-tested from three sides.
+- **The solver:** 9 mutations on its own, all caught by the rigid tests.
+- **The acceptance block:** 25 against the real solver. 24 were caught; the one
+  survivor, checking the residual after a sweep instead of before, only costs a
+  sweep and changes no observable state.
+- **The parser and fuzzers:** 39 parser mutations, all caught, and 5 of 6
+  fuzzer mutations trapped on seeds (the sixth is caught by the budget tests).
+
+Among the mutations caught:
+- one sweep;
+- impulses not accumulated, or not clamped;
+- friction clamped to this sweep's change;
+- restitution applied in the rest phase;
+- the projection off, or writing velocity;
+- no warm start;
+- the cache not rolled back;
+- radial friction;
+- no margin;
+- no threshold;
+- the body-frame spin kept through a turn;
+- every budget weight and the cap.
+
+### Docs
+
+- **ADR 0011:** contacts are solved per point, iteratively, inside each rigid
+  world.
+- **CLAUDE.md rules 4 to 6:** the per-point solver and the accumulated friction
+  are recorded.
+- **docs/04:** the contact conventions are rewritten (no more single pass and no
+  micro-bounce).
+- **docs/03, docs/07, docs/00 and docs/08, and the README:** updated to M40; the
+  solver comes off the candidate lists.
+
 ## [M39] - 2026-10-10  (thermal walls: heat flow through a gas)
 
 ### Added

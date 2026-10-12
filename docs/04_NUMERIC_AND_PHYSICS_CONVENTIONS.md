@@ -82,32 +82,46 @@ settings applied as forcing, not force or torque accumulators (`CLAUDE.md`
 rule 5). Only `malloy_springs` accumulates forces, through its own network
 (ADR 0008).
 
-Contacts are impulses, resolved after the position update, in a fixed order and
-in ONE pass with no iteration: a positional correction along the normal, a
-normal impulse that reverses the closing speed scaled by the restitution, and
-then a Coulomb friction impulse computed from the velocity that remains,
-clamped to the friction coefficient times the normal impulse. A box contact
-manifold (box on ground, box against box) is reduced to one contact at its
-penetration-weighted centroid (the plain mean when its depths agree to within
-rounding), with the deepest penetration (issue #41).
+Since M40 rigid contacts are solved PER POINT, iteratively (ADR 0011), in a
+fixed order (body pairs ascending, then body against plane; points in the
+collide layer's order):
 
-Three fixed-step consequences follow from that design. The first is derived and
-documented; the other two are open defects.
+- **Detect** at the start-of-step poses. The queries are speculative: a pair
+  still apart by up to 1e-4 of the smaller body's size is kept, at a negative
+  penetration.
+- **Impact phase,** only when the restitution is above 0. Points approaching
+  faster than `4 dt (|g| + |F| / m_min)` at the middle of the step's forcing
+  leave at `e` times that approach. Points that were not approaching take no
+  part.
+- **Forcing,** exactly as before.
+- **Rest phase.** Sequential impulses drive every point to zero normal velocity,
+  or to `-gap/dt` for a point still apart.
+  - Impulses are accumulated and clamped: the normal never below 0, the
+    friction within `mu` times that point's accumulated normal impulse.
+  - In 3D the friction disc is projected in the tangent effective-mass metric
+    (Coulomb's maximum-dissipation law).
+  - The phase is warm-started from the last step's impulses.
+- **Integrate positions** from the solved velocities.
+- **Project positions** (nonlinear Gauss-Seidel, 3 passes). This removes the
+  penetration beyond a slop of 1e-6 of the size, keeping the world angular
+  momentum, so it adds no kinetic energy.
 
-- **Micro-bounce.** There is no restitution threshold, so a body resting on the
-  ground keeps a vertical speed of `e g dt / (1 + e)`: each step's gravity is
-  bounced back at restitution `e` (2.67e-3 in `box_drop.scn`).
-- **Static friction creeps.** Gravity moves a body before friction acts, so a
-  rigid body on a slope inside the friction cone still creeps down it, at a steady
-  `g sin(theta) dt` per unit time
-  ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
-- **Boxes do not fully settle.** One contact cannot stop several corners at
-  once. Since the penetration-weighted reduction (issue #41) a tilted box
-  rights itself and a 2D box comes to rest, but a 3D box still rocks at the
-  scale of one step's gravity ([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41)), and at restitution 1 a nudged
-  box gains energy without bound ([#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)). The real fix is a
-  per-point iterative contact solver, a milestone candidate
-  ([#73](https://github.com/MalloyTheDev/malloy_sim/issues/73)).
+Each phase stops when no point's constraint is violated by more than `1e-8`
+(rest) or `1e-12` (impact) times the velocity scale, or after 100 sweeps. The
+state decides the count, so a run repeats exactly.
+
+What this gives, and its limits:
+
+- **Rest.** A body resting on the ground has zero velocity: there is no
+  micro-bounce, a tilted box comes to rest, and short stacks stand.
+- **Friction holds.** Contacts are solved before positions move, so static
+  friction holds on a slope.
+- **Energy.** The velocity phases never raise the kinetic energy. Measured
+  energy can rise only by the projection lifting a body out of a penetration
+  it sank into after a fast impact.
+- **Limits.** Stacks taller than about five boxes may need more than the sweep
+  cap. A body much heavier than the one under it (1e4 times) still sinks,
+  slowly and without gaining energy.
 
 ## Kinetic theory (M38)
 

@@ -39,9 +39,9 @@ Several items that were on this list have since had their milestone and are no
 longer scope creep: config files (the scenario format, M7), collision geometry
 (M9), rigid bodies (M11), and 3D, which began with `Vec3` and 3D gravity (M19)
 and has since given every domain a 3D form, quaternions, the inertia tensor as a
-construction step, and 3D contact geometry (M20 to M34). What remains of 3D,
-rendering, a per-point contact solver and immovable 3D bodies among it, is still
-gated, and each piece needs its own milestone (`CLAUDE.md` rule 6,
+construction step, and 3D contact geometry (M20 to M34), and M40 added the
+per-point contact solver. What remains of 3D, rendering and immovable 3D bodies
+among it, is still gated, and each piece needs its own milestone (`CLAUDE.md` rule 6,
 `docs/07_POST_M5_ROADMAP.md`).
 
 The rule is the "until" clause, not the list. A list of names goes stale as

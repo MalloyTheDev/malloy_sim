@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M39 are complete, so this is the live roadmap for what comes next.
+M1-M40 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -54,6 +54,7 @@ M36 - 2D oriented boxes (SAT)               [done]
 M37 - a 2D box on a ground plane            [done]
 M38 - a hard-disk gas (kinetic theory)      [done]
 M39 - thermal walls (heat flow)             [done]
+M40 - per-point iterative contact solver    [done]
 ```
 
 ## What is next: milestone candidates
@@ -64,7 +65,6 @@ started until it is explicitly asked for, and it gets a number only then.
 
 | Issue | Candidate | Track |
 |---|---|---|
-| [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73) | per-point iterative contact solver for box manifolds (resting and stacking) | 1, 4 |
 | [#74](https://github.com/MalloyTheDev/malloy_sim/issues/74) | immovable 3D bodies (parity with 2D `rigid_static`) | 4 |
 | [#48](https://github.com/MalloyTheDev/malloy_sim/issues/48) | box against disc in 2D (until then, a 2D file that mixes the two is refused) | 1 |
 | [#75](https://github.com/MalloyTheDev/malloy_sim/issues/75) | a piston (moving wall) to do work on a gas | 3 |
@@ -76,19 +76,18 @@ started until it is explicitly asked for, and it gets a number only then.
 | [#80](https://github.com/MalloyTheDev/malloy_sim/issues/80) | real-time 3D rendering of the simulation (the destination of the 3D arc) | 4 |
 | [#81](https://github.com/MalloyTheDev/malloy_sim/issues/81) | a GUI, UI and UX over the rendering | 4 |
 | [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82) | package the libraries for reuse by other projects | 2 |
+| [#85](https://github.com/MalloyTheDev/malloy_sim/issues/85) | a rigid broadphase and a runtime contact-work budget, so large rigid scenes run | 4 |
 
-Open bugs are issues too. The ones that qualify claims made in these documents
-are noted where the claim is made: boxes that do not fully settle
-([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41), [#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)) and static
-friction that creeps ([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)). Fixing a bug is
-not a milestone, but a fix that changes an integrator or a template's numbers
+Open bugs are issues too; the ones that qualify a claim are noted where the
+claim is made. Fixing a bug is not a milestone, but a fix that changes an integrator or a template's numbers
 is a deliberate change recorded in `CHANGELOG.md`.
 
 ## Track 1: classical mechanics depth (complete)
 
 This was the committed stretch after M5. It turned one working domain into
 five, produced the first real template library, and is now complete; its
-remaining depth is in the candidates above (#73, #48, #78).
+remaining depth is in the candidates above (#48, #78), and M40 (the per-point
+contact solver, ADR 0011) returned to it.
 
 M9 shipped as a support library rather than a domain: `malloy_collide` works on
 shapes, not bodies, so it has no world and no scenario template, and rule 16
@@ -124,10 +123,10 @@ A tangential impulse clamped to the friction coefficient times the normal
 impulse gives rolling, spin-down, backspin reversal and static holding, none of
 which existed before, and it needs no new state on a body and no force
 accumulator: friction is computed and consumed inside a contact exactly as
-restitution is. Static holding is not exact: because gravity moves a body
-before friction acts, a body inside the friction cone creeps down a slope at
-`g sin(theta) dt` per unit time
-([#44](https://github.com/MalloyTheDev/malloy_sim/issues/44)).
+restitution is. Until M40 static holding was not exact: gravity moved a body
+before friction acted, so a body inside the friction cone crept down a slope at
+`g sin(theta) dt` per unit time. M40 solves contacts before positions move,
+which closed issue #44.
 
 What M17 makes visible is the next pressure point. Friction makes stacking look
 achievable, and the solver is a single pass with no iteration, so a stack will
@@ -135,9 +134,9 @@ not stand. That is where sequential-impulse iteration and then a constraint
 solver start pulling, and a constraint solver is where a `Constraint` base class
 grows. Rule 12 exists to stop exactly that, so it is named here and deferred
 rather than left to drift in. The box contacts of M30 to M37 sharpened it: even
-one box on a floor does not fully come to rest
-([#41](https://github.com/MalloyTheDev/malloy_sim/issues/41), [#83](https://github.com/MalloyTheDev/malloy_sim/issues/83)). The per-point
-solver is candidate [#73](https://github.com/MalloyTheDev/malloy_sim/issues/73).
+one box on a floor did not fully come to rest. M40 built the per-point solver
+without that base class: plain per-point structs local to each world, warm-
+started, stopped at a tolerance with a fixed cap (ADR 0011).
 
 M13 shipped as a separate `malloy_springs` domain rather than as springs inside
 `ParticleWorld`, because a spring network is interaction topology rather than
@@ -243,12 +242,12 @@ a general inertia tensor               [done, M25: compound spheres, parallel ax
 a box mass primitive, and combine      [done, M26: three moments, tilt, compound assembly]
 mass properties of an arbitrary mesh   [done, M27: signed-tetrahedron volume integrals]
 a translational force on a 3D body     [done, M28: constant force setting, F/m, no accumulator; the `force` key since #47]
-an oriented box against a plane        [done, M30: penetrating corners, one penetration-weighted centroid contact]
-box against box (SAT, edge-edge)       [done, M33: the clipped manifold resolved as one weighted centroid contact, a bounce]
+an oriented box against a plane        [done, M30: penetrating corners; every corner solved since M40]
+box against box (SAT, edge-edge)       [done, M33: the clipped manifold; every point solved since M40]
 box against a sphere                    [done, M34: the box's nearest point to the sphere centre, the last movable pair in 3D]
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 immovable 3D bodies                     [candidate, #74]
-a per-point iterative contact solver    [candidate, #73: resting boxes and stacks]
+a per-point iterative contact solver    [done, M40: resting boxes and short stacks, ADR 0011]
 rendering in 3D         [candidate, #80: the destination; terminal-first holds until then, ADR 0002]
 a GUI, UI and UX        [candidate, #81: after rendering, each its own milestone]
 ```
