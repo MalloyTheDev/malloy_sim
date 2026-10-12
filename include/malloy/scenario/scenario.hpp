@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <iosfwd>
 #include <string>
 #include <vector>
@@ -439,6 +440,18 @@ struct ScenarioParseResult
 //                        10, box-plane 40, sphere-plane 4; rigid box-box 40,
 //                        any other pair 5, box-ground 20, disc-ground 4. A body
 //                        is a box when all its half-extents are positive
+//   contact points       at most 250000 that a rigid or rigid3d world could
+//                        have to hold in memory at once (M40): every pair of
+//                        bodies that collide, and every such body against
+//                        every ground plane, each counted at the most points
+//                        that contact can report. In rigid3d that is 8 for a
+//                        box against a box (a clipped face polygon) or against
+//                        a plane (the corners past it), and 1 for any other
+//                        pair or plane; in rigid, 2 for a box against a box, 4
+//                        for a box against a ground, and 1 for any other pair
+//                        or ground. A body collides when it is a box or its
+//                        radius is above 0; one that is neither counts
+//                        nothing. Checked as each line is read
 //   reports              at most 1e5 (steps / output_every + 1); output_every
 //                        0 prints only the step-0 report
 //   line length          at most 4096 characters, comments included; the
@@ -461,4 +474,22 @@ ScenarioParseResult parse_scenario_file(const std::string& path);
 // parser itself still accepts such a fragment, because it checks syntax and
 // settings, not whether there is something to simulate.
 std::size_t entity_count(const Scenario& scenario);
+
+// The work one step of `scenario` does, in the work units of the budget above
+// (about 10 ns of Release time each): N for its N bodies, N + springs for the
+// springs domains, plus its pair tests, weighted by kind in the rigid domains,
+// exactly as listed under `work`. The parser refuses a file whose steps plus
+// reports, times this, exceed 1e11. Exported so a caller that has to bound a
+// run the way the parser does, such as the fuzzers, uses this one formula
+// rather than a copy of it that can drift (issue #84). Never negative; zero for
+// a scenario with nothing in it.
+double step_work(const Scenario& scenario);
+
+// The most contact points `scenario`'s world could have to hold at once, the
+// quantity the `contact points` cap above bounds: each pair of bodies that
+// collide, and each such body against each ground plane, counted at the most
+// points that contact can report. Zero for every domain but rigid and rigid3d,
+// which are the ones that keep a step's contact points (M40). Exported for the
+// same reason as step_work.
+std::uint64_t potential_contact_points(const Scenario& scenario);
 } // namespace malloy::scenario

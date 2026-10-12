@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -2400,6 +2401,137 @@ int main()
             MALLOY_CHECK_TRUE(r.error.find("plane") != std::string::npos);
         }
 
+        // M40: the contact point cap. A rigid world keeps a step's contact
+        // points in memory together, so the parser bounds how many it could
+        // have to hold: every colliding pair and every collider against every
+        // ground plane, at the most points that contact reports (rigid3d box
+        // pair or box-plane 8, anything else 1; rigid box pair 2, box-ground 4,
+        // anything else 1), at most 250000. Each file below is built to sit
+        // EXACTLY at 250000, so it parses and potential_contact_points reports
+        // 250000, and one more body or plane is refused on that line. A weight
+        // that drifts either way fails one side or the other. `steps 0` keeps
+        // the work far inside its own budget, so the cap is tested alone.
+        {
+            const auto repeat = [](int count, const std::string& line) {
+                std::string lines;
+                for (int i = 0; i < count; ++i)
+                {
+                    lines += line;
+                }
+                return lines;
+            };
+            const std::string head3 = "type rigid3d\nsteps 0\noutput_every 0\n";
+            const std::string head2 = "type rigid\nsteps 0\noutput_every 0\n";
+            const std::string box3 = "rigid_box3d 1 0.5 0.5 0.5 0 0 0 1 0 0 0 0 0 0 0 0 0\n";
+            const std::string sphere3 = "rigid_body3d 1 1 1 1 0.5 0 0 0 1 0 0 0 0 0 0 0 0 0\n";
+            const std::string ghost3 = "rigid_body3d 1 1 1 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0\n";
+            const std::string plane3 = "plane3 0 0 1 -100\n";
+            const std::string box2 = "rigid_box 1 0.5 0.5 0 0 0 0 0 0\n";
+            const std::string disc2 = "rigid_body 1 0.125 0.5 0 0 0 0 0 0 0 0\n";
+            const std::string static2 = "rigid_static 0.5 0 0 0\n";
+            const std::string ghost2 = "rigid_body 1 0.125 0 0 0 0 0 0 0 0 0\n";
+            const std::string ground = "ground 0 1 -100\n";
+            const std::string refusal = "scenario exceeds the maximum contact point count (250000)";
+
+            // Parses `at`, which must sit exactly at the cap, then `at` plus
+            // `extra`, which must be refused on line `line`. Lines follow the
+            // one that crosses, so a check made only at the end of the file
+            // would name the wrong line.
+            const auto at_cap_edge = [&](const std::string& label, const std::string& at,
+                                         const std::string& extra, std::size_t line) {
+                std::istringstream at_in(at);
+                const ScenarioParseResult inside = parse_scenario(at_in);
+                std::istringstream over_in(at + extra + "# past the cap\n# and more\n");
+                const ScenarioParseResult over = parse_scenario(over_in);
+                const std::string expected = "line " + std::to_string(line) + ": " + refusal;
+                const std::uint64_t points =
+                    inside.ok ? malloy::scenario::potential_contact_points(inside.scenario) : 0;
+                if (!inside.ok || points != 250000 || over.ok || over.error != expected)
+                {
+                    std::cerr << label << ": at the cap ok=" << inside.ok << " ("
+                              << inside.error << "), points " << points
+                              << "; one over ok=" << over.ok << " (" << over.error << ")\n";
+                    return false;
+                }
+                return true;
+            };
+
+            // rigid3d boxes and planes: 8 x (125 x 124 / 2) + 8 x 188 x 125
+            // = 62000 + 188000. The 126th box is line 3 + 188 + 126 = 317;
+            // a 189th plane after the boxes is line 3 + 188 + 125 + 1 = 317.
+            const std::string boxes3 = head3 + repeat(188, plane3) + repeat(125, box3);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d boxes, one more box", boxes3, box3, 317));
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d boxes, one more plane", boxes3, plane3, 317));
+
+            // rigid3d spheres and planes: 625 x 624 / 2 + 88 x 625
+            // = 195000 + 55000, one point each.
+            const std::string spheres3 = head3 + repeat(88, plane3) + repeat(625, sphere3);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d spheres", spheres3, sphere3, 3 + 88 + 626));
+
+            // rigid3d, every kind at once: 176 boxes, 21 spheres and 86 planes,
+            // 8 x 15400 + 176 x 21 + 210 + 86 x (8 x 176 + 21)
+            // = 123200 + 3696 + 210 + 122894. One more sphere adds 176 + 21 + 86.
+            const std::string mixed3 =
+                head3 + repeat(86, plane3) + repeat(176, box3) + repeat(21, sphere3);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d mixed", mixed3, sphere3, 3 + 86 + 176 + 22));
+
+            // rigid boxes and grounds: 2 x (125 x 124 / 2) + 4 x 469 x 125
+            // = 15500 + 234500.
+            const std::string boxes2 = head2 + repeat(469, ground) + repeat(125, box2);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid boxes", boxes2, box2, 3 + 469 + 126));
+
+            // rigid discs and grounds, half of them immovable (a static disc
+            // still collides with a movable one): 625 x 624 / 2 + 88 x 625.
+            const std::string discs2 =
+                head2 + repeat(88, ground) + repeat(313, disc2) + repeat(312, static2);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid discs", discs2, static2, 3 + 88 + 626));
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid discs, one more ground", discs2, ground,
+                                          3 + 88 + 626));
+
+            // One point over is refused: 189 boxes, 2 spheres and 71 planes are
+            // 8 x 17766 + 378 + 1 + 71 x 1514 = 250001, crossed by the second
+            // sphere on line 3 + 71 + 189 + 2. Without it, 249740, inside.
+            {
+                const std::string almost =
+                    head3 + repeat(71, plane3) + repeat(189, box3) + sphere3;
+                std::istringstream inside(almost);
+                const ScenarioParseResult in = parse_scenario(inside);
+                MALLOY_CHECK_TRUE(in.ok);
+                MALLOY_CHECK_TRUE(in.ok &&
+                                  malloy::scenario::potential_contact_points(in.scenario) == 249740);
+                std::istringstream one_over(almost + sphere3 + "# past the cap\n");
+                const ScenarioParseResult r = parse_scenario(one_over);
+                MALLOY_CHECK_FALSE(r.ok);
+                MALLOY_CHECK_EQ(r.error, "line 265: " + refusal);
+            }
+
+            // A body that collides with nothing holds no contact points, so any
+            // number of them beside a file at the cap still parses, in either
+            // dimension, and leaves the count where it was. That includes a box
+            // with a zero half-extent and no radius, which its world does not
+            // treat as a box (the degenerate box is left for validate()).
+            const std::string flat3 = "rigid_box3d 1 0.5 0.5 0 0 0 0 1 0 0 0 0 0 0 0 0 0\n";
+            const std::string flat2 = "rigid_box 1 0.5 0 0 0 0 0 0 0\n";
+            for (const std::string& file :
+                 {spheres3 + repeat(500, ghost3) + repeat(100, flat3),
+                  boxes2 + repeat(500, ghost2) + repeat(100, flat2)})
+            {
+                std::istringstream in(file);
+                const ScenarioParseResult r = parse_scenario(in);
+                MALLOY_CHECK_TRUE(r.ok);
+                MALLOY_CHECK_TRUE(r.ok &&
+                                  malloy::scenario::potential_contact_points(r.scenario) == 250000);
+            }
+
+            // Only the rigid domains keep contact points: 1000 particles, which
+            // collide, count none.
+            std::istringstream gas("type particles\nsteps 0\n" +
+                                   repeat(1000, "particle 1 0.01 0 0 0 0\n"));
+            const ScenarioParseResult g = parse_scenario(gas);
+            MALLOY_CHECK_TRUE(g.ok);
+            MALLOY_CHECK_TRUE(g.ok && malloy::scenario::potential_contact_points(g.scenario) == 0);
+        }
+
         // Issue #25: the WORK budget, steps plus reports, times the work a step
         // does, at most 1e11 units (a report's diagnostics cost about a step).
         // Issue #46 weighted it: a step costs a unit per body plus its tests,
@@ -2432,6 +2564,17 @@ int main()
                               << " steps: inside ok=" << in_budget.ok << " (" << in_budget.error
                               << "), one over ok=" << over_budget.ok << " ("
                               << over_budget.error << ")\n";
+                    return false;
+                }
+                // Issue #84: the exported step_work is the figure the parser
+                // charges, so a caller bounding a run with it (the fuzzers)
+                // counts exactly what the parser counts. Every W here is an
+                // integer below 2^53, so the comparison is exact.
+                const double exported = malloy::scenario::step_work(in_budget.scenario);
+                if (exported != static_cast<double>(per_step))
+                {
+                    std::cerr << head << "step_work gives " << exported << ", the edge needs "
+                              << per_step << '\n';
                     return false;
                 }
                 return true;
@@ -2564,6 +2707,27 @@ int main()
             }
             std::istringstream springs(chain.str());
             MALLOY_CHECK_TRUE(parse_scenario(springs).ok);
+        }
+
+        // Issue #84: step_work for the domains the edges above do not reach,
+        // by the documented formula: N(N-1)/2 + N for the other pairwise
+        // domains, N + springs for springs, and nothing for an empty file.
+        {
+            const auto work_of = [](const std::string& text) {
+                std::istringstream in(text);
+                const ScenarioParseResult r = parse_scenario(in);
+                return r.ok ? malloy::scenario::step_work(r.scenario) : -1.0;
+            };
+            MALLOY_CHECK_EQ(work_of(""), 0.0);
+            MALLOY_CHECK_EQ(work_of("type particles\nparticle 1 0.1 0 0 0 0\n"
+                                    "particle 1 0.1 1 0 0 0\nparticle 1 0.1 2 0 0 0\n"),
+                            6.0); // 3 pairs + 3 bodies
+            MALLOY_CHECK_EQ(work_of("type charges\ncharge 1 1 0 0 0 0\ncharge 1 -1 1 0 0 0\n"
+                                    "charge 1 1 2 0 0 0\ncharge 1 1 3 0 0 0\n"),
+                            10.0); // 6 pairs + 4 bodies
+            MALLOY_CHECK_EQ(work_of("type springs\nspring_body 1 0 0 0 0\nspring_body 1 1 0 0 0\n"
+                                    "spring_body 1 2 0 0 0\nspring 0 1 1 1 0\nspring 1 2 1 1 0\n"),
+                            5.0); // 3 bodies + 2 springs
         }
 
         // Issue #25: at most 1e5 reports, which bounds the output volume.

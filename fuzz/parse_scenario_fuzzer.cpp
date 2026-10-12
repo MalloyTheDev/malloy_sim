@@ -78,9 +78,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         }
 
         // Every resource cap scenario.hpp documents holds for a file the parser
-        // accepted (issue #66). The reports and the work are recomputed here
-        // from the documented formula, not taken from the parser, so a slip in
-        // the parser's own arithmetic shows up as a disagreement.
+        // accepted (issue #66). The counts are recomputed here from the
+        // documented formulas, not taken from the parser, so a slip in the
+        // parser's own arithmetic shows up as a disagreement. The weighted work
+        // and the contact point count come from the parser's exported functions
+        // (issue #84), each held against an independent lower bound.
         if (s.steps > 100000000)
         {
             fail("a successful parse exceeds the step cap (1e8)");
@@ -102,22 +104,66 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         {
             fail("a successful parse exceeds the report cap (1e5)");
         }
-        // Pair tests per step: N + springs for the linear springs domains, and
-        // N(N-1)/2 pairs plus N per body and N per ground plane otherwise, where
-        // N counts every entity but the springs.
-        const std::size_t springs =
-            s.spring_network.springs().size() + s.spring_network3d.springs().size();
-        const double n = static_cast<double>(entities - springs);
-        const bool linear = s.type == malloy::scenario::ScenarioType::Springs ||
-                            s.type == malloy::scenario::ScenarioType::Springs3D;
-        const double per_step =
-            linear ? n + static_cast<double>(springs)
-                   : n * (n - 1.0) / 2.0 + n * static_cast<double>(planes2 + planes3) + n;
+        // The work budget, through the parser's own step_work (issue #84), so
+        // this checks the cap the parser actually enforces rather than a copy
+        // of its formula, which went stale once when issue #46 weighted it.
+        const double per_step = malloy::scenario::step_work(s);
         const double work =
             (static_cast<double>(s.steps) + static_cast<double>(reports)) * per_step;
         if (work > 1e11)
         {
             fail("a successful parse exceeds the work budget (1e11)");
+        }
+        // And an independent lower bound on it, from the documented formula
+        // with every weight at 1: N + springs for the linear springs domains,
+        // and N(N-1)/2 pairs plus N per body and N per ground plane otherwise,
+        // where N counts every entity but the springs. Every weight the parser
+        // applies is at least 1, so a step_work below this (a weight under 1,
+        // a dropped term, a NaN) is a slip in the parser's own arithmetic.
+        const std::size_t springs =
+            s.spring_network.springs().size() + s.spring_network3d.springs().size();
+        const double n = static_cast<double>(entities - springs);
+        const bool linear = s.type == malloy::scenario::ScenarioType::Springs ||
+                            s.type == malloy::scenario::ScenarioType::Springs3D;
+        const double unweighted =
+            linear ? n + static_cast<double>(springs)
+                   : n * (n - 1.0) / 2.0 + n * static_cast<double>(planes2 + planes3) + n;
+        if (!(per_step >= unweighted))
+        {
+            fail("the parser's work per step is below the unweighted pair count");
+        }
+
+        // The contact point cap (M40), through the parser's own count, and an
+        // independent lower bound on that count: every pair of rigid bodies
+        // that collide (a box, or a radius above 0), and every such body
+        // against every ground plane, holds at least one point.
+        const std::uint64_t points = malloy::scenario::potential_contact_points(s);
+        if (points > 250000)
+        {
+            fail("a successful parse exceeds the contact point cap (250000)");
+        }
+        std::uint64_t colliders = 0;
+        for (const malloy::rigid::RigidBody2D& body : s.rigid_bodies)
+        {
+            if ((body.half_extents.x > 0.0 && body.half_extents.y > 0.0) || body.radius > 0.0)
+            {
+                ++colliders;
+            }
+        }
+        for (const malloy::rigid::RigidBody3D& body : s.rigid_bodies3d)
+        {
+            if ((body.half_extents.x > 0.0 && body.half_extents.y > 0.0 &&
+                 body.half_extents.z > 0.0) ||
+                body.radius > 0.0)
+            {
+                ++colliders;
+            }
+        }
+        const std::uint64_t collider_pairs = colliders > 0 ? colliders * (colliders - 1) / 2 : 0;
+        if (points < collider_pairs + colliders * (planes2 + planes3))
+        {
+            fail("the parser's contact point count is below one point per colliding pair "
+                 "and plane");
         }
 
         // No line, counted in bytes up to its newline, may pass 4096.

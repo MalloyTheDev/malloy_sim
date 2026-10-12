@@ -19,8 +19,10 @@
 // Every input must finish in milliseconds, so the run is bounded here, on top
 // of the parser's own caps. A scenario with more than 64 entities is skipped (it
 // still joins the corpus for the parser coverage it found). Any other scenario
-// runs, but only for its first steps: as many as fit in 1e4 pair tests, counted
-// the way the parser counts its work budget, and in 32 reports. Cutting a run
+// runs, but only for its first steps: as many as fit in 1e4 work units, counted
+// by the parser's own step_work (issue #84: this file used to carry a copy of
+// the formula, which went stale when issue #46 weighted it), and in 32 reports.
+// A step costlier than 1e4 units runs none, only its step-0 report. Cutting a run
 // short rather than skipping it means every shipped template, all of which run
 // for thousands of steps, still runs its opening.
 //
@@ -124,29 +126,14 @@ private:
     }
 };
 
-// The pair tests one step does, counted as the parser counts its work budget
-// (step_work in src/scenario/scenario.cpp, which is not exported). A drift
-// between the two would change only how far a run gets, not what is checked.
-double step_work(const malloy::scenario::Scenario& s)
-{
-    using malloy::scenario::ScenarioType;
-    const std::size_t springs =
-        s.spring_network.springs().size() + s.spring_network3d.springs().size();
-    const double n = static_cast<double>(malloy::scenario::entity_count(s) - springs);
-    if (s.type == ScenarioType::Springs || s.type == ScenarioType::Springs3D)
-    {
-        return n + static_cast<double>(springs);
-    }
-    const double planes =
-        static_cast<double>(s.rigid_settings.ground.size() + s.rigid3d_settings.ground.size());
-    return n * (n - 1.0) / 2.0 + n * planes + n;
-}
-
 // How many of its steps a parsed scenario may run here: as many as fit in the
-// work and report bounds, never more than it asked for.
+// work and report bounds, never more than it asked for. The work a step does is
+// the parser's own figure (issue #84), so the bound cannot drift from the
+// budget the parser enforces.
 int bounded_steps(const malloy::scenario::Scenario& s)
 {
-    long long allowed = static_cast<long long>(max_work / std::max(1.0, step_work(s)));
+    long long allowed =
+        static_cast<long long>(max_work / std::max(1.0, malloy::scenario::step_work(s)));
     if (s.output_every > 0)
     {
         allowed = std::min(allowed,

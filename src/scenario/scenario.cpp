@@ -117,6 +117,40 @@ constexpr long long max_reports = 100000;
 // were counted by no cap at all (issue #26). A container needs a handful.
 constexpr std::size_t max_planes = 1000;
 
+// The most contact points a rigid world could have to hold at once (M40). The
+// per-point contact solver keeps every point of a step in memory together, and
+// keeps the last step's as warm-start state, so memory grows with the pairs that
+// touch, which neither the entity cap nor the work budget bounds: a file of a
+// few thousand coincident bodies, inside both, could ask for tens of GB. This
+// caps the POTENTIAL count, every colliding pair and every body-plane test at
+// the most points that contact can report (see potential_contact_points below),
+// so it holds however the bodies end up arranged.
+//
+// The value is a memory ceiling of 1 GiB divided by a generous bound on what a
+// point costs. A 3D point record of the M40 design carries about nine vectors
+// (normal, point, two arms, two body-frame anchors, a tangent basis and the
+// accumulated friction) and a dozen scalars, about 330 bytes, taken as 512 to
+// cover padding and the 2D record. A point can be live in four copies at once:
+// the step's list, the impact phase's, the warm-start cache that is world state,
+// and that cache's rollback snapshot (2 KiB). Allowing as much again for the
+// per-manifold records and for std::vector growth gives 4 KiB a point, and
+// 1 GiB / 4 KiB = 262144, rounded down to 250000. The rigid templates hold at
+// most 190 (dropped_bodies.scn), over a thousand times inside.
+constexpr std::uint64_t max_contact_points = 250000;
+
+// The most points one contact can report, by kind, as the collide layer builds
+// them. In 3D a box face clipped against another box is a polygon of at most 8
+// vertices (a quad cut by four side planes), and a box sunk into a plane has at
+// most its 8 corners past it; every other 3D pair or plane is one point. In 2D a
+// clipped box edge has 2 ends and a box has 4 corners for a ground line; a disc
+// is one point. Box against disc is refused in 2D (issue #48) and counted as one
+// point, which is what it will be.
+constexpr std::uint64_t box3_box3_points = 8;
+constexpr std::uint64_t box3_plane_points = 8;
+constexpr std::uint64_t box2_box2_points = 2;
+constexpr std::uint64_t box2_ground_points = 4;
+constexpr std::uint64_t single_points = 1;
+
 // The longest line read. Lines were read whole before any check, so one
 // enormous line could allocate without limit (issue #29); the longest shipped
 // template line is about 100 characters.
@@ -203,58 +237,81 @@ std::string quoted(const std::string& token)
     return out;
 }
 
-// The work one step of this scenario does, in work units (see max_work): a unit
-// per body, plus its tests. Springs is linear, a body and a spring at a time.
-// The 2D nbody world evaluates every ORDERED pair, N(N-1) force terms
-// (src/nbody/nbody.cpp), and was counted as N(N-1)/2, half its cost (issue
-// #46); every other pairwise domain tests each pair once. The rigid domains
-// weight each pair, and each body's test against each ground plane, by its kind.
-double step_work(const Scenario& scenario, std::size_t bodies, std::size_t springs)
+// How many rigid bodies of each collider kind a scenario holds, as its world
+// classifies them: a box when every half-extent is positive, otherwise a round
+// body (a sphere, or a disc in 2D, static or not) when its radius is above 0. A
+// body that is neither collides with nothing and is not counted. `seen` is how
+// many bodies have been classified so far, so the parser counts as it reads, in
+// time proportional to the file rather than to its square.
+struct ColliderCount
 {
-    const double n = static_cast<double>(bodies);
-    if (scenario.type == ScenarioType::Springs || scenario.type == ScenarioType::Springs3D)
-    {
-        return n + static_cast<double>(springs);
-    }
-    if (scenario.type == ScenarioType::NBody)
-    {
-        return n * (n - 1.0) + n;
-    }
+    std::uint64_t boxes{0};
+    std::uint64_t rounds{0};
+    std::size_t seen{0};
+};
+
+// Classifies the bodies added since the last call. Only the list of the
+// scenario's own type is read; `type` is settled before any body line.
+void count_colliders(const Scenario& scenario, ColliderCount& count)
+{
     if (scenario.type == ScenarioType::Rigid3D)
     {
-        double boxes = 0.0;
-        for (const rigid::RigidBody3D& body : scenario.rigid_bodies3d)
+        for (; count.seen < scenario.rigid_bodies3d.size(); ++count.seen)
         {
+            const rigid::RigidBody3D& body = scenario.rigid_bodies3d[count.seen];
             if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0} &&
                 body.half_extents.z > math::Real{0})
             {
-                boxes += 1.0;
+                ++count.boxes;
+            }
+            else if (body.radius > math::Real{0})
+            {
+                ++count.rounds;
             }
         }
-        const double spheres = n - boxes;
-        const double planes = static_cast<double>(scenario.rigid3d_settings.ground.size());
-        return box3_box3_work * boxes * (boxes - 1.0) / 2.0 +
-               box3_sphere3_work * boxes * spheres +
-               sphere3_sphere3_work * spheres * (spheres - 1.0) / 2.0 +
-               planes * (box3_plane_work * boxes + sphere3_plane_work * spheres) + n;
+    }
+    else if (scenario.type == ScenarioType::Rigid)
+    {
+        for (; count.seen < scenario.rigid_bodies.size(); ++count.seen)
+        {
+            const rigid::RigidBody2D& body = scenario.rigid_bodies[count.seen];
+            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0})
+            {
+                ++count.boxes;
+            }
+            else if (body.radius > math::Real{0})
+            {
+                ++count.rounds;
+            }
+        }
+    }
+}
+
+// The potential contact points of a scenario with these colliders (see
+// max_contact_points): each colliding pair, and each collider against each
+// ground plane, at the most points that kind of contact reports. Exact in
+// unsigned 64-bit arithmetic: inside the parser the entity cap keeps a count at
+// or below 1e5, so the largest term is 8 x 1e5 x 1e5 / 2 = 4e10, and overflow
+// would need about 2e9 bodies.
+std::uint64_t contact_points(const Scenario& scenario, const ColliderCount& count)
+{
+    const std::uint64_t boxes = count.boxes;
+    const std::uint64_t rounds = count.rounds;
+    const std::uint64_t box_pairs = boxes > 0 ? boxes * (boxes - 1) / 2 : 0;
+    const std::uint64_t round_pairs = rounds > 0 ? rounds * (rounds - 1) / 2 : 0;
+    if (scenario.type == ScenarioType::Rigid3D)
+    {
+        const std::uint64_t planes = scenario.rigid3d_settings.ground.size();
+        return box3_box3_points * box_pairs + single_points * (boxes * rounds + round_pairs) +
+               planes * (box3_plane_points * boxes + single_points * rounds);
     }
     if (scenario.type == ScenarioType::Rigid)
     {
-        double boxes = 0.0;
-        for (const rigid::RigidBody2D& body : scenario.rigid_bodies)
-        {
-            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0})
-            {
-                boxes += 1.0;
-            }
-        }
-        const double discs = n - boxes;
-        const double planes = static_cast<double>(scenario.rigid_settings.ground.size());
-        return box2_box2_work * boxes * (boxes - 1.0) / 2.0 +
-               disc2_pair_work * (boxes * discs + discs * (discs - 1.0) / 2.0) +
-               planes * (box2_ground_work * boxes + disc2_ground_work * discs) + n;
+        const std::uint64_t planes = scenario.rigid_settings.ground.size();
+        return box2_box2_points * box_pairs + single_points * (boxes * rounds + round_pairs) +
+               planes * (box2_ground_points * boxes + single_points * rounds);
     }
-    return n * (n - 1.0) / 2.0 + n;
+    return 0;
 }
 
 // A `lattice` or `lattice3` line (M38), held until the whole file has been read
@@ -293,6 +350,8 @@ ScenarioParseResult parse_scenario(std::istream& input)
     std::size_t first_box_line = 0;
     std::size_t first_disc_line = 0;
     const char* first_disc_key = "";
+    // M40: the rigid colliders read so far, for the contact point cap.
+    ColliderCount colliders;
 
     for (;;)
     {
@@ -1394,6 +1453,16 @@ ScenarioParseResult parse_scenario(std::istream& input)
         {
             return make_error(line_number, "scenario exceeds the maximum entity count (100000)");
         }
+
+        // M40: so is the contact point cap, which grows with each colliding
+        // body and each ground plane, so the error names the line that crossed
+        // it. Only the bodies this line added are classified.
+        count_colliders(scenario, colliders);
+        if (contact_points(scenario, colliders) > max_contact_points)
+        {
+            return make_error(line_number,
+                              "scenario exceeds the maximum contact point count (250000)");
+        }
     }
 
     // --- #7: read_line stops on a read error as well as on end of input, so a
@@ -1464,14 +1533,12 @@ ScenarioParseResult parse_scenario(std::istream& input)
     // the nbody and charges domains, so the work counts the reports as well as
     // the steps: otherwise a `steps 0` file of 1e5 bodies counted as no work,
     // while its one report ran 5e9 pair tests.
-    const std::size_t springs =
-        scenario.spring_network.springs().size() + scenario.spring_network3d.springs().size();
     const long long reports =
         scenario.output_every > 0
             ? static_cast<long long>(scenario.steps) / scenario.output_every + 1
             : 1;
     const double work = (static_cast<double>(scenario.steps) + static_cast<double>(reports)) *
-                        step_work(scenario, total_entities - springs, springs);
+                        step_work(scenario);
     if (work > max_work)
     {
         return ScenarioParseResult{
@@ -1502,6 +1569,70 @@ std::size_t entity_count(const Scenario& scenario)
            scenario.spring_bodies.size() + scenario.spring_bodies3d.size() +
            scenario.spring_network.springs().size() +
            scenario.spring_network3d.springs().size();
+}
+
+// The work one step does, in work units (see max_work): a unit per body, plus
+// its tests. Springs is linear, a body and a spring at a time. The 2D nbody
+// world evaluates every ORDERED pair, N(N-1) force terms (src/nbody/nbody.cpp),
+// and was counted as N(N-1)/2, half its cost (issue #46); every other pairwise
+// domain tests each pair once. The rigid domains weight each pair, and each
+// body's test against each ground plane, by its kind. Public since issue #84,
+// so the fuzzers bound a run with this formula and not with a copy of it.
+double step_work(const Scenario& scenario)
+{
+    const std::size_t springs =
+        scenario.spring_network.springs().size() + scenario.spring_network3d.springs().size();
+    const double n = static_cast<double>(entity_count(scenario) - springs);
+    if (scenario.type == ScenarioType::Springs || scenario.type == ScenarioType::Springs3D)
+    {
+        return n + static_cast<double>(springs);
+    }
+    if (scenario.type == ScenarioType::NBody)
+    {
+        return n * (n - 1.0) + n;
+    }
+    if (scenario.type == ScenarioType::Rigid3D)
+    {
+        double boxes = 0.0;
+        for (const rigid::RigidBody3D& body : scenario.rigid_bodies3d)
+        {
+            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0} &&
+                body.half_extents.z > math::Real{0})
+            {
+                boxes += 1.0;
+            }
+        }
+        const double spheres = n - boxes;
+        const double planes = static_cast<double>(scenario.rigid3d_settings.ground.size());
+        return box3_box3_work * boxes * (boxes - 1.0) / 2.0 +
+               box3_sphere3_work * boxes * spheres +
+               sphere3_sphere3_work * spheres * (spheres - 1.0) / 2.0 +
+               planes * (box3_plane_work * boxes + sphere3_plane_work * spheres) + n;
+    }
+    if (scenario.type == ScenarioType::Rigid)
+    {
+        double boxes = 0.0;
+        for (const rigid::RigidBody2D& body : scenario.rigid_bodies)
+        {
+            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0})
+            {
+                boxes += 1.0;
+            }
+        }
+        const double discs = n - boxes;
+        const double planes = static_cast<double>(scenario.rigid_settings.ground.size());
+        return box2_box2_work * boxes * (boxes - 1.0) / 2.0 +
+               disc2_pair_work * (boxes * discs + discs * (discs - 1.0) / 2.0) +
+               planes * (box2_ground_work * boxes + disc2_ground_work * discs) + n;
+    }
+    return n * (n - 1.0) / 2.0 + n;
+}
+
+std::uint64_t potential_contact_points(const Scenario& scenario)
+{
+    ColliderCount count;
+    count_colliders(scenario, count);
+    return contact_points(scenario, count);
 }
 
 ScenarioParseResult parse_scenario_file(const std::string& path)
