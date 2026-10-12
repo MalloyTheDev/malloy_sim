@@ -1,5 +1,6 @@
 #include <malloy/rigid/rigid.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -15,11 +16,100 @@ namespace malloy::rigid
 {
 namespace
 {
+// ============================================================================
+// M40: the per-point iterative contact solver (issue #73).
+//
+// Every constant below is defined once, here, with its derivation; the step
+// contract in rigid3d_world.hpp states each of them. The measurements quoted
+// are from the M40 research prototype and the tests that pin them.
+// ============================================================================
+
+// Speculative margin, as a fraction of the smaller body's size: a pair still
+// apart by up to this is kept as a contact with a negative penetration (the
+// gap), and the rest phase lets it close the gap but not pass it. It must
+// exceed any motion of a body at rest (the rest tolerance below leaves at most
+// about 1e-8 g dt of velocity, under 1e-12 of a size per step) and the slop,
+// so a resting point inside the slop band is always inside the margin; and it
+// must be invisible, since a bounce can start from a gap this wide. Without it
+// a resting corner rounds clear of the floor, drops out of the manifold, and
+// falls for a step: a three-box stack then drifts 3.9e-5 of a size in 10 s
+// and a box on a slope creeps 2.2e-5 (0.39 at dt 0.01). Any value from 1e-6 to
+// 1e-2 measured the same; 1e-4 sits two decades inside both ends.
+constexpr math::Real kMarginFraction = 1e-4;
+
+// Allowed penetration, as a fraction of the smaller body's size, below which
+// the position projection does not push. At least 1e10 times position rounding
+// (about 1e-16 of a size), so the projection never chases rounding (a slop of
+// 0 cost 18 sweeps a step instead of 2); and no larger than the precision a
+// template states for a resting height (bouncing_sphere's position_z, 1e-6 at
+// radius 0.5). Dynamics measured the same from 1e-9 to 1e-2.
+constexpr math::Real kSlopFraction = 1e-6;
+
+// Fraction of the remaining penetration (beyond the slop) one projection push
+// removes, Box2D's position factor. Below 1 so several points that share a
+// body do not overshoot each other. Measured the same from 0.1 to 1.
+constexpr math::Real kProjectionFactor = 0.2;
+
+// Projection passes per step, and the largest single push as a fraction of the
+// size (Box2D's 3 and 0.2 m for metre-sized bodies). Measured the same from 1
+// to 10 passes; the cap only matters for a deep overlap, which it spreads over
+// a few steps instead of launching a body.
+constexpr int kProjectionPasses = 3;
+constexpr math::Real kMaxCorrectionFraction = 0.2;
+
+// Sweep termination: stop when no point's constraint is violated by more than
+// this times the velocity scale (the largest speed in contact, or one step of
+// the external acceleration, whichever is larger). Rest: 1e-8. At 1e-6 a
+// symmetric drop kept a 1.4e-9 rad/s spin (box_drop.scn checks 1e-9); 1e-8
+// gives 2.7e-11 for about 2 sweeps a step at rest. Impacts, which are rare and
+// violent and decide whether a symmetric landing stays symmetric: 1e-12
+// (about 60 sweeps for a frictional landing). Both stop at 100 sweeps, a cap
+// short stacks never reach at rest; a stack of eight twisted boxes needs about
+// 300 and is beyond this milestone.
+constexpr math::Real kRestTolerance = 1e-8;
+constexpr math::Real kImpactTolerance = 1e-12;
+constexpr int kMaxSweeps = 100;
+
+// Restitution threshold, as a multiple of dt (|g| + |F| / m_min): a point
+// approaching slower than this at mid-step is not an impact, and the rest phase
+// stops it instead. A free body's resting contact approaches at |a| dt / 2 at
+// mid-step, and one that fell clear for a step at 1.5 |a| dt. But a point of a
+// body PIVOTING on another contact falls faster than the body: about a pivot P
+// the far point Q accelerates at |a| d_G d_Q / (I_P / m) <= |a| d_Q / d_G
+// (d the horizontal distances from P, I_P >= m d_G^2), and a box's centre of
+// mass lies over the middle of its face, so the corner opposite the pivot has
+// d_Q = 2 d_G and falls at up to 2 |a|. Fell clear for a step, it approaches at
+// 1.5 x 2 = 3 |a| dt; four clears that with the 4/3 margin that two had over
+// 1.5. At two, a box nudged at e 1 and dt 0.002 kept rattling on alternate
+// corners, its strikes resolved a step late and so never slow enough to rest:
+// 6 of 48 nudges with friction 0.5 and 32 of 48 frictionless (up to 1.5e-2 J
+// after 15 s). At four, all 48 rest with friction and the frictionless ones are
+// below 2e-10 J.
+constexpr math::Real kThresholdFactor = 4.0;
+
+// Warm-start match radius for two boxes, as a fraction of body a's size: the
+// nearest last-step point within it, in a's own frame, lends its impulses.
+// Clipped manifold points of a resting pair repeat to rounding; a new point
+// this far from every old one is a new contact and starts from 0.
+constexpr math::Real kWarmMatchFraction = 0.05;
+
+// A manifold is LEVEL when its depths agree to within this fraction of the
+// boxes' size, the collide layer's touch-tolerance convention: its centroid
+// weights are then equal rather than depth-weighted (issue #41).
+constexpr math::Real kLevelTolerance = 1e-9;
+
+// The friction disc projection (project_to_disc) stops when the projected
+// impulse is within this fraction of the disc's radius, a few roundings, or
+// after this many iterations. Newton from the bracket's low end converges in
+// about 3 to 5 for any tangent effective mass; the cap is the bisection fallback
+// that halves a bracket at most k_max / k_min wide to rounding.
+constexpr math::Real kDiscTolerance = 1e-14;
+constexpr int kDiscIterations = 60;
+
 // The world-frame inverse inertia applied to a vector: R I^-1 R^T x. The stored
 // inertia is the diagonal of principal moments in the body frame, so this
-// rotates x into the body frame, divides component-wise, and rotates back. The
-// same body-frame bridge Euler's equations use for the torque (M21), now for a
-// contact impulse. For an isotropic (spherical) body it reduces to x / I.
+// rotates x into the body frame, divides component-wise, and rotates back. For
+// an isotropic (spherical) body it reduces to x / I.
 math::Vec3 inverse_inertia_world(const RigidBody3D& body, const math::Vec3& x)
 {
     const math::Vec3 body_frame = math::rotate(math::conjugate(body.orientation), x);
@@ -27,156 +117,6 @@ math::Vec3 inverse_inertia_world(const RigidBody3D& body, const math::Vec3& x)
                             body_frame.y / body.inertia.y,
                             body_frame.z / body.inertia.z};
     return math::rotate(body.orientation, scaled);
-}
-
-// One side of a contact: a real body with the arm from its centre of mass to
-// the contact point, or the immovable plane (body == nullptr), which
-// contributes nothing and receives nothing. The plane as a zero-inverse-mass
-// participant is the 3D echo of the 2D `resolve_ground` stand-in body: it lets
-// one impulse formula serve both a sphere against a plane and a sphere against
-// a sphere, so the formula is never written twice (ADR 0008).
-struct Participant
-{
-    RigidBody3D* body;
-    math::Vec3 arm;
-};
-
-math::Real inverse_mass_of(const Participant& p)
-{
-    return p.body ? math::Real{1} / p.body->mass : math::Real{0};
-}
-
-// Velocity of the participant's material point at the contact: v + omega x r,
-// with omega in the world frame. Zero for the immovable plane.
-math::Vec3 contact_velocity_of(const Participant& p)
-{
-    if (!p.body)
-    {
-        return math::Vec3{};
-    }
-    const math::Vec3 omega_world =
-        math::rotate(p.body->orientation, p.body->angular_velocity);
-    return p.body->velocity + math::cross(omega_world, p.arm);
-}
-
-// The rotational part of the effective mass along a direction d:
-// d . [(I^-1 (r x d)) x r]. Zero for a plane, and zero for any d parallel to
-// the arm (so a centred sphere's normal impulse has no rotational term).
-math::Real angular_effective_mass(const Participant& p, const math::Vec3& d)
-{
-    if (!p.body)
-    {
-        return math::Real{0};
-    }
-    return math::dot(
-        d, math::cross(inverse_inertia_world(*p.body, math::cross(p.arm, d)), p.arm));
-}
-
-// Apply an impulse `signed_impulse` to a participant: change its velocity by
-// J/m and its angular velocity by I^-1 (r x J). The caller passes +J to one
-// side and -J to the other, so the pair exchanges momentum exactly.
-void apply_impulse(const Participant& p, const math::Vec3& signed_impulse)
-{
-    if (!p.body)
-    {
-        return;
-    }
-    const math::Real inverse_mass = math::Real{1} / p.body->mass;
-    p.body->velocity += signed_impulse * inverse_mass;
-    const math::Vec3 angular_world =
-        inverse_inertia_world(*p.body, math::cross(p.arm, signed_impulse));
-    p.body->angular_velocity +=
-        math::rotate(math::conjugate(p.body->orientation), angular_world);
-}
-
-// Resolve one contact between two participants: a positional correction, a
-// normal impulse with restitution, then a tangential friction impulse clamped
-// to the Coulomb cone. `normal` points from a toward b, and the relative
-// velocity is taken as b's minus a's, matching the 2D apply_contact.
-//
-// This is the whole contact response, and it serves both the ground (b is the
-// plane) and a sphere pair (both real). A centred sphere's normal impulse has
-// no lever arm, so it imparts no spin; friction is tangential, so it does.
-void resolve_pair(const Participant& a, const Participant& b,
-                  const math::Vec3& normal, math::Real penetration,
-                  const Rigid3DSettings& settings)
-{
-    const math::Real inverse_mass_a = inverse_mass_of(a);
-    const math::Real inverse_mass_b = inverse_mass_of(b);
-    const math::Real inverse_sum = inverse_mass_a + inverse_mass_b;
-    if (!(inverse_sum > math::Real{0}))
-    {
-        return; // two immovable things never resolve
-    }
-
-    // Positional correction, split by inverse mass so the heavier body moves
-    // less. The plane, with zero inverse mass, does not move.
-    if (penetration > math::Real{0})
-    {
-        const math::Vec3 correction = normal * (penetration / inverse_sum);
-        if (a.body)
-        {
-            a.body->position -= correction * inverse_mass_a;
-        }
-        if (b.body)
-        {
-            b.body->position += correction * inverse_mass_b;
-        }
-    }
-
-    // Normal impulse. Closing speed is the relative velocity along the normal;
-    // negative when the two are approaching. If already separating, do nothing.
-    const math::Vec3 relative = contact_velocity_of(b) - contact_velocity_of(a);
-    const math::Real closing = math::dot(relative, normal);
-    if (closing >= math::Real{0})
-    {
-        return;
-    }
-    const math::Real effective = inverse_sum + angular_effective_mass(a, normal) +
-                                 angular_effective_mass(b, normal);
-    if (!(effective > math::Real{0}))
-    {
-        return;
-    }
-    const math::Real normal_magnitude =
-        -(math::Real{1} + settings.restitution) * closing / effective;
-    const math::Vec3 normal_impulse = normal * normal_magnitude;
-    apply_impulse(a, -normal_impulse);
-    apply_impulse(b, normal_impulse);
-
-    // Friction: a tangential impulse, from the velocity that REMAINS after the
-    // normal impulse (the observable 2D ordering), clamped to the Coulomb cone.
-    if (!(settings.friction > math::Real{0}))
-    {
-        return;
-    }
-    const math::Vec3 remaining = contact_velocity_of(b) - contact_velocity_of(a);
-    const math::Vec3 sideways = remaining - normal * math::dot(remaining, normal);
-    const math::Real sliding = math::length(sideways);
-    if (!(sliding > math::Real{0}))
-    {
-        return; // not sliding; invent no tangent (the 2D no-fallback rule)
-    }
-    const math::Vec3 tangent = sideways / sliding;
-    const math::Real tangent_effective = inverse_sum +
-                                         angular_effective_mass(a, tangent) +
-                                         angular_effective_mass(b, tangent);
-    if (!(tangent_effective > math::Real{0}))
-    {
-        return;
-    }
-    math::Real tangent_magnitude = sliding / tangent_effective;
-    const math::Real limit = settings.friction * normal_magnitude;
-    if (tangent_magnitude > limit)
-    {
-        tangent_magnitude = limit; // Coulomb's cone
-    }
-    const math::Vec3 friction_impulse = tangent * tangent_magnitude;
-    // Friction opposes the slide, which points from a toward b along `tangent`,
-    // so a receives +friction_impulse and b receives -friction_impulse (the
-    // opposite of the normal impulse's sign).
-    apply_impulse(a, friction_impulse);
-    apply_impulse(b, -friction_impulse);
 }
 
 // A body collides as an oriented box when all three half-extents are positive;
@@ -188,205 +128,1131 @@ bool body_is_box(const RigidBody3D& body)
            body.half_extents.y > math::Real{0} && body.half_extents.z > math::Real{0};
 }
 
-// The one contact a whole box manifold (box on a plane, M30, or box against
-// box, M33) is reduced to: the PENETRATION-WEIGHTED centroid of its points,
-// with the deepest penetration. The 3D sibling of the 2D reduce_manifold, and
-// the reasons are the same (issue #41).
-//
-// The plain mean of a tilted face's penetrating corners sits toward the RAISED
-// side of the centre of mass, so the normal impulse tipped the box further and,
-// with the translation-only correction lifting it each step, a box resting on
-// the ground rocked forever and gained energy even at restitution 0. Weighting
-// by depth, as a contact whose force grows with penetration would, puts the
-// resultant toward the deeper corners and rights the box. The weights are
-// non-negative, so the point stays within the manifold.
-//
-// A LEVEL manifold, whose depths agree to within kLevelTolerance times the
-// boxes' size (the collide layer's touch-tolerance convention), takes the plain
-// mean as before, so a flat landing still makes no torque. That covers a bare
-// touch, every depth 0 and nothing to weight by, and a bare touch whose depths
-// are themselves rounding, which weighting would turn into an arbitrary lever
-// arm: two turned boxes meeting head-on can first touch at depths near 1e-16
-// that differ by a few 1e-17, and 3 of the 6 turned head-on hits in the issue
-// #23 test then spun.
-//
-// Still one contact, not a per-point solve: it cannot stop several corners at
-// once, so a box on the ground keeps a small chatter at the scale of one step's
-// gravity (about m g^2 dt^2) until the iterative contact solver of issue #73.
-constexpr math::Real kLevelTolerance = 1e-9;
-
-struct ManifoldContact
+// The size every contact tolerance scales with: a box's largest half-width, or
+// a sphere's radius (0 for a body that does not collide).
+math::Real collider_size(const RigidBody3D& body)
 {
-    math::Vec3 point;
-    math::Real penetration;
-};
-
-ManifoldContact reduce_manifold(const std::vector<collide::Contact3>& hits,
-                                math::Real size)
-{
-    math::Vec3 sum{};
-    math::Vec3 weighted{};
-    math::Real total_depth = 0.0;
-    math::Real deepest = 0.0;
-    math::Real shallowest = std::numeric_limits<math::Real>::infinity();
-    for (const collide::Contact3& hit : hits)
-    {
-        sum += hit.point;
-        weighted += hit.point * hit.penetration;
-        total_depth += hit.penetration;
-        deepest = std::fmax(deepest, hit.penetration);
-        shallowest = std::fmin(shallowest, hit.penetration);
-    }
-    // Not level means the deepest point is deeper than the shallowest by more
-    // than the tolerance, so the total depth is positive and the weighted mean
-    // is defined.
-    const bool level = !(deepest - shallowest > kLevelTolerance * size);
-    const math::Vec3 point = level ? sum / static_cast<math::Real>(hits.size())
-                                   : weighted / total_depth;
-    return ManifoldContact{point, deepest};
-}
-
-// The largest half-width of a box, the size the level test scales with.
-math::Real box_size(const RigidBody3D& body)
-{
-    return std::fmax(std::fmax(body.half_extents.x, body.half_extents.y),
-                     body.half_extents.z);
-}
-
-// A body against one immovable ground plane (M22, M23 for a sphere; M30 for a
-// box): the plane is the null participant.
-void resolve_ground3d(RigidBody3D& body, const collide::Plane3& plane,
-                      const Rigid3DSettings& settings)
-{
-    const Participant ground{nullptr, math::Vec3{}};
-
     if (body_is_box(body))
     {
-        // A box against a plane touches at up to four corners at once. Rather
-        // than resolve each corner in sequence, which would inject a spurious
-        // torque on a symmetric landing (the corners are handled one at a time,
-        // so the body is no longer symmetric by the second), the coplanar
-        // manifold is reduced to a SINGLE contact at the penetration-weighted
-        // CENTROID of the penetrating corners, resolved with the deepest
-        // penetration (reduce_manifold, issue #41). For a flat face the corners
-        // are equally deep, so that centroid lies directly below the centre of
-        // mass, the normal impulse passes through it and makes no torque: a
-        // flat drop stays flat and its angular momentum is conserved. For a
-        // corner or edge landing the centroid is that corner or edge, which is
-        // the correct lever arm, so the box tips and tumbles as it should; a
-        // tilted face puts it toward the deeper corners, so the impulse rights
-        // the box. A full per-corner manifold with an iterative solver, needed
-        // to stand a stack or to bring a rocking box fully to rest, is a later
-        // milestone (issue #73; the same boundary the 2D solver drew).
-        const collide::Box3 shape{body.position, body.half_extents, body.orientation};
-        const std::vector<collide::Contact3> hits = collide::contacts(shape, plane);
-        if (hits.empty())
-        {
-            return;
-        }
-        const ManifoldContact manifold = reduce_manifold(hits, box_size(body));
-        const Participant box_body{&body, manifold.point - body.position};
-        resolve_pair(box_body, ground, -plane.normal, manifold.penetration, settings);
-        return;
+        return std::fmax(std::fmax(body.half_extents.x, body.half_extents.y),
+                         body.half_extents.z);
     }
-
-    if (!(body.radius > math::Real{0})) // zero radius does not collide
-    {
-        return;
-    }
-    const std::optional<collide::Contact3> hit =
-        collide::contact(collide::Sphere{body.position, body.radius}, plane);
-    if (!hit)
-    {
-        return;
-    }
-    const Participant sphere{&body, hit->normal * body.radius};
-    resolve_pair(sphere, ground, hit->normal, hit->penetration, settings);
+    return body.radius;
 }
 
-// Body against body: sphere against sphere (M24), box against box (M33), or box
-// against sphere (M34). Every pair runs the shared impulse core with the normal
-// pointing from a toward b; only the contact that feeds it differs.
-void resolve_contact3d(RigidBody3D& a, RigidBody3D& b,
-                       const Rigid3DSettings& settings)
+// One point of a contact manifold, for one step. `b` is the other body, or the
+// plane index when `ground` (an immovable participant with zero inverse mass).
+struct ContactPoint
 {
-    // Two boxes resolve through the separating-axis contact (M33). The clipped
-    // contact manifold is reduced to ONE contact at its penetration-weighted
-    // centroid with the deepest penetration, exactly as M30 reduces a box on a
-    // plane (reduce_manifold, issue #41): a face resting level on a face pushes
-    // through the middle of the touch, so two aligned boxes meeting head-on
-    // trade momentum along the line of centres with no torque, while a corner,
-    // an edge, a tilted face or an offset overlap lands the centroid off the
-    // centre of mass and spins them as it should. (Until the review pass after
-    // M37 this used the single vertex `collide::contact` reports, which sits on
-    // a face corner and invented a lever arm for a head-on hit.) One contact,
-    // not a per-point solve: enough for a correct bounce, not for a stable
-    // stack, which needs the iterative solver of issue #73.
-    if (body_is_box(a) && body_is_box(b))
+    std::size_t a{0};
+    std::size_t b{0};
+    bool ground{false};
+    int key{-1};                // warm-start feature (see WarmContact)
+    math::Vec3 normal{};        // unit, from a toward b
+    math::Vec3 arm_a{};         // a's centre of mass to the point (world)
+    math::Vec3 arm_b{};
+    math::Vec3 local{};         // the point in a's body frame
+    math::Vec3 anchor_a{};      // projection anchors: a's surface point in its
+    math::Vec3 anchor_b{};      // frame (a sphere's centre), b's likewise or,
+    math::Real radius_a{0.0};   // for the ground, the world point on the plane;
+    math::Real radius_b{0.0};   // a sphere adds its radius along the normal
+    math::Real penetration{0.0}; // signed: negative is a speculative gap
+    math::Real weight{0.0};     // share of the manifold's centroid
+    math::Real normal_mass{0.0}; // k along the normal
+    math::Vec3 tangent1{};
+    math::Vec3 tangent2{};
+    math::Real k11{0.0};        // the 2x2 tangent block of k
+    math::Real k12{0.0};
+    math::Real k22{0.0};
+    math::Real target{0.0};     // the normal velocity this phase drives toward
+    math::Real normal_impulse{0.0};
+    math::Vec3 tangent_impulse{};
+    bool active{true};
+};
+
+// The points [first, first + count) of one body pair's manifold.
+struct Manifold
+{
+    std::size_t first{0};
+    std::size_t count{0};
+    math::Real scale{0.0};      // the smaller body's size: margin, slop, push cap
+    math::Real level_size{0.0}; // the larger: the level test
+};
+
+// A body's velocities while a phase runs: the world-frame angular velocity at
+// the start of the phase plus the change the phase has made, kept apart so a
+// body's own body-frame spin is only ever adjusted by that change.
+struct SolverBody
+{
+    math::Vec3 velocity{};
+    math::Vec3 spin{};          // world frame, at the phase start
+    math::Vec3 spin_change{};   // world frame, accumulated this phase
+    math::Mat3 inverse_inertia{};
+    math::Real inverse_mass{0.0};
+    bool touched{false};
+};
+
+struct Contacts
+{
+    std::vector<ContactPoint> points;
+    std::vector<Manifold> manifolds;
+};
+
+void add_point(const std::vector<RigidBody3D>& bodies, Contacts& contacts, std::size_t a,
+               std::size_t b, bool ground, int key, const math::Vec3& normal,
+               const math::Vec3& point, math::Real penetration, const math::Vec3& arm_a,
+               const math::Vec3& arm_b)
+{
+    ContactPoint c;
+    c.a = a;
+    c.b = b;
+    c.ground = ground;
+    c.key = key;
+    c.normal = normal;
+    c.penetration = penetration;
+    c.arm_a = arm_a;
+    c.arm_b = arm_b;
+    const RigidBody3D& body_a = bodies[a];
+    c.local = math::rotate(math::conjugate(body_a.orientation), point - body_a.position);
+    // Each body's own surface point: the contact point is midway, so a's lies
+    // half the penetration along the normal, b's half against it.
+    const math::Vec3 surface_a = point + normal * (penetration / math::Real{2});
+    const math::Vec3 surface_b = point - normal * (penetration / math::Real{2});
+    if (body_is_box(body_a))
     {
-        const collide::Box3 shape_a{a.position, a.half_extents, a.orientation};
-        const collide::Box3 shape_b{b.position, b.half_extents, b.orientation};
-        const std::vector<collide::Contact3> hits = collide::contacts(shape_a, shape_b);
-        if (hits.empty())
+        c.anchor_a = math::rotate(math::conjugate(body_a.orientation),
+                                  surface_a - body_a.position);
+    }
+    else
+    {
+        c.radius_a = body_a.radius; // the centre, plus the radius along the normal
+    }
+    if (ground)
+    {
+        c.anchor_b = surface_b;
+    }
+    else
+    {
+        const RigidBody3D& body_b = bodies[b];
+        if (body_is_box(body_b))
+        {
+            c.anchor_b = math::rotate(math::conjugate(body_b.orientation),
+                                      surface_b - body_b.position);
+        }
+        else
+        {
+            c.radius_b = body_b.radius;
+        }
+    }
+    contacts.points.push_back(c);
+}
+
+// Closes the manifold opened at `first`: its centroid weights are each point's
+// penetration share (negatives count as 0), or equal when the manifold is level
+// or nothing penetrates, as reduce_manifold weighted them before M40.
+void close_manifold(Contacts& contacts, std::size_t first, math::Real scale,
+                    math::Real level_size)
+{
+    const std::size_t count = contacts.points.size() - first;
+    if (count == 0)
+    {
+        return;
+    }
+    math::Real deepest = -std::numeric_limits<math::Real>::infinity();
+    math::Real shallowest = std::numeric_limits<math::Real>::infinity();
+    math::Real total = 0.0;
+    for (std::size_t k = first; k < contacts.points.size(); ++k)
+    {
+        const math::Real depth = contacts.points[k].penetration;
+        deepest = std::fmax(deepest, depth);
+        shallowest = std::fmin(shallowest, depth);
+        total += std::fmax(math::Real{0}, depth);
+    }
+    const bool level = !(deepest - shallowest > kLevelTolerance * level_size);
+    for (std::size_t k = first; k < contacts.points.size(); ++k)
+    {
+        ContactPoint& c = contacts.points[k];
+        c.weight = (level || !(total > math::Real{0}))
+                       ? math::Real{1} / static_cast<math::Real>(count)
+                       : std::fmax(math::Real{0}, c.penetration) / total;
+    }
+    contacts.manifolds.push_back(Manifold{first, count, scale, level_size});
+}
+
+// Every contact of the step, at the current poses, in the fixed order of the
+// step contract.
+void detect(const std::vector<RigidBody3D>& bodies, const Rigid3DSettings& settings,
+            Contacts& contacts)
+{
+    const std::size_t count = bodies.size();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        for (std::size_t j = i + 1; j < count; ++j)
+        {
+            const RigidBody3D& a = bodies[i];
+            const RigidBody3D& b = bodies[j];
+            const math::Real size_a = collider_size(a);
+            const math::Real size_b = collider_size(b);
+            if (!(size_a > math::Real{0}) || !(size_b > math::Real{0}))
+            {
+                continue; // a body without a collider takes part in nothing
+            }
+            const math::Real scale = std::fmin(size_a, size_b);
+            const math::Real level_size = std::fmax(size_a, size_b);
+            const math::Real margin = kMarginFraction * scale;
+            const std::size_t first = contacts.points.size();
+            if (body_is_box(a) && body_is_box(b))
+            {
+                const std::vector<collide::Contact3> hits = collide::contacts(
+                    collide::Box3{a.position, a.half_extents, a.orientation},
+                    collide::Box3{b.position, b.half_extents, b.orientation}, margin);
+                for (const collide::Contact3& hit : hits)
+                {
+                    add_point(bodies, contacts, i, j, false, -1, hit.normal, hit.point,
+                              hit.penetration, hit.point - a.position,
+                              hit.point - b.position);
+                }
+            }
+            else if (body_is_box(a) || body_is_box(b))
+            {
+                const RigidBody3D& box = body_is_box(a) ? a : b;
+                const RigidBody3D& sphere = body_is_box(a) ? b : a;
+                const std::optional<collide::Contact3> hit = collide::contact(
+                    collide::Box3{box.position, box.half_extents, box.orientation},
+                    collide::Sphere{sphere.position, sphere.radius}, margin);
+                if (hit)
+                {
+                    // The query's normal runs from the box toward the sphere;
+                    // flip it when the box is b, so it runs from a toward b.
+                    const math::Vec3 normal = body_is_box(a) ? hit->normal : -hit->normal;
+                    add_point(bodies, contacts, i, j, false, 0, normal, hit->point,
+                              hit->penetration, hit->point - a.position,
+                              hit->point - b.position);
+                }
+            }
+            else
+            {
+                const std::optional<collide::Contact3> hit =
+                    collide::contact(collide::Sphere{a.position, a.radius},
+                                     collide::Sphere{b.position, b.radius}, margin);
+                if (hit)
+                {
+                    // Both arms reach the ONE contact point, so the equal and
+                    // opposite impulses conserve angular momentum (issue #35).
+                    add_point(bodies, contacts, i, j, false, 0, hit->normal, hit->point,
+                              hit->penetration, hit->point - a.position,
+                              hit->point - b.position);
+                }
+            }
+            close_manifold(contacts, first, scale, level_size);
+        }
+    }
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const RigidBody3D& body = bodies[i];
+        const math::Real size = collider_size(body);
+        if (!(size > math::Real{0}))
+        {
+            continue;
+        }
+        const math::Real margin = kMarginFraction * size;
+        for (std::size_t k = 0; k < settings.ground.size(); ++k)
+        {
+            const collide::Plane3& plane = settings.ground[k];
+            const std::size_t first = contacts.points.size();
+            if (body_is_box(body))
+            {
+                const std::vector<collide::Contact3> hits = collide::contacts(
+                    collide::Box3{body.position, body.half_extents, body.orientation},
+                    plane, margin);
+                for (const collide::Contact3& hit : hits)
+                {
+                    // The corner this point came from, by the signs of its body
+                    // coordinates: the warm-start key a resting corner keeps.
+                    const math::Vec3 corner =
+                        hit.point + hit.normal * (hit.penetration / math::Real{2});
+                    const math::Vec3 local = math::rotate(
+                        math::conjugate(body.orientation), corner - body.position);
+                    const int key = (local.x > math::Real{0} ? 1 : 0) |
+                                    (local.y > math::Real{0} ? 2 : 0) |
+                                    (local.z > math::Real{0} ? 4 : 0);
+                    add_point(bodies, contacts, i, k, true, key, hit.normal, hit.point,
+                              hit.penetration, hit.point - body.position, math::Vec3{});
+                }
+            }
+            else
+            {
+                const std::optional<collide::Contact3> hit = collide::contact(
+                    collide::Sphere{body.position, body.radius}, plane, margin);
+                if (hit)
+                {
+                    // The arm reaches the sphere's own surface point, exactly
+                    // radius along the normal (M22/M23), which keeps rolling
+                    // exact whatever the penetration.
+                    add_point(bodies, contacts, i, k, true, 0, hit->normal, hit->point,
+                              hit->penetration, hit->normal * body.radius, math::Vec3{});
+                }
+            }
+            close_manifold(contacts, first, size, size);
+        }
+    }
+}
+
+// The world inverse inertia R diag(1/I) R^T, computed once per phase.
+math::Mat3 world_inverse_inertia(const RigidBody3D& body)
+{
+    const math::Mat3 r = math::to_mat3(body.orientation);
+    const math::Vec3 inverse{math::Real{1} / body.inertia.x, math::Real{1} / body.inertia.y,
+                             math::Real{1} / body.inertia.z};
+    return r * math::diagonal3(inverse) * math::transpose(r);
+}
+
+std::vector<SolverBody> solver_bodies(const std::vector<RigidBody3D>& bodies,
+                                      const Contacts& contacts)
+{
+    std::vector<SolverBody> solver(bodies.size());
+    std::vector<bool> ready(bodies.size(), false);
+    const auto prepare = [&](std::size_t i)
+    {
+        if (ready[i])
         {
             return;
         }
-        const ManifoldContact manifold =
-            reduce_manifold(hits, std::fmax(box_size(a), box_size(b)));
-        // The arm is the centroid relative to each centre of mass, so an
-        // off-centre touch generates torque exactly as the ground box does.
-        const Participant pa{&a, manifold.point - a.position};
-        const Participant pb{&b, manifold.point - b.position};
-        resolve_pair(pa, pb, hits.front().normal, manifold.penetration, settings);
-        return;
-    }
-    // A box against a sphere (M34): exactly one body is a box. Find which, and
-    // resolve through the closest-point contact rather than the SAT or the
-    // sphere path. The box uses its half_extents; the sphere needs a real
-    // radius.
-    if (body_is_box(a) != body_is_box(b))
+        ready[i] = true;
+        const RigidBody3D& body = bodies[i];
+        SolverBody& s = solver[i];
+        s.velocity = body.velocity;
+        s.spin = math::rotate(body.orientation, body.angular_velocity);
+        s.inverse_mass = math::Real{1} / body.mass;
+        s.inverse_inertia = world_inverse_inertia(body);
+    };
+    for (const ContactPoint& c : contacts.points)
     {
-        const RigidBody3D& box_body = body_is_box(a) ? a : b;
-        const RigidBody3D& sphere_body = body_is_box(a) ? b : a;
-        if (!(sphere_body.radius > math::Real{0}))
+        prepare(c.a);
+        if (!c.ground)
         {
-            return; // the non-box body has no sphere shape
+            prepare(c.b);
         }
-        const collide::Box3 box_shape{box_body.position, box_body.half_extents,
-                                      box_body.orientation};
-        const std::optional<collide::Contact3> hit = collide::contact(
-            box_shape, collide::Sphere{sphere_body.position, sphere_body.radius});
-        if (!hit)
+    }
+    return solver;
+}
+
+// Velocity of a participant's material point at `arm`; zero for the ground.
+math::Vec3 point_velocity(const std::vector<SolverBody>& solver, std::size_t i, bool ground,
+                          const math::Vec3& arm)
+{
+    if (ground)
+    {
+        return math::Vec3{};
+    }
+    const SolverBody& s = solver[i];
+    return s.velocity + math::cross(s.spin + s.spin_change, arm);
+}
+
+math::Vec3 relative_velocity(const std::vector<SolverBody>& solver, const ContactPoint& c,
+                             const math::Vec3& arm_a, const math::Vec3& arm_b)
+{
+    return point_velocity(solver, c.b, c.ground, arm_b) -
+           point_velocity(solver, c.a, false, arm_a);
+}
+
+// Apply `impulse` at `arm`: v += J/m, w += I^-1 (r x J). A zero impulse leaves
+// the body untouched, so it is not written back.
+void apply(std::vector<SolverBody>& solver, std::size_t i, bool ground,
+           const math::Vec3& impulse, const math::Vec3& arm)
+{
+    if (ground || (impulse.x == math::Real{0} && impulse.y == math::Real{0} &&
+                   impulse.z == math::Real{0}))
+    {
+        return;
+    }
+    SolverBody& s = solver[i];
+    s.velocity += impulse * s.inverse_mass;
+    s.spin_change += s.inverse_inertia * math::cross(arm, impulse);
+    s.touched = true;
+}
+
+// Equal and opposite: -impulse on a, +impulse on b, at their own arms.
+void apply_pair(std::vector<SolverBody>& solver, const ContactPoint& c,
+                const math::Vec3& impulse, const math::Vec3& arm_a, const math::Vec3& arm_b)
+{
+    apply(solver, c.a, false, -impulse, arm_a);
+    apply(solver, c.b, c.ground, impulse, arm_b);
+}
+
+// The effective-mass form k(d1, d2) = (1/m_a + 1/m_b) d1.d2
+// + d1.[(I_a^-1 (r_a x d2)) x r_a] + the same for b. k(n, n) is the normal's
+// effective mass; it is symmetric, so the tangent block is too.
+math::Real effective_mass(const std::vector<SolverBody>& solver, const ContactPoint& c,
+                          const math::Vec3& arm_a, const math::Vec3& arm_b,
+                          const math::Vec3& d1, const math::Vec3& d2)
+{
+    const SolverBody& sa = solver[c.a];
+    math::Real k = sa.inverse_mass * math::dot(d1, d2) +
+                   math::dot(d1, math::cross(sa.inverse_inertia * math::cross(arm_a, d2), arm_a));
+    if (!c.ground)
+    {
+        const SolverBody& sb = solver[c.b];
+        k += sb.inverse_mass * math::dot(d1, d2) +
+             math::dot(d1, math::cross(sb.inverse_inertia * math::cross(arm_b, d2), arm_b));
+    }
+    return k;
+}
+
+// A fixed tangent basis from the normal alone, so a run repeats; the friction
+// solve below is a 2x2 block with a circular clamp, so the result does not
+// depend on the basis beyond rounding.
+void tangent_basis(const math::Vec3& n, math::Vec3& t1, math::Vec3& t2)
+{
+    if (std::abs(n.x) >= math::Real{0.57735026918962576}) // 1/sqrt(3)
+    {
+        t1 = math::normalize(math::Vec3{n.y, -n.x, math::Real{0}});
+    }
+    else
+    {
+        t1 = math::normalize(math::Vec3{math::Real{0}, n.z, -n.y});
+    }
+    t2 = math::cross(n, t1);
+}
+
+void prepare_points(const std::vector<SolverBody>& solver, Contacts& contacts)
+{
+    for (ContactPoint& c : contacts.points)
+    {
+        c.normal_mass = effective_mass(solver, c, c.arm_a, c.arm_b, c.normal, c.normal);
+        tangent_basis(c.normal, c.tangent1, c.tangent2);
+        c.k11 = effective_mass(solver, c, c.arm_a, c.arm_b, c.tangent1, c.tangent1);
+        c.k12 = effective_mass(solver, c, c.arm_a, c.arm_b, c.tangent1, c.tangent2);
+        c.k22 = effective_mass(solver, c, c.arm_a, c.arm_b, c.tangent2, c.tangent2);
+        c.normal_impulse = math::Real{0};
+        c.tangent_impulse = math::Vec3{};
+    }
+}
+
+// The point of the friction disc |p| <= limit closest to `p` (tangent
+// coordinates) in the metric of the tangent effective mass K = [k11 k12; k12
+// k22]: p(g) = (K + g 1)^-1 K p with g >= 0 the root of |p(g)| = limit.
+//
+// This is Coulomb's law in its maximum-dissipation form. Of every impulse the
+// disc allows it leaves the least kinetic energy, and the slide it leaves,
+// K (p(g) - p), equals -g p(g): exactly opposite the friction. Scaling p
+// radially onto the circle (the Euclidean nearest point) agrees only when K is
+// isotropic; a box's K is not, and radial scaling pushed a box sliding
+// diagonally sideways (0.15 m/s after 0.3 s) and spun it.
+//
+// The root is bracketed in closed form: k/(k + g) grows with k, so with q = |p|
+// and s = q / limit - 1, |p(g)| >= limit at g = k_min s and <= limit at
+// g = k_max s (k_min, k_max the eigenvalues of K). An isotropic K closes the
+// bracket to one point, so the result is then exactly the radial one. Newton on
+// 1/|p(g)| - 1/limit, nearly linear in g (the trust-region secular equation),
+// kept inside the bracket by bisection, then scaled onto the circle.
+void project_to_disc(math::Real k11, math::Real k12, math::Real k22, math::Real limit,
+                     math::Real& p1, math::Real& p2)
+{
+    const math::Real q = std::sqrt(p1 * p1 + p2 * p2);
+    if (!(q > limit))
+    {
+        return;
+    }
+    if (!(limit > math::Real{0}))
+    {
+        p1 = math::Real{0};
+        p2 = math::Real{0};
+        return;
+    }
+    const math::Real b1 = k11 * p1 + k12 * p2;
+    const math::Real b2 = k12 * p1 + k22 * p2;
+    const math::Real half_sum = (k11 + k22) / math::Real{2};
+    const math::Real radius = std::sqrt((k11 - k22) * (k11 - k22) / math::Real{4} + k12 * k12);
+    const math::Real k_max = half_sum + radius;
+    const math::Real k_min = (k11 * k22 - k12 * k12) / k_max; // no cancellation
+    const math::Real s = q / limit - math::Real{1};
+    math::Real lo = k_min * s;
+    math::Real hi = k_max * s;
+    math::Real g = lo;
+    math::Real o1 = p1;
+    math::Real o2 = p2;
+    for (int iteration = 0; iteration < kDiscIterations; ++iteration)
+    {
+        const math::Real a = k11 + g;
+        const math::Real d = k22 + g;
+        const math::Real det = a * d - k12 * k12;
+        o1 = (d * b1 - k12 * b2) / det;
+        o2 = (-k12 * b1 + a * b2) / det;
+        const math::Real length = std::sqrt(o1 * o1 + o2 * o2);
+        const math::Real error = length - limit;
+        if (std::abs(error) <= kDiscTolerance * limit || !(hi > lo))
         {
-            return;
+            break;
         }
-        // The contact normal points from the box toward the sphere; flip it when
-        // the box is body b, so the normal always runs from a toward b.
-        const math::Vec3 normal = body_is_box(a) ? hit->normal : -hit->normal;
-        const Participant pa{&a, hit->point - a.position};
-        const Participant pb{&b, hit->point - b.position};
-        resolve_pair(pa, pb, normal, hit->penetration, settings);
+        if (error > math::Real{0})
+        {
+            lo = g;
+        }
+        else
+        {
+            hi = g;
+        }
+        // d|p|/dg = -p.(K + g)^-1 p / |p|, so the Newton step on
+        // 1/|p| - 1/limit is (1/|p| - 1/limit) |p|^3 / (p.(K + g)^-1 p).
+        const math::Real m1 = (d * o1 - k12 * o2) / det;
+        const math::Real m2 = (-k12 * o1 + a * o2) / det;
+        const math::Real curvature = o1 * m1 + o2 * m2;
+        math::Real next = curvature > math::Real{0}
+                              ? g + (math::Real{1} / length - math::Real{1} / limit) * length *
+                                        length * length / curvature
+                              : (lo + hi) / math::Real{2};
+        if (!(next > lo && next < hi))
+        {
+            next = (lo + hi) / math::Real{2};
+        }
+        g = next;
+    }
+    const math::Real length = std::sqrt(o1 * o1 + o2 * o2);
+    p1 = length > math::Real{0} ? o1 * (limit / length) : math::Real{0};
+    p2 = length > math::Real{0} ? o2 * (limit / length) : math::Real{0};
+}
+
+// The friction step of one point, or of a manifold's centroid: the 2x2 tangent
+// solve for the impulse that stops the slide, then the ACCUMULATED impulse
+// brought into the disc of radius `limit` by project_to_disc. Returns the change
+// to apply.
+math::Vec3 friction_change(const math::Vec3& relative, const math::Vec3& t1,
+                           const math::Vec3& t2, math::Real k11, math::Real k12,
+                           math::Real k22, math::Vec3& accumulated, math::Real limit)
+{
+    const math::Real determinant = k11 * k22 - k12 * k12;
+    if (!(determinant > math::Real{0}))
+    {
+        return math::Vec3{};
+    }
+    const math::Real u1 = math::dot(relative, t1);
+    const math::Real u2 = math::dot(relative, t2);
+    const math::Real d1 = -(k22 * u1 - k12 * u2) / determinant;
+    const math::Real d2 = -(-k12 * u1 + k11 * u2) / determinant;
+    math::Vec3 next = accumulated + t1 * d1 + t2 * d2;
+    const math::Real length = math::length(next);
+    if (length > limit)
+    {
+        if (!(limit > math::Real{0}))
+        {
+            next = math::Vec3{};
+        }
+        else if (k12 == math::Real{0} && k11 == k22)
+        {
+            next = next * (limit / length); // isotropic: the radial point is the closest
+        }
+        else
+        {
+            math::Real p1 = math::dot(next, t1);
+            math::Real p2 = math::dot(next, t2);
+            project_to_disc(k11, k12, k22, limit, p1, p2);
+            next = t1 * p1 + t2 * p2;
+        }
+    }
+    const math::Vec3 change = next - accumulated;
+    accumulated = next;
+    return change;
+}
+
+// One impulse at the manifold's weighted centroid before the per-point sweeps.
+// For a level face landing flat it is the whole answer, applied in one piece,
+// so the landing stays exactly symmetric (the four corners resolved one at a
+// time would spin the box); otherwise it is a starting guess the sweeps refine.
+// Its share is booked to each point's accumulated impulse by weight.
+void prepass(std::vector<SolverBody>& solver, Contacts& contacts, math::Real friction)
+{
+    for (const Manifold& m : contacts.manifolds)
+    {
+        if (m.count < 2)
+        {
+            continue;
+        }
+        math::Real weight_sum = 0.0;
+        std::size_t active = 0;
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            if (contacts.points[k].active)
+            {
+                weight_sum += contacts.points[k].weight;
+                ++active;
+            }
+        }
+        if (active < 2 || !(weight_sum > math::Real{0}))
+        {
+            continue;
+        }
+        math::Vec3 arm_a{};
+        math::Vec3 arm_b{};
+        math::Real target = 0.0;
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            const ContactPoint& c = contacts.points[k];
+            if (!c.active)
+            {
+                continue;
+            }
+            const math::Real share = c.weight / weight_sum;
+            arm_a += c.arm_a * share;
+            arm_b += c.arm_b * share;
+            target += c.target * share;
+        }
+        ContactPoint& head = contacts.points[m.first];
+        const math::Vec3 n = head.normal;
+        const math::Real mass = effective_mass(solver, head, arm_a, arm_b, n, n);
+        if (!(mass > math::Real{0}))
+        {
+            continue;
+        }
+        // The centroid impulse is clamped as an accumulated impulse, like every
+        // other row: it may take back what the warm start applied, but no
+        // point's booked impulse may go below 0. So a warm start larger than
+        // this step needs (a landing's impulse remembered into the first resting
+        // step) is reduced here, in one symmetric piece, rather than left to the
+        // per-point sweeps, whose order would leave a spin at the tolerance.
+        const math::Real approach = math::dot(relative_velocity(solver, head, arm_a, arm_b), n);
+        math::Real lambda = (target - approach) / mass;
+        math::Vec3 centroid_friction{};
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            const ContactPoint& c = contacts.points[k];
+            if (c.active && c.weight > math::Real{0})
+            {
+                lambda = std::fmax(lambda, -c.normal_impulse * weight_sum / c.weight);
+            }
+            if (c.active)
+            {
+                centroid_friction += c.tangent_impulse;
+            }
+        }
+        apply_pair(solver, head, n * lambda, arm_a, arm_b);
+        math::Real total = 0.0;
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            ContactPoint& c = contacts.points[k];
+            if (c.active)
+            {
+                c.normal_impulse =
+                    std::fmax(math::Real{0}, c.normal_impulse + c.weight / weight_sum * lambda);
+                total += c.normal_impulse;
+            }
+        }
+        if (!(friction > math::Real{0}))
+        {
+            continue;
+        }
+        // Likewise accumulated: the manifold's total friction (what the warm
+        // start applied plus this) stays within friction times its total push.
+        const math::Vec3 change = friction_change(
+            relative_velocity(solver, head, arm_a, arm_b), head.tangent1, head.tangent2,
+            effective_mass(solver, head, arm_a, arm_b, head.tangent1, head.tangent1),
+            effective_mass(solver, head, arm_a, arm_b, head.tangent1, head.tangent2),
+            effective_mass(solver, head, arm_a, arm_b, head.tangent2, head.tangent2),
+            centroid_friction, friction * total);
+        apply_pair(solver, head, change, arm_a, arm_b);
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            ContactPoint& c = contacts.points[k];
+            if (c.active)
+            {
+                c.tangent_impulse += change * (c.weight / weight_sum);
+            }
+        }
+    }
+}
+
+// One Gauss-Seidel sweep: per manifold, every normal row, then every friction
+// row. Accumulated impulses are clamped, never the change: the normal impulse
+// never below 0, the friction impulse within friction times the point's own
+// accumulated normal impulse.
+void sweep(std::vector<SolverBody>& solver, Contacts& contacts, math::Real friction)
+{
+    for (const Manifold& m : contacts.manifolds)
+    {
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            ContactPoint& c = contacts.points[k];
+            if (!c.active || !(c.normal_mass > math::Real{0}))
+            {
+                continue;
+            }
+            const math::Real approach =
+                math::dot(relative_velocity(solver, c, c.arm_a, c.arm_b), c.normal);
+            const math::Real next =
+                std::fmax(math::Real{0}, c.normal_impulse + (c.target - approach) / c.normal_mass);
+            const math::Real change = next - c.normal_impulse;
+            c.normal_impulse = next;
+            apply_pair(solver, c, c.normal * change, c.arm_a, c.arm_b);
+        }
+        if (!(friction > math::Real{0}))
+        {
+            continue;
+        }
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            ContactPoint& c = contacts.points[k];
+            if (!c.active)
+            {
+                continue;
+            }
+            const math::Vec3 change = friction_change(
+                relative_velocity(solver, c, c.arm_a, c.arm_b), c.tangent1, c.tangent2, c.k11,
+                c.k12, c.k22, c.tangent_impulse, friction * c.normal_impulse);
+            apply_pair(solver, c, change, c.arm_a, c.arm_b);
+        }
+    }
+}
+
+// The largest constraint violation: a pushing point off its target, a slack
+// point approaching faster than its target allows, a sticking point still
+// sliding, or a sliding point whose friction does not oppose the slide.
+math::Real residual(const std::vector<SolverBody>& solver, const Contacts& contacts,
+                    math::Real friction)
+{
+    math::Real worst = 0.0;
+    for (const ContactPoint& c : contacts.points)
+    {
+        if (!c.active)
+        {
+            continue;
+        }
+        const math::Vec3 relative = relative_velocity(solver, c, c.arm_a, c.arm_b);
+        const math::Real approach = math::dot(relative, c.normal);
+        worst = std::fmax(worst, c.normal_impulse > math::Real{0}
+                                     ? std::abs(approach - c.target)
+                                     : std::fmax(math::Real{0}, c.target - approach));
+        if (friction > math::Real{0})
+        {
+            const math::Vec3 slide = relative - c.normal * approach;
+            const math::Real limit = friction * c.normal_impulse;
+            const math::Real held = math::length(c.tangent_impulse);
+            if (held < limit * (math::Real{1} - math::Real{1e-12}))
+            {
+                worst = std::fmax(worst, math::length(slide));
+            }
+            else if (held > math::Real{0})
+            {
+                worst = std::fmax(worst, std::fmax(math::Real{0},
+                                                   math::dot(slide, c.tangent_impulse) / held));
+            }
+        }
+    }
+    return worst;
+}
+
+// The velocity scale the tolerance is relative to: the fastest material point
+// in contact, or one step of the external acceleration, whichever is larger.
+math::Real velocity_scale(const std::vector<RigidBody3D>& bodies,
+                          const std::vector<SolverBody>& solver, const Contacts& contacts,
+                          math::Real forcing_speed)
+{
+    math::Real scale = forcing_speed;
+    for (const ContactPoint& c : contacts.points)
+    {
+        for (int side = 0; side < 2; ++side)
+        {
+            if (side == 1 && c.ground)
+            {
+                continue;
+            }
+            const std::size_t i = side == 0 ? c.a : c.b;
+            const SolverBody& s = solver[i];
+            scale = std::fmax(scale, math::length(s.velocity) +
+                                         math::length(s.spin) * collider_size(bodies[i]));
+        }
+    }
+    return scale;
+}
+
+// Runs sweeps until the residual is within `tolerance`, or kMaxSweeps. The
+// residual is checked BEFORE the first sweep too: when the warm start and the
+// centroid prepass already solve the manifold (a symmetric landing, a stack at
+// rest), no per-point sweep runs, so nothing order-dependent touches it and it
+// stays exactly symmetric.
+void iterate(std::vector<SolverBody>& solver, Contacts& contacts, math::Real friction,
+             math::Real tolerance)
+{
+    for (int pass = 0; pass < kMaxSweeps; ++pass)
+    {
+        if (residual(solver, contacts, friction) <= tolerance)
+        {
+            break;
+        }
+        sweep(solver, contacts, friction);
+    }
+}
+
+// Writes back only the bodies a nonzero impulse reached. The body-frame spin is
+// adjusted by the change alone, so a centred impulse (no spin change) leaves it
+// bit for bit as it was.
+void write_back(std::vector<RigidBody3D>& bodies, const std::vector<SolverBody>& solver)
+{
+    for (std::size_t i = 0; i < bodies.size(); ++i)
+    {
+        const SolverBody& s = solver[i];
+        if (!s.touched)
+        {
+            continue;
+        }
+        RigidBody3D& body = bodies[i];
+        body.velocity = s.velocity;
+        if (s.spin_change.x != math::Real{0} || s.spin_change.y != math::Real{0} ||
+            s.spin_change.z != math::Real{0})
+        {
+            body.angular_velocity +=
+                math::rotate(math::conjugate(body.orientation), s.spin_change);
+        }
+    }
+}
+
+// The external acceleration scale: |g| + |F| / m_min, the most one step of
+// forcing can change a resting contact's normal velocity, per unit dt.
+math::Real forcing_acceleration(const std::vector<RigidBody3D>& bodies,
+                                const Rigid3DSettings& settings)
+{
+    math::Real lightest = std::numeric_limits<math::Real>::infinity();
+    for (const RigidBody3D& body : bodies)
+    {
+        lightest = std::fmin(lightest, body.mass);
+    }
+    const math::Real force = math::length(settings.force);
+    return math::length(settings.gravity) +
+           (force > math::Real{0} ? force / lightest : math::Real{0});
+}
+
+// Phase B: the impacts. On the start-of-step velocities, before any forcing.
+void impact_phase(std::vector<RigidBody3D>& bodies, const Rigid3DSettings& settings,
+                  math::Real dt, Contacts& contacts)
+{
+    const math::Real restitution = settings.restitution;
+    std::vector<SolverBody> solver = solver_bodies(bodies, contacts);
+    prepare_points(solver, contacts);
+    const math::Real acceleration = forcing_acceleration(bodies, settings);
+    const math::Real threshold = kThresholdFactor * dt * acceleration;
+    bool any = false;
+    for (ContactPoint& c : contacts.points)
+    {
+        // delta: what this step's forcing (steps 0 and 1) will add to the
+        // point's normal velocity, from the same start state the forcing reads.
+        const auto forcing_change = [&](std::size_t i, const math::Vec3& arm)
+        {
+            const RigidBody3D& body = bodies[i];
+            const math::Vec3& w = body.angular_velocity;
+            const math::Vec3& I = body.inertia;
+            const math::Vec3 torque_body =
+                math::rotate(math::conjugate(body.orientation), settings.torque);
+            const math::Vec3 rate{((I.y - I.z) * w.y * w.z + torque_body.x) / I.x,
+                                  ((I.z - I.x) * w.z * w.x + torque_body.y) / I.y,
+                                  ((I.x - I.y) * w.x * w.y + torque_body.z) / I.z};
+            const math::Vec3 spin_change = math::rotate(body.orientation, rate * dt);
+            return settings.gravity * dt + (settings.force / body.mass) * dt +
+                   math::cross(spin_change, arm);
+        };
+        math::Vec3 forcing = -forcing_change(c.a, c.arm_a);
+        if (!c.ground)
+        {
+            forcing += forcing_change(c.b, c.arm_b);
+        }
+        const math::Real delta = math::dot(forcing, c.normal);
+        const math::Real start =
+            math::dot(relative_velocity(solver, c, c.arm_a, c.arm_b), c.normal);
+        const math::Real middle = start + delta / math::Real{2};
+        const math::Real gap = -c.penetration;
+        c.active = middle < -threshold && (!(gap > math::Real{0}) || -middle * dt >= gap);
+        // After the forcing adds delta, the point leaves at -e times its
+        // mid-step approach: Newton's law at the middle of the step.
+        c.target = -restitution * middle - delta / math::Real{2};
+        any = any || c.active;
+    }
+    if (!any)
+    {
         return;
     }
-    if (!(a.radius > math::Real{0}) || !(b.radius > math::Real{0}))
+    prepass(solver, contacts, settings.friction);
+    iterate(solver, contacts, settings.friction,
+            kImpactTolerance *
+                velocity_scale(bodies, solver, contacts, acceleration * dt));
+    write_back(bodies, solver);
+}
+
+// Matches this step's points to last step's rest-phase impulses and applies
+// them. Both lists are in detection order, sorted by (ground, a, b), so one
+// merge finds each manifold's old points.
+void warm_start(std::vector<SolverBody>& solver, Contacts& contacts,
+                const std::vector<RigidBody3D>& bodies,
+                const std::vector<Rigid3DWorld::WarmContact>& cache)
+{
+    const auto before = [](bool ground_x, std::size_t a_x, std::size_t b_x, bool ground_y,
+                           std::size_t a_y, std::size_t b_y)
     {
-        return; // two non-box bodies without a sphere shape do not collide
+        if (ground_x != ground_y)
+        {
+            return !ground_x;
+        }
+        if (a_x != a_y)
+        {
+            return a_x < a_y;
+        }
+        return b_x < b_y;
+    };
+    std::size_t cursor = 0;
+    std::vector<bool> used;
+    for (const Manifold& m : contacts.manifolds)
+    {
+        const ContactPoint& head = contacts.points[m.first];
+        while (cursor < cache.size() && before(cache[cursor].ground, cache[cursor].a,
+                                               cache[cursor].b, head.ground, head.a, head.b))
+        {
+            ++cursor;
+        }
+        std::size_t end = cursor;
+        while (end < cache.size() && cache[end].ground == head.ground &&
+               cache[end].a == head.a && cache[end].b == head.b)
+        {
+            ++end;
+        }
+        used.assign(end - cursor, false);
+        const math::Real radius = kWarmMatchFraction * collider_size(bodies[head.a]);
+        for (std::size_t k = m.first; k < m.first + m.count; ++k)
+        {
+            ContactPoint& c = contacts.points[k];
+            std::size_t best = end;
+            math::Real best_distance = radius;
+            for (std::size_t o = cursor; o < end; ++o)
+            {
+                if (used[o - cursor])
+                {
+                    continue;
+                }
+                if (c.key >= 0)
+                {
+                    if (cache[o].key == c.key)
+                    {
+                        best = o;
+                        break;
+                    }
+                    continue;
+                }
+                const math::Real distance = math::length(cache[o].local - c.local);
+                if (distance <= best_distance)
+                {
+                    best_distance = distance;
+                    best = o;
+                }
+            }
+            if (best == end)
+            {
+                continue;
+            }
+            used[best - cursor] = true;
+            c.normal_impulse = cache[best].normal_impulse;
+            // Last step's friction impulse, in this step's tangent plane.
+            c.tangent_impulse = cache[best].tangent_impulse -
+                                c.normal * math::dot(cache[best].tangent_impulse, c.normal);
+            apply_pair(solver, c, c.normal * c.normal_impulse + c.tangent_impulse, c.arm_a,
+                       c.arm_b);
+        }
+        cursor = end;
     }
-    const std::optional<collide::Contact3> hit = collide::contact(
-        collide::Sphere{a.position, a.radius}, collide::Sphere{b.position, b.radius});
-    if (!hit)
+}
+
+// Phase C: every point, after the forcing, warm-started.
+void rest_phase(std::vector<RigidBody3D>& bodies, const Rigid3DSettings& settings,
+                math::Real dt, Contacts& contacts,
+                const std::vector<Rigid3DWorld::WarmContact>& cache)
+{
+    std::vector<SolverBody> solver = solver_bodies(bodies, contacts);
+    prepare_points(solver, contacts);
+    for (ContactPoint& c : contacts.points)
+    {
+        c.active = true;
+        // Hold a touching point at 0; let a point still apart close its gap
+        // exactly within the step, and no further.
+        c.target = c.penetration < math::Real{0} ? c.penetration / dt : math::Real{0};
+    }
+    warm_start(solver, contacts, bodies, cache);
+    prepass(solver, contacts, settings.friction);
+    iterate(solver, contacts, settings.friction,
+            kRestTolerance * velocity_scale(bodies, solver, contacts,
+                                            forcing_acceleration(bodies, settings) * dt));
+    write_back(bodies, solver);
+}
+
+// A small world-frame turn of a body by `angle` (a rotation vector), the
+// quaternion update the integrator uses, renormalised. The projection moves the
+// pose, not the motion, so the body's WORLD-frame angular momentum is kept and
+// re-expressed in the turned body frame (omega = I^-1 R'^T L). Keeping the
+// body-frame angular velocity instead turns L with the body: on a frictionless
+// floor a tilted cube picked up |L_z| = 3e-3 and never came to rest. Keeping
+// the world-frame angular velocity is the same thing for an isotropic body (the
+// cube) but not for a box with two equal moments: nudged at e 1 on a
+// frictionless floor it kept |L_z| = 2.5e-8, a yaw of 1.5e-7 rad/s that nothing
+// there can remove; keeping L leaves 2e-13. Contact impulses conserve L, so the
+// projection is the step that must not change it.
+void turn(RigidBody3D& body, const math::Vec3& angle)
+{
+    if (angle.x == math::Real{0} && angle.y == math::Real{0} && angle.z == math::Real{0})
     {
         return;
     }
-    // Both arms reach the ONE contact point, midway between the surfaces, so
-    // the equal and opposite impulses act at the same place and conserve
-    // angular momentum exactly, as the 2D pair and the box pairs do. Arms of
-    // each radius along the normal reached two different points whenever the
-    // spheres overlapped, and friction's tangential impulse then formed a
-    // couple, changing the total angular momentum (issue #35).
-    const Participant pa{&a, hit->point - a.position};
-    const Participant pb{&b, hit->point - b.position};
-    resolve_pair(pa, pb, hit->normal, hit->penetration, settings);
+    const math::Vec3& w = body.angular_velocity;
+    const math::Vec3& I = body.inertia;
+    const math::Vec3 momentum =
+        math::rotate(body.orientation, math::Vec3{I.x * w.x, I.y * w.y, I.z * w.z});
+    const math::Quat d{math::Real{0}, angle};
+    body.orientation =
+        math::normalize(body.orientation + (d * body.orientation) * math::Real{0.5});
+    const math::Vec3 local = math::rotate(math::conjugate(body.orientation), momentum);
+    body.angular_velocity = math::Vec3{local.x / I.x, local.y / I.y, local.z / I.z};
+}
+
+math::Vec3 anchor_a(const std::vector<RigidBody3D>& bodies, const ContactPoint& c)
+{
+    const RigidBody3D& body = bodies[c.a];
+    return body.position + math::rotate(body.orientation, c.anchor_a) + c.normal * c.radius_a;
+}
+
+math::Vec3 anchor_b(const std::vector<RigidBody3D>& bodies, const ContactPoint& c)
+{
+    if (c.ground)
+    {
+        return c.anchor_b;
+    }
+    const RigidBody3D& body = bodies[c.b];
+    return body.position + math::rotate(body.orientation, c.anchor_b) - c.normal * c.radius_b;
+}
+
+// One projection push of `correction` (negative: the depth to remove) along the
+// point's normal, at the midpoint of the two anchors, moving and turning both
+// bodies by inverse mass and inertia at their CURRENT pose. Velocities are not
+// touched. A sphere is only moved, never turned: its contact normal passes
+// through its centre, so the push has no lever arm, and leaving the rotation
+// alone keeps a sphere's spin and orientation exactly those of a sphere with no
+// contact (M22's rotationally inert contact).
+void push(std::vector<RigidBody3D>& bodies, const ContactPoint& c, const math::Vec3& point_a,
+          const math::Vec3& point_b, math::Real correction)
+{
+    const math::Vec3 middle = (point_a + point_b) * math::Real{0.5};
+    const math::Vec3 n = c.normal;
+    RigidBody3D& a = bodies[c.a];
+    const bool turn_a = body_is_box(a);
+    const math::Vec3 arm_a = middle - a.position;
+    math::Real mass = math::Real{1} / a.mass;
+    if (turn_a)
+    {
+        mass += math::dot(n, math::cross(inverse_inertia_world(a, math::cross(arm_a, n)), arm_a));
+    }
+    bool turn_b = false;
+    math::Vec3 arm_b{};
+    if (!c.ground)
+    {
+        const RigidBody3D& b = bodies[c.b];
+        turn_b = body_is_box(b);
+        arm_b = middle - b.position;
+        mass += math::Real{1} / b.mass;
+        if (turn_b)
+        {
+            mass += math::dot(n, math::cross(inverse_inertia_world(b, math::cross(arm_b, n)),
+                                             arm_b));
+        }
+    }
+    if (!(mass > math::Real{0}))
+    {
+        return;
+    }
+    const math::Vec3 impulse = n * (-correction / mass);
+    a.position -= impulse / a.mass;
+    if (turn_a)
+    {
+        turn(a, -inverse_inertia_world(a, math::cross(arm_a, impulse)));
+    }
+    if (!c.ground)
+    {
+        RigidBody3D& b = bodies[c.b];
+        b.position += impulse / b.mass;
+        if (turn_b)
+        {
+            turn(b, inverse_inertia_world(b, math::cross(arm_b, impulse)));
+        }
+    }
+}
+
+// Phase D: nonlinear Gauss-Seidel position projection.
+void project(std::vector<RigidBody3D>& bodies, const Contacts& contacts)
+{
+    for (int pass = 0; pass < kProjectionPasses; ++pass)
+    {
+        // A LEVEL manifold is lifted whole at its centroid first: one push
+        // through the middle of a flat face, so the corners are not pushed one
+        // at a time and a flat landing gains no spin.
+        for (const Manifold& m : contacts.manifolds)
+        {
+            if (m.count < 2)
+            {
+                continue;
+            }
+            const math::Real slop = kSlopFraction * m.scale;
+            math::Real deepest = -std::numeric_limits<math::Real>::infinity();
+            math::Real shallowest = std::numeric_limits<math::Real>::infinity();
+            math::Vec3 sum_a{};
+            math::Vec3 sum_b{};
+            for (std::size_t k = m.first; k < m.first + m.count; ++k)
+            {
+                const ContactPoint& c = contacts.points[k];
+                const math::Vec3 pa = anchor_a(bodies, c);
+                const math::Vec3 pb = anchor_b(bodies, c);
+                const math::Real depth = -math::dot(pb - pa, c.normal);
+                deepest = std::fmax(deepest, depth);
+                shallowest = std::fmin(shallowest, depth);
+                sum_a += pa;
+                sum_b += pb;
+            }
+            if (!(deepest > slop) || deepest - shallowest > kLevelTolerance * m.level_size)
+            {
+                continue;
+            }
+            const math::Real share = math::Real{1} / static_cast<math::Real>(m.count);
+            const math::Vec3 pa = sum_a * share;
+            const math::Vec3 pb = sum_b * share;
+            const ContactPoint& head = contacts.points[m.first];
+            const math::Real separation = math::dot(pb - pa, head.normal);
+            const math::Real correction = std::clamp(
+                separation + slop, -kMaxCorrectionFraction * m.scale, math::Real{0});
+            if (correction < math::Real{0})
+            {
+                push(bodies, head, pa, pb, correction);
+            }
+        }
+        for (const Manifold& m : contacts.manifolds)
+        {
+            const math::Real slop = kSlopFraction * m.scale;
+            for (std::size_t k = m.first; k < m.first + m.count; ++k)
+            {
+                const ContactPoint& c = contacts.points[k];
+                const math::Vec3 pa = anchor_a(bodies, c);
+                const math::Vec3 pb = anchor_b(bodies, c);
+                const math::Real separation = math::dot(pb - pa, c.normal);
+                const math::Real correction =
+                    std::clamp(kProjectionFactor * (separation + slop),
+                               -kMaxCorrectionFraction * m.scale, math::Real{0});
+                if (correction < math::Real{0})
+                {
+                    push(bodies, c, pa, pb, correction);
+                }
+            }
+        }
+    }
+}
+
+// The rest-phase impulses, kept for the next step's warm start.
+void remember(const Contacts& contacts, std::vector<Rigid3DWorld::WarmContact>& cache)
+{
+    cache.clear();
+    for (const ContactPoint& c : contacts.points)
+    {
+        cache.push_back(Rigid3DWorld::WarmContact{c.a, c.b, c.ground, c.key, c.local,
+                                                  c.normal_impulse, c.tangent_impulse});
+    }
 }
 } // namespace
 
@@ -505,9 +1371,23 @@ sim_core::StepResult Rigid3DWorld::step()
         return sim_core::StepResult{status}; // leave state unchanged
     }
 
+    // The state is the bodies AND the warm-start impulses; a failed step
+    // restores both.
     previous_ = bodies_;
+    previous_warm_ = warm_;
 
     const math::Real dt = simulation_settings_.dt;
+
+    // (A) detect at the start-of-step poses, speculatively (step contract).
+    Contacts contacts;
+    detect(bodies_, settings_, contacts);
+
+    // (B) the impacts, on the start-of-step velocities. Restitution 0 has none:
+    //     every contact is then resolved by the rest phase alone.
+    if (!contacts.points.empty() && settings_.restitution > math::Real{0})
+    {
+        impact_phase(bodies_, settings_, dt, contacts);
+    }
 
     for (RigidBody3D& body : bodies_)
     {
@@ -551,7 +1431,16 @@ sim_core::StepResult Rigid3DWorld::step()
                               ((I.z - I.x) * w.z * w.x + torque_body.y) / I.y,
                               ((I.x - I.y) * w.x * w.y + torque_body.z) / I.z};
         body.angular_velocity += rate * dt;
+    }
 
+    // (C) every contact, after the forcing, warm-started from the last step.
+    if (!contacts.points.empty())
+    {
+        rest_phase(bodies_, settings_, dt, contacts, warm_);
+    }
+
+    for (RigidBody3D& body : bodies_)
+    {
         // (2) the orientation, from the UPDATED angular velocity, which keeps
         //     this semi-implicit Euler. Body-frame omega puts the quaternion on
         //     the LEFT of the product.
@@ -574,35 +1463,23 @@ sim_core::StepResult Rigid3DWorld::step()
         //     displacement rather than performing the rotation.
         body.orientation = math::normalize(body.orientation);
 
-        // (4) translation, with the gravity-updated velocity.
+        // (4) translation, with the solved velocity.
         body.position += body.velocity * dt;
     }
 
-    // (5) resolve contacts. First every pair of bodies against each other, in a
-    //     fixed ascending pair order, then every body against every ground
-    //     plane. Fixed order so a run repeats (docs/04): floating-point addition
-    //     is not associative, so the order is part of the observable behaviour.
-    const std::size_t count = bodies_.size();
-    for (std::size_t i = 0; i < count; ++i)
+    // (D) project the remaining penetration out, positions only.
+    if (!contacts.points.empty())
     {
-        for (std::size_t j = i + 1; j < count; ++j)
-        {
-            resolve_contact3d(bodies_[i], bodies_[j], settings_);
-        }
+        project(bodies_, contacts);
     }
-    for (RigidBody3D& body : bodies_)
-    {
-        for (const collide::Plane3& plane : settings_.ground)
-        {
-            resolve_ground3d(body, plane, settings_);
-        }
-    }
+    remember(contacts, warm_);
 
     for (const RigidBody3D& body : bodies_)
     {
         if (!body.is_valid())
         {
             bodies_.swap(previous_);
+            warm_.swap(previous_warm_);
             return sim_core::StepResult{sim_core::StepStatus::InvalidState};
         }
     }
