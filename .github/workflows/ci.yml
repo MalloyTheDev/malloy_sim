@@ -1,10 +1,14 @@
 # Build and test on every push and pull request to main (issue #66): the MSVC
-# Debug and Release builds with every CTest test, and a short fuzzing run of
-# both fuzz targets under ASan and UBSan.
+# Debug and Release builds with every CTest test, a clang build on Linux with
+# every CTest test and the 3D viewer's pixel self-test (M41, issue #80), and a
+# short fuzzing run of both fuzz targets under ASan and UBSan.
 #
 # Third-party actions are pinned to a full commit SHA, the release named in the
 # comment beside it. The workflow reads the repository and nothing else, and
-# needs no secrets.
+# needs no secrets. The viewer's build fetches raylib 6.0 from its release
+# archive at configure time, checked against a pinned SHA-256
+# (CMakeLists.txt), and the Linux job installs its packages from the Ubuntu
+# archive.
 name: CI
 
 on:
@@ -43,6 +47,9 @@ jobs:
       - name: Show the toolchain
         run: cmake --version
 
+      # The presets build the 3D viewer, so configuring fetches raylib and
+      # CTest runs the viewer's headless checks with the rest. A hosted Windows
+      # runner has no OpenGL 3.3 driver, so the pixel self-test runs on Linux.
       - name: Configure
         run: cmake --preset windows-msvc-${{ matrix.config }}
 
@@ -51,6 +58,62 @@ jobs:
 
       - name: Test
         run: ctest --preset windows-msvc-${{ matrix.config }}
+
+  linux-clang:
+    name: Linux clang 21 (viewer pixel self-test)
+    # Everything, the viewer and the tests included, built by clang 21 with the
+    # project's -Werror, then every CTest test. Then the viewer's pixel
+    # self-test for one template of each 3D type, on a virtual X display with
+    # Mesa's software rasterizer (llvmpipe), so no GPU is needed. Each self-test
+    # is a plain command in a bash step, so ANY nonzero exit fails the job,
+    # 77 (no OpenGL context) included: here a missing context is a failure, not
+    # a skip.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The X11 and OpenGL headers raylib's bundled GLFW needs to build (its X11
+      # backend stops without RandR, Xinerama, Xkb, Xcursor, XInput or Xshape),
+      # and Xvfb with Mesa's software OpenGL to run a window without a display.
+      - name: Install the X11, OpenGL and virtual display packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libxext-dev libxfixes-dev libgl-dev \
+            xvfb xauth libgl1-mesa-dri libglx-mesa0
+
+      - name: Show the toolchain
+        run: |
+          cmake --version
+          clang++-21 --version
+
+      - name: Configure
+        run: >-
+          cmake -S . -B out/linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=clang++-21
+          -DMALLOY_BUILD_APPS=ON -DMALLOY_BUILD_TESTS=ON -DMALLOY_BUILD_VIEWER=ON
+
+      - name: Build
+        run: cmake --build out/linux
+
+      - name: Test
+        run: ctest --test-dir out/linux --output-on-failure
+
+      - name: Viewer pixel self-test, one template per 3D type
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          for template in bouncing_sphere particle_collision3d inclined_orbits \
+                          spring_tetrahedron magnetic_helix; do
+            echo "== $template"
+            xvfb-run -a -s "-screen 0 1280x720x24" \
+              out/linux/malloy_viewer "scenarios/$template.scn" --self-test
+          done
 
   fuzz-smoke:
     name: Fuzz smoke (clang, libFuzzer, ASan, UBSan)

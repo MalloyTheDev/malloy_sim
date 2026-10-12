@@ -15,7 +15,8 @@
             "binaryDir": "${sourceDir}/out/build/windows-msvc-debug",
             "cacheVariables": {
                 "MALLOY_BUILD_APPS": "ON",
-                "MALLOY_BUILD_TESTS": "ON"
+                "MALLOY_BUILD_TESTS": "ON",
+                "MALLOY_BUILD_VIEWER": "ON"
             }
         },
         {
@@ -27,7 +28,8 @@
             "binaryDir": "${sourceDir}/out/build/windows-msvc-release",
             "cacheVariables": {
                 "MALLOY_BUILD_APPS": "ON",
-                "MALLOY_BUILD_TESTS": "ON"
+                "MALLOY_BUILD_TESTS": "ON",
+                "MALLOY_BUILD_VIEWER": "ON"
             }
         }
     ],

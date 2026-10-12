@@ -700,6 +700,163 @@ if(MALLOY_BUILD_TESTS AND MALLOY_BUILD_APPS)
 endif()
 
 # ----------------------------------------------------------------------------
+# The 3D viewer (M41, issue #80). malloy_viewer draws the five 3D scenario
+# types in a window, and is the only target that uses a graphics library:
+# raylib 6.0, fetched at configure time from its release archive and checked
+# against the archive's SHA-256. That value is the one Conan Center publishes
+# for this URL; the archive's SHA-512 is vcpkg's, and it holds the tag's commit
+# dbc56a87da87d973a9c5baa4e7438a9d20121d28. The option is OFF here, so a plain
+# configure, the fuzz build and any project using these libraries fetch
+# nothing; the presets turn it on.
+#
+# raylib is built static, without audio, and only because the viewer links it
+# (EXCLUDE_FROM_ALL). Its include directory is SYSTEM, so its headers compile
+# under /external:W0 and -isystem while the viewer's own code keeps /W4 /WX and
+# -Werror. raylib never receives the project's flags, which live on the two
+# INTERFACE targets it does not link; Control Flow Guard (issue #37) is added
+# to its objects explicitly.
+#
+# The block sits after the terminal app's checks, so the viewer's checks are
+# registered after the test-executable count above and leave it unchanged.
+# ----------------------------------------------------------------------------
+option(MALLOY_BUILD_VIEWER "Build the 3D viewer (fetches raylib 6.0 at configure time)" OFF)
+
+if(MALLOY_BUILD_VIEWER AND MALLOY_BUILD_FUZZERS)
+    message(FATAL_ERROR
+        "MALLOY_BUILD_VIEWER and MALLOY_BUILD_FUZZERS cannot both be on: the fuzz "
+        "build instruments every target and changes its runtime library, which "
+        "the viewer and raylib must not get. Configure each in its own build "
+        "directory.")
+endif()
+
+if(MALLOY_BUILD_APPS AND MALLOY_BUILD_VIEWER)
+    if(CMAKE_VERSION VERSION_LESS 3.28)
+        message(FATAL_ERROR
+            "The viewer needs CMake 3.28 or later (FetchContent's SYSTEM and "
+            "EXCLUDE_FROM_ALL); this is ${CMAKE_VERSION}. Configure with "
+            "-DMALLOY_BUILD_VIEWER=OFF to build everything else.")
+    endif()
+
+    include(FetchContent)
+    FetchContent_Declare(raylib
+        URL https://github.com/raysan5/raylib/archive/refs/tags/6.0.tar.gz
+        URL_HASH SHA256=2b3ee1e2120c7a0796b33062c7e9a694dd8a8caa56a96319ac8c8ecf54a90d0b
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SYSTEM
+        EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(raylib)
+    # raylib 6.0's config.h takes a feature switch from the command line when
+    # one is given: no audio module, so miniaudio is not compiled at all.
+    target_compile_definitions(raylib PRIVATE SUPPORT_MODULE_RAUDIO=0)
+    if(MSVC)
+        target_compile_options(raylib PRIVATE /guard:cf)
+        if(TARGET glfw) # GLFW is an object library folded into raylib
+            target_compile_options(glfw PRIVATE /guard:cf)
+        endif()
+    endif()
+
+    # A console program, so its report lines and errors reach the terminal it
+    # was started from; the manifest is the terminal app's (issue #33).
+    add_executable(malloy_viewer
+        apps/viewer/main.cpp
+        apps/viewer/picture.cpp
+        apps/viewer/self_test.cpp
+        apps/viewer/window.cpp
+        apps/viewer/viewer.manifest
+    )
+    target_link_libraries(malloy_viewer
+        PRIVATE
+            malloy::scenario
+            malloy::view3d
+            raylib
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    # The viewer's app checks, run without a window or OpenGL, so they pass on
+    # any runner: the refusals, a path outside the ANSI code page, the flags,
+    # and for one template of each 3D type the headless report lines, which
+    # must be the terminal app's lines, every one, at three frame rates.
+    # Refusals that need only a scenario path go through run_app_check.cmake;
+    # the rest need flags or the terminal app, which viewer_check.cmake adds.
+    if(MALLOY_BUILD_TESTS)
+        set(malloy_viewer_inputs "${CMAKE_CURRENT_BINARY_DIR}/viewer_inputs")
+        file(WRITE "${malloy_viewer_inputs}/empty.scn" "")
+        file(WRITE "${malloy_viewer_inputs}/parse_error.scn" "type rigid3d\nnot_a_key 1\n")
+        file(WRITE "${malloy_viewer_inputs}/invalid.scn"
+            "type nbody3d\ndt 0.0\nsteps 1\nbody3 1.0 0.0 0.0 0.0 0.0 0.0 0.0\n")
+        file(WRITE "${malloy_viewer_inputs}/orbit_ψ🚀.scn"
+            "type nbody3d\ndt 0.001\nsteps 10\noutput_every 10\n"
+            "body3 1.0 0.0 0.0 0.0 0.0 0.0 0.0\nbody3 0.000001 1.0 0.0 0.0 0.0 1.0 0.0\n")
+        file(WRITE "${malloy_viewer_inputs}/every_step.scn"
+            "type nbody3d\ndt 0.001\nsteps 1000\noutput_every 1\n"
+            "body3 1.0 0.0 0.0 0.0 0.0 0.0 0.0\nbody3 0.000001 1.0 0.0 0.0 0.0 1.0 0.0\n")
+
+        function(malloy_add_viewer_refusal name scenario pattern)
+            add_test(NAME ${name}
+                     COMMAND ${CMAKE_COMMAND}
+                         "-DAPP=$<TARGET_FILE:malloy_viewer>"
+                         "-DSCENARIO=${scenario}"
+                         "-DEXPECT_EXIT=1"
+                         "-DEXPECT_OUTPUT=${pattern}"
+                         -P "${PROJECT_SOURCE_DIR}/cmake/run_app_check.cmake")
+        endfunction()
+        malloy_add_viewer_refusal(malloy_viewer_refuses_empty
+            "${malloy_viewer_inputs}/empty.scn" "defines nothing to simulate")
+        malloy_add_viewer_refusal(malloy_viewer_refuses_parse_error
+            "${malloy_viewer_inputs}/parse_error.scn" "scenario error: line 2")
+        malloy_add_viewer_refusal(malloy_viewer_refuses_invalid_configuration
+            "${malloy_viewer_inputs}/invalid.scn" "invalid configuration")
+        malloy_add_viewer_refusal(malloy_viewer_refuses_2d
+            "${PROJECT_SOURCE_DIR}/scenarios/two_body.scn"
+            "is a 2D scenario \\(type nbody\\).*malloy_nbody_terminal")
+
+        function(malloy_add_viewer_run name exit_code pattern)
+            add_test(NAME ${name}
+                     COMMAND ${CMAKE_COMMAND} -DMODE=run
+                         "-DVIEWER=$<TARGET_FILE:malloy_viewer>"
+                         ${ARGN}
+                         "-DEXPECT_EXIT=${exit_code}"
+                         "-DEXPECT_OUTPUT=${pattern}"
+                         -P "${PROJECT_SOURCE_DIR}/apps/viewer/viewer_check.cmake")
+        endfunction()
+        malloy_add_viewer_run(malloy_viewer_refuses_no_argument 1
+            "no scenario file given.*usage: malloy_viewer")
+        malloy_add_viewer_run(malloy_viewer_refuses_unknown_option 1 "unknown option --fast"
+            "-DSCENARIO=${PROJECT_SOURCE_DIR}/scenarios/box_stack.scn" "-DARGS=--fast")
+        # Issue #33 for the viewer: only a run that opened the file prints step 10.
+        malloy_add_viewer_run(malloy_viewer_opens_unicode_path 0 "step +10 +E"
+            "-DSCENARIO=${malloy_viewer_inputs}/orbit_ψ🚀.scn" "-DARGS=--headless")
+        # --stop-at ends the run there; the last line printed is that tick's.
+        malloy_add_viewer_run(malloy_viewer_stops_at 0 "step +500 +E"
+            "-DSCENARIO=${PROJECT_SOURCE_DIR}/scenarios/box_stack.scn"
+            "-DARGS=--headless|--stop-at|1000" "-DEXPECT_LAST_LINE=^step +1000 +E ")
+        # The clock, not the frame count, decides the steps: 31 frames of 1/60 s
+        # are 0.51667 s, which at dt 0.001 and speed 1 is 516 whole steps.
+        malloy_add_viewer_run(malloy_viewer_paces_by_the_clock 0 "step +516 +E"
+            "-DSCENARIO=${malloy_viewer_inputs}/every_step.scn"
+            "-DARGS=--headless|--frame-time|1/60|--frames|31" "-DEXPECT_LAST_LINE=^step +516 +E ")
+        # --paused advances nothing: step 0 is the only report line.
+        malloy_add_viewer_run(malloy_viewer_starts_paused 0 "step +0 +E"
+            "-DSCENARIO=${PROJECT_SOURCE_DIR}/scenarios/box_stack.scn"
+            "-DARGS=--headless|--paused" "-DEXPECT_LAST_LINE=^step +0 +E ")
+
+        foreach(template IN ITEMS box_stack hard_sphere_gas inclined_orbits
+                                  spring_tetrahedron magnetic_helix)
+            set(scenario "${PROJECT_SOURCE_DIR}/scenarios/${template}.scn")
+            add_test(NAME malloy_viewer_matches_terminal_${template}
+                     COMMAND ${CMAKE_COMMAND} -DMODE=same
+                         "-DVIEWER=$<TARGET_FILE:malloy_viewer>"
+                         "-DTERMINAL=$<TARGET_FILE:malloy_nbody_terminal>"
+                         "-DSCENARIO=${scenario}"
+                         "-DFRAME_TIMES=1/20|1/60|1/144"
+                         -P "${PROJECT_SOURCE_DIR}/apps/viewer/viewer_check.cmake")
+        endforeach()
+    endif()
+endif()
+
+# ----------------------------------------------------------------------------
 # Fuzzers (off by default; not registered as tests, so the count above is
 # unchanged). Coverage-guided robustness for the scenario file, the one
 # untrusted input (docs/06, Fuzzing): one target fuzzes the parser, the
