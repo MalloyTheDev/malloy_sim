@@ -115,7 +115,8 @@ std::vector<Triangle> sphere_triangles(const Vec3& center, Real radius,
 void place_sphere(const std::vector<Triangle>& unit, const Vec3& center, Real radius,
                   std::vector<Triangle>& out)
 {
-    out.reserve(out.size() + unit.size());
+    // No reserve here: reserving exactly what one more sphere needs would
+    // reallocate on every call, and a frame of n spheres would cost n^2.
     for (const Triangle& t : unit)
     {
         out.push_back(Triangle{center + t.a * radius, center + t.b * radius,
