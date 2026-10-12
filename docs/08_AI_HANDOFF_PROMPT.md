@@ -24,11 +24,11 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0011)
+- docs/decisions/ (ADRs 0001-0012)
 
 Current status:
 
-M1-M40 are complete. Five finished domains sit behind one scenario `type` key,
+M1-M41 are complete. Five finished domains sit behind one scenario `type` key,
 across ten scenario types, and every domain runs in two dimensions and three:
 
 - gravity (nbody, nbody3d);

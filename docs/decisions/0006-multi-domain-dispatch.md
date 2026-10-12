@@ -2,6 +2,11 @@
 
 ## Status
 
+Note, 2026-10-12 (M41): the two front ends, the terminal app and the 3D viewer,
+share a run layer in `malloy_scenario` (`make_<type>_world`, readouts, report
+lines). Each keeps its own plain switch over the type, as decided here (ADR
+0012).
+
 Accepted, and implemented as of M10.
 
 Note, 2026-10-11 (M39): two statements below are narrower than the code now

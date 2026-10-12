@@ -29,8 +29,8 @@ CLI parser, logging framework, plugins, scripting, editor, asset manager,
 threading, package manager, or install/export rules.
 
 Being on this list means "not before its milestone", not "unwanted". Rendering
-in 3D, and the windowing, input and camera that come with it, are where the
-project is going ([#80](https://github.com/MalloyTheDev/malloy_sim/issues/80)), followed by a GUI, UI and UX
+in 3D, with the windowing, input and camera that come with it, had its
+milestone in M41 (raylib, the viewer only, ADR 0012), followed next by a GUI, UI and UX
 ([#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)); install and export rules arrive when the libraries
 are packaged for other projects ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)). The mistake is adding
 any of them early, not adding them.

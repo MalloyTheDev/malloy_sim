@@ -1,6 +1,6 @@
 # 07 - Post-M5 Roadmap
 
-M1-M40 are complete, so this is the live roadmap for what comes next.
+M1-M41 are complete, so this is the live roadmap for what comes next.
 
 Treat each entry as its own milestone: start it only when explicitly asked, and
 build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
@@ -55,6 +55,7 @@ M37 - a 2D box on a ground plane            [done]
 M38 - a hard-disk gas (kinetic theory)      [done]
 M39 - thermal walls (heat flow)             [done]
 M40 - per-point iterative contact solver    [done]
+M41 - real-time 3D rendering                [done]
 ```
 
 ## What is next: milestone candidates
@@ -73,7 +74,6 @@ started until it is explicitly asked for, and it gets a number only then.
 | [#79](https://github.com/MalloyTheDev/malloy_sim/issues/79) | a uniform-grid broadphase for the particle domain | 3 |
 | [#78](https://github.com/MalloyTheDev/malloy_sim/issues/78) | uniform gravity for spring networks | 1 |
 | [#64](https://github.com/MalloyTheDev/malloy_sim/issues/64) | one shared `# check` evaluator for the tests and the app | 2 |
-| [#80](https://github.com/MalloyTheDev/malloy_sim/issues/80) | real-time 3D rendering of the simulation (the destination of the 3D arc) | 4 |
 | [#81](https://github.com/MalloyTheDev/malloy_sim/issues/81) | a GUI, UI and UX over the rendering | 4 |
 | [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82) | package the libraries for reuse by other projects | 2 |
 | [#85](https://github.com/MalloyTheDev/malloy_sim/issues/85) | a rigid broadphase and a runtime contact-work budget, so large rigid scenes run | 4 |
@@ -248,7 +248,7 @@ box against a sphere                    [done, M34: the box's nearest point to t
 3D versions of every domain            [done: nbody M19, rigid M20, charges M29, springs M31, particles M32]
 immovable 3D bodies                     [candidate, #74]
 a per-point iterative contact solver    [done, M40: resting boxes and short stacks, ADR 0011]
-rendering in 3D         [candidate, #80: the destination; terminal-first holds until then, ADR 0002]
+rendering in 3D         [done, M41: malloy_viewer over the run layer and malloy_view3d, ADR 0012]
 a GUI, UI and UX        [candidate, #81: after rendering, each its own milestone]
 ```
 

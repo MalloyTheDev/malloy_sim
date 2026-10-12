@@ -71,6 +71,18 @@ terminal app is run:
 - on `applied_force.scn`, whose final energy pins the app's own `rigid3d` E
   column.
 
+Since M41 CTest also runs fifteen viewer checks (registered only when the
+viewer is built). They need no window: refusals (no argument, an empty file, a
+2D type, a parse error, an invalid configuration, an unknown option), a path
+outside the ANSI code page, `--stop-at`, `--paused`, pacing by a synthetic
+clock, and for one template of each 3D type the viewer's `--headless` report
+lines, which must equal the terminal app's byte for byte at 1/20, 1/60 and
+1/144 s frames (the viewer never changes the physics). The pixel self-test
+(`--self-test`: not blank, every subject drawn where the render model projects
+it, clear pixels background, the restart picture identical) needs OpenGL, so it
+runs on the Linux CI job under Xvfb and Mesa; the render model itself is unit
+tested in `malloy_view3d_tests` without any graphics library.
+
 ## Test helpers
 
 Use `MALLOY_CHECK_TRUE`, `MALLOY_CHECK_FALSE`, `MALLOY_CHECK_EQ`,
