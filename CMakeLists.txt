@@ -151,6 +151,59 @@ target_link_libraries(malloy_ascii
         malloy::project_warnings
 )
 
+# malloy_view3d (M41): the 3D render model, the sibling of malloy_ascii. It
+# turns a 3D world's state into final world-space primitives and triangle
+# meshes, and frames them with a camera, so the viewer computes no geometry of
+# its own. A client of the five domains like any other project, and pure: no
+# graphics library is linked or included here, ever.
+add_library(malloy_view3d STATIC
+    src/view3d/view3d.cpp
+    src/view3d/mesh.cpp
+)
+add_library(malloy::view3d ALIAS malloy_view3d)
+target_include_directories(malloy_view3d PUBLIC include)
+target_link_libraries(malloy_view3d
+    PUBLIC
+        malloy::charges
+        malloy::collide
+        malloy::nbody
+        malloy::particles
+        malloy::rigid
+        malloy::springs
+        malloy::math
+        malloy::project_options
+    PRIVATE
+        malloy::project_warnings
+)
+
+if(MALLOY_BUILD_TESTS)
+    # Its tests also run every shipped 3D template, so they read the scenarios
+    # through malloy_scenario, as the scenario tests do.
+    add_executable(malloy_view3d_tests
+        tests/view3d/view3d_tests.cpp
+    )
+
+    target_include_directories(malloy_view3d_tests
+        PRIVATE
+            tests
+    )
+
+    target_link_libraries(malloy_view3d_tests
+        PRIVATE
+            malloy::view3d
+            malloy::scenario
+            malloy::project_options
+            malloy::project_warnings
+    )
+
+    target_compile_definitions(malloy_view3d_tests
+        PRIVATE
+            MALLOY_SCENARIO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scenarios"
+    )
+
+    add_test(NAME malloy_view3d_tests COMMAND malloy_view3d_tests)
+endif()
+
 # malloy_collide (M9): 2D and 3D collision primitives and contacts (STATIC).
 add_library(malloy_collide STATIC
     src/collide/collide.cpp

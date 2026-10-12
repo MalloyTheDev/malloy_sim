@@ -68,7 +68,7 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-All 14 test executables should pass, and
+All 15 test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
 completion. CTest runs 30 tests in all: the executables plus sixteen checks
 that run the app itself. CI runs the Debug and Release builds with every test,

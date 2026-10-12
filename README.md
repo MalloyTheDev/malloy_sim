@@ -83,7 +83,7 @@ thermodynamics (M38-M39); and the per-point contact solver for rigid bodies
 
 The project builds clean under MSVC (`/W4 /WX /permissive-`, with Control Flow
 Guard and CET shadow-stack compatibility on every target), and all
-14 test executables pass via CTest, along with sixteen checks that run the
+15 test executables pass via CTest, along with sixteen checks that run the
 terminal app itself and require both its exit code and its output (30 CTest
 tests in all). CI runs the Debug and Release builds with every test, and a
 short fuzz run, on every push and pull request to `main`. The terminal app runs any of the ten scenario
