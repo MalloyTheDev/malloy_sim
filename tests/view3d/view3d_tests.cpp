@@ -1086,6 +1086,18 @@ int test_sphere_mesh()
         // last-bit difference: the seam at phi = 2 pi must reuse phi = 0's
         // vertices exactly (sin(2 pi) is -2.4e-16, not 0).
         MALLOY_CHECK_TRUE(closed(sphere_triangles(Vec3{}, r, d)));
+
+        // Placed from the unit sphere: the same vertices bit for bit, and the
+        // same normals to rounding (they are the unit mesh's, not recomputed).
+        std::vector<Triangle> placed{Triangle{}};
+        place_sphere(sphere_triangles(Vec3{}, 1.0, d), c, r, placed);
+        MALLOY_CHECK_EQ(placed.size(), mesh.size() + 1); // appended, not replaced
+        for (std::size_t i = 0; i < mesh.size(); ++i)
+        {
+            const Triangle& p = placed[i + 1];
+            MALLOY_CHECK_TRUE(same(p.a, mesh[i].a) && same(p.b, mesh[i].b) && same(p.c, mesh[i].c));
+            MALLOY_CHECK_TRUE(math::approx_equal(p.normal, mesh[i].normal, 1e-12));
+        }
     }
 
     // Level of detail by count.

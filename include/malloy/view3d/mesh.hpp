@@ -49,6 +49,14 @@ SphereDetail sphere_detail(std::size_t sphere_count);
 std::vector<Triangle> sphere_triangles(const Vec3& center, Real radius,
                                        const SphereDetail& detail);
 
+// The same sphere placed from a unit one: append `unit` (sphere_triangles of
+// the origin and radius 1) scaled by `radius` and moved to `center`. The
+// vertices are bit for bit those of sphere_triangles(center, radius, detail)
+// and the normals are the unit mesh's, so a viewer drawing many spheres makes
+// the unit mesh once per level of detail and does no trigonometry per sphere.
+void place_sphere(const std::vector<Triangle>& unit, const Vec3& center, Real radius,
+                  std::vector<Triangle>& out);
+
 // The two triangles of a ground patch, counter-clockwise from its free side.
 std::array<Triangle, 2> patch_triangles(const Patch& patch);
 

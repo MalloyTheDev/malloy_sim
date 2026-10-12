@@ -112,6 +112,17 @@ std::vector<Triangle> sphere_triangles(const Vec3& center, Real radius,
     return out;
 }
 
+void place_sphere(const std::vector<Triangle>& unit, const Vec3& center, Real radius,
+                  std::vector<Triangle>& out)
+{
+    out.reserve(out.size() + unit.size());
+    for (const Triangle& t : unit)
+    {
+        out.push_back(Triangle{center + t.a * radius, center + t.b * radius,
+                               center + t.c * radius, t.normal});
+    }
+}
+
 std::array<Triangle, 2> patch_triangles(const Patch& patch)
 {
     const std::array<Vec3, 4>& c = patch.corners;
