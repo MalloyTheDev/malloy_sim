@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -115,7 +116,32 @@ public:
     // InvalidState (a body).
     sim_core::StepStatus validate() const;
 
-    // Advance by exactly one fixed step:
+    // Advance by exactly one fixed step (M40 order; every constant named here
+    // is defined once in rigid3d.cpp with its derivation):
+    //
+    //   A. DETECT contacts at the START-of-step poses, in a fixed order so a run
+    //      repeats (docs/04): every pair of bodies in ascending pair order
+    //      (sphere against sphere, M24; box against box, M33; box against
+    //      sphere, M34), then every body against every ground plane in
+    //      ascending body then plane order (M22, boxes M30). Each pair gives a
+    //      MANIFOLD of points in the collide layer's own order (up to 4 for a
+    //      box on a plane, 8 for two boxes). The queries are SPECULATIVE
+    //      (kMarginFraction): a pair still apart by up to 1e-4 times the
+    //      smaller body's size is kept, at a negative penetration (the gap), so
+    //      a resting contact cannot drop out on rounding. A body with neither a
+    //      radius nor box half-widths does not collide.
+    //
+    //   B. IMPACT phase, only when the restitution is above 0: on the
+    //      start-of-step velocities, a point is an impact when its normal
+    //      velocity at the MIDDLE of this step's forcing (v_n + delta/2, delta
+    //      the change steps 0 and 1 below will make there) approaches faster
+    //      than the threshold 4 dt (|g| + |F| / m_min) (kThresholdFactor), and
+    //      it is touching or would close its gap within the step. Those points
+    //      are driven by sequential impulses to the Newton target
+    //      -e (v_n + delta/2) - delta/2, so after the forcing each leaves at
+    //      e times its mid-step approach. Points that were not approaching take
+    //      no part, so an impact can never pull energy out of a separating
+    //      point (the phase never raises the kinetic energy).
     //
     //   0. add the gravity acceleration to every body's velocity, before the
     //      position update, which keeps this semi-implicit Euler. An
@@ -143,6 +169,30 @@ public:
     //      The gyroscopic part is the DIFFERENCE of principal moments, exactly
     //      as in M20: a sphere still cannot precess, and it is nonzero only in
     //      three dimensions. The torque is what M21 adds to it.
+    //
+    //   C. REST phase, every point: sequential impulses drive each point's
+    //      normal velocity to 0 (to -gap/dt for a point still apart, so it may
+    //      close its gap exactly but not pass it), with Coulomb friction: a
+    //      tangential impulse in the contact plane, solved as a 2x2 block and
+    //      kept within a disc of radius friction times that point's ACCUMULATED
+    //      normal impulse (M23's cone, per point). Outside the disc the impulse
+    //      is the disc's point nearest the sticking one in the metric of the
+    //      point's tangent effective mass, which is Coulomb's maximum-
+    //      dissipation law: the friction then opposes the slide it leaves
+    //      (scaling radially does that only for an isotropic effective mass, a
+    //      sphere's, and turned a box sliding diagonally). Impulses are
+    //      accumulated and clamped (normal never below 0), WARM-STARTED from the
+    //      last step's rest-phase impulses of the matching point (box corner
+    //      index on a plane; nearest point in body a's frame within 0.05 of its
+    //      size for two boxes; the one point of a sphere pair). Per sweep,
+    //      manifolds in detection order, each its normal rows then its friction
+    //      rows; each manifold first takes one impulse at its weighted centroid
+    //      (the prepass that keeps a symmetric landing exactly symmetric). The
+    //      sweeps stop when no point's constraint is violated by more than
+    //      1e-8 times the velocity scale (1e-12 in the impact phase), or after
+    //      100 sweeps (kMaxSweeps): a deterministic count, set by the state.
+    //      Only bodies that received a nonzero impulse are written back, so a
+    //      body out of contact is bit for bit what it was without contacts.
     //
     //   2. integrate the orientation with the UPDATED angular velocity. This
     //      coupling is what makes the world semi-implicit in the sense every
@@ -175,23 +225,28 @@ public:
     //      displacement instead of rotating. Renormalizing also stops the
     //      factor above from compounding over a long run.
     //
-    //   4. move the centre of mass by velocity * dt, with the gravity-updated
-    //      velocity. Without gravity and without a contact this is still a body
-    //      flying straight while it tumbles.
+    //   4. move the centre of mass by velocity * dt, with the solved velocity.
+    //      Without gravity and without a contact this is still a body flying
+    //      straight while it tumbles.
     //
-    //   5. resolve contacts, in a fixed order so a run repeats (docs/04): first
-    //      every pair of bodies in ascending pair order (sphere against sphere,
-    //      M24; box against box, M33; box against sphere, M34), then every body
-    //      against every ground plane (M22, boxes M30). An overlap is pushed
-    //      apart along the contact normal and given a normal impulse that
-    //      reverses the closing speed to -restitution times itself, with Coulomb
-    //      friction along the tangent (M23); a ground plane is immovable, so only
-    //      the body changes. A body with neither a radius nor box half-widths
-    //      does not collide. This is the only place the colliders and the
-    //      ground planes are read.
+    //   D. PROJECT positions (nonlinear Gauss-Seidel, 3 passes): each point's
+    //      penetration beyond the slop (1e-6 times the pair's size) is removed a
+    //      fifth at a time (kProjectionFactor), at most 0.2 times the size per
+    //      push, by moving and turning the bodies along the normal (a sphere
+    //      is only moved); a LEVEL manifold is first lifted whole at its
+    //      centroid. Linear velocities are not touched, and through a turn the
+    //      body's WORLD-frame angular momentum is kept, re-expressed in the
+    //      turned body frame, so the projection changes no momentum, linear or
+    //      angular. It can only restore height a body lost by sinking in.
     //
-    // On validation failure, before or after the update, the state is left
-    // unchanged and the failing status is returned; this never throws.
+    // A ground plane is immovable, so only the body changes. Impulses are
+    // equal and opposite at one point, so a pair conserves linear momentum.
+    //
+    // The world's state is the bodies AND the warm-start impulses: a world
+    // rebuilt from `bodies()` alone starts without them and so differs for its
+    // first steps, deterministically. On validation failure, before or after
+    // the update, both are left unchanged and the failing status is returned;
+    // this never throws.
     sim_core::StepResult step();
 
     const std::vector<RigidBody3D>& bodies() const { return bodies_; }
@@ -208,11 +263,32 @@ public:
         return simulation_settings_;
     }
 
+    // One rest-phase contact point remembered for the next step's warm start
+    // (M40), the part of the world's state that is not in `bodies()`.
+    struct WarmContact
+    {
+        std::size_t a{0};
+        std::size_t b{0};        // the other body, or the plane index when `ground`
+        bool ground{false};
+        int key{-1};             // box corner index, 0 for a sphere pair, -1: by position
+        math::Vec3 local{};      // the contact point in body a's frame
+        math::Real normal_impulse{0.0};
+        math::Vec3 tangent_impulse{};
+    };
+
+    // Read-only, so the whole state can be compared (a failed step restores
+    // it with the bodies); there is no way to set it.
+    const std::vector<WarmContact>& warm_contacts() const { return warm_; }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     Rigid3DSettings settings_;
     std::vector<RigidBody3D> bodies_;
     std::vector<RigidBody3D> previous_;
+    // Ordered as the manifolds are detected (pairs, then ground), so matching
+    // is one merge per step. Snapshotted and rolled back with the bodies.
+    std::vector<WarmContact> warm_;
+    std::vector<WarmContact> previous_warm_;
     std::optional<time::FixedStep> step_;
 };
 

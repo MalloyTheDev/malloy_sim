@@ -45,6 +45,13 @@ math::Vec2 closest_point_on(const Aabb& box, const math::Vec2& point)
     return math::Vec2{clamp_to(point.x, box.min.x, box.max.x),
                       clamp_to(point.y, box.min.y, box.max.y)};
 }
+
+// A speculative margin (M40) is a distance: finite and not negative. Anything
+// else is refused like an invalid shape, so a query never sees a NaN gap.
+bool valid_margin(math::Real margin)
+{
+    return margin >= math::Real{0} && math::is_finite(margin);
+}
 } // namespace
 
 bool Halfplane::is_valid() const
@@ -201,14 +208,23 @@ bool overlaps(const Circle& circle, const Halfplane& plane)
 
 std::optional<Contact> contact(const Circle& circle, const Halfplane& plane)
 {
-    if (!circle.is_valid() || !plane.is_valid())
+    return contact(circle, plane, math::Real{0});
+}
+
+std::optional<Contact> contact(const Circle& circle, const Halfplane& plane,
+                               math::Real margin)
+{
+    if (!circle.is_valid() || !plane.is_valid() || !valid_margin(margin))
     {
         return std::nullopt;
     }
 
     const math::Real distance = signed_distance(plane, circle.center);
     const math::Real depth = circle.radius - distance;
-    if (depth < math::Real{0})
+    // With margin 0 this is exactly the touching test `depth < 0`; a positive
+    // margin also keeps a circle up to `margin` clear of the line, its depth
+    // then negative (the gap).
+    if (depth < -margin)
     {
         return std::nullopt;
     }
@@ -228,7 +244,12 @@ std::optional<Contact> contact(const Circle& circle, const Halfplane& plane)
 
 std::optional<Contact> contact(const Circle& a, const Circle& b)
 {
-    if (!a.is_valid() || !b.is_valid())
+    return contact(a, b, math::Real{0});
+}
+
+std::optional<Contact> contact(const Circle& a, const Circle& b, math::Real margin)
+{
+    if (!a.is_valid() || !b.is_valid() || !valid_margin(margin))
     {
         return std::nullopt;
     }
@@ -241,7 +262,10 @@ std::optional<Contact> contact(const Circle& a, const Circle& b)
     }
 
     const math::Real radius_sum = a.radius + b.radius;
-    if (distance_squared > radius_sum * radius_sum)
+    // `reach` is the sum itself when the margin is 0 (x + 0 == x for the
+    // non-negative sum), so the plain query is unchanged bit for bit.
+    const math::Real reach = radius_sum + margin;
+    if (distance_squared > reach * reach)
     {
         return std::nullopt;
     }
@@ -433,7 +457,13 @@ struct MinAxis2
 // Two coincident centres are not special-cased: every gap is zero, no axis
 // separates, and the least-overlap axis is the one of least combined width, a
 // fixed repeatable choice.
-bool box2_min_axis(const Obb2& a, const Obb2& b, MinAxis2& out)
+//
+// `margin` (M40) lets a gap of up to that width count as touching: an axis then
+// separates only when the overlap is below -margin, and the least-overlap axis
+// may report a negative overlap (the gap). With margin 0 the test is exactly
+// `overlap < 0`, so the plain queries are unchanged.
+bool box2_min_axis(const Obb2& a, const Obb2& b, MinAxis2& out,
+                   math::Real margin = math::Real{0})
 {
     const Obb2Frame fa = make_obb2(a);
     const Obb2Frame fb = make_obb2(b);
@@ -445,7 +475,7 @@ bool box2_min_axis(const Obb2& a, const Obb2& b, MinAxis2& out)
         const math::Real gap = std::abs(math::dot(t, axis));
         const math::Real overlap =
             projected_radius(fa, axis) + projected_radius(fb, axis) - gap;
-        if (overlap < math::Real{0})
+        if (overlap < -margin)
         {
             return false; // a separating axis: the boxes are apart
         }
@@ -473,6 +503,47 @@ bool box2_min_axis(const Obb2& a, const Obb2& b, MinAxis2& out)
     }
     return true;
 }
+
+// The single representative contact for a SAT axis `m`: the deepest vertex of
+// the other box, moved half the depth back to the midpoint. `is_signed` keeps a
+// negative overlap (a speculative gap, M40) instead of clamping it to 0, which
+// is what the plain query does for a bare touch that rounds a hair negative.
+Contact box2_point_contact(const Obb2& a, const Obb2& b, const MinAxis2& m,
+                           bool is_signed)
+{
+    const math::Vec2 t = b.center - a.center;
+    // Orient the axis from a toward b, like every pair. Coincident centres leave
+    // the sign as computed, a fixed choice (the box analogue of +x).
+    math::Vec2 n = m.axis;
+    if (math::dot(n, t) < math::Real{0})
+    {
+        n = -n;
+    }
+    // A bare touch can round to a hair-negative overlap; never report negative.
+    const math::Real depth = is_signed ? m.overlap : std::max(math::Real{0}, m.overlap);
+
+    Contact result;
+    result.normal = n;
+    result.penetration = depth;
+    if (m.kind == FaceA2)
+    {
+        // A face of a separates: contact on b's deepest vertex into a (its
+        // support along -n), nudged half the penetration back to the midpoint.
+        result.point = support(make_obb2(b), -n) + n * (depth / math::Real{2});
+    }
+    else
+    {
+        // A face of b separates: a's deepest vertex into b (support along +n).
+        result.point = support(make_obb2(a), n) - n * (depth / math::Real{2});
+    }
+    return result;
+}
+
+// The contact manifold of two boxes, shared by the plain query (margin 0,
+// unsigned) and the speculative one (M40). Defined below, after the clipping
+// helpers it uses.
+std::vector<Contact> box2_manifold(const Obb2& a, const Obb2& b, math::Real margin,
+                                   bool is_signed);
 } // namespace
 
 bool overlaps(const Obb2& a, const Obb2& b)
@@ -496,33 +567,7 @@ std::optional<Contact> contact(const Obb2& a, const Obb2& b)
     {
         return std::nullopt;
     }
-
-    const math::Vec2 t = b.center - a.center;
-    // Orient the axis from a toward b, like every pair. Coincident centres leave
-    // the sign as computed, a fixed choice (the box analogue of +x).
-    math::Vec2 n = m.axis;
-    if (math::dot(n, t) < math::Real{0})
-    {
-        n = -n;
-    }
-    // A bare touch can round to a hair-negative overlap; never report negative.
-    const math::Real depth = std::max(math::Real{0}, m.overlap);
-
-    Contact result;
-    result.normal = n;
-    result.penetration = depth;
-    if (m.kind == FaceA2)
-    {
-        // A face of a separates: contact on b's deepest vertex into a (its
-        // support along -n), nudged half the penetration back to the midpoint.
-        result.point = support(make_obb2(b), -n) + n * (depth / math::Real{2});
-    }
-    else
-    {
-        // A face of b separates: a's deepest vertex into b (support along +n).
-        result.point = support(make_obb2(a), n) - n * (depth / math::Real{2});
-    }
-    return result;
+    return box2_point_contact(a, b, m, false);
 }
 
 namespace
@@ -562,8 +607,13 @@ bool overlaps(const Obb2& box, const Halfplane& plane)
 
 std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane)
 {
+    return contacts(box, plane, math::Real{0});
+}
+
+std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane, math::Real margin)
+{
     std::vector<Contact> result;
-    if (!box.is_valid() || !plane.is_valid())
+    if (!box.is_valid() || !plane.is_valid() || !valid_margin(margin))
     {
         return result;
     }
@@ -572,7 +622,9 @@ std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane)
     for (const math::Vec2& corner : corners)
     {
         const math::Real distance = signed_distance(plane, corner);
-        if (distance > math::Real{0})
+        // With margin 0 exactly the touching test; a positive margin also keeps
+        // a corner up to `margin` clear of the line, at a negative depth.
+        if (distance > margin)
         {
             continue; // this corner is in free space
         }
@@ -620,17 +672,13 @@ bool clip_segment(math::Vec2& p, math::Vec2& q, const math::Vec2& plane_normal,
     }
     return true;
 }
-} // namespace
 
-std::vector<Contact> contacts(const Obb2& a, const Obb2& b)
+std::vector<Contact> box2_manifold(const Obb2& a, const Obb2& b, math::Real margin,
+                                   bool is_signed)
 {
     std::vector<Contact> result;
-    if (!a.is_valid() || !b.is_valid())
-    {
-        return result;
-    }
     MinAxis2 m;
-    if (!box2_min_axis(a, b, m))
+    if (!box2_min_axis(a, b, m, margin))
     {
         return result;
     }
@@ -669,23 +717,26 @@ std::vector<Contact> contacts(const Obb2& a, const Obb2& b)
     // the face on either side; dropping the ones a hair in front left a
     // lopsided manifold, or none, and resolving that at one corner put torque
     // into a head-on hit (issue #23). A kept point in front counts as
-    // penetration 0.
+    // penetration 0 in the plain query; the speculative query (M40) keeps
+    // points up to `margin` in front and reports their signed depth.
     const math::Real size =
         std::fmax(std::fmax(ref.e[0], ref.e[1]), std::fmax(inc.e[0], inc.e[1]));
     const math::Real tolerance = math::Real{1e-9} * size;
+    const math::Real keep = std::fmax(tolerance, margin);
     if (clip_segment(p, q, side, side_centre + side_extent) &&
         clip_segment(p, q, -side, side_extent - side_centre))
     {
         for (const math::Vec2& v : {p, q})
         {
             const math::Real separation = math::dot(face_normal, v) - face_offset;
-            if (separation > tolerance)
+            if (separation > keep)
             {
                 continue; // in front of the reference face: not touching
             }
             Contact hit;
             hit.normal = n;
-            hit.penetration = std::fmax(math::Real{0}, -separation);
+            hit.penetration =
+                is_signed ? -separation : std::fmax(math::Real{0}, -separation);
             hit.point = v + face_normal * (-separation / math::Real{2});
             result.push_back(hit);
         }
@@ -695,8 +746,27 @@ std::vector<Contact> contacts(const Obb2& a, const Obb2& b)
         // A bare touch can round every clipped point a hair outside while the
         // SAT still reports overlap; keep the single-point contact rather than
         // reporting nothing, so the manifold agrees with overlaps().
-        result.push_back(*contact(a, b));
+        result.push_back(box2_point_contact(a, b, m, is_signed));
     }
     return result;
+}
+} // namespace
+
+std::vector<Contact> contacts(const Obb2& a, const Obb2& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return std::vector<Contact>{};
+    }
+    return box2_manifold(a, b, math::Real{0}, false);
+}
+
+std::vector<Contact> contacts(const Obb2& a, const Obb2& b, math::Real margin)
+{
+    if (!a.is_valid() || !b.is_valid() || !valid_margin(margin))
+    {
+        return std::vector<Contact>{};
+    }
+    return box2_manifold(a, b, margin, true);
 }
 } // namespace malloy::collide
