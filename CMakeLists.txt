@@ -118,6 +118,7 @@ target_link_libraries(malloy_nbody
 # malloy_scenario (M7): minimal text scenario/config loading (compiled STATIC).
 add_library(malloy_scenario STATIC
     src/scenario/scenario.cpp
+    src/scenario/run.cpp
 )
 add_library(malloy::scenario ALIAS malloy_scenario)
 target_include_directories(malloy_scenario PUBLIC include)
