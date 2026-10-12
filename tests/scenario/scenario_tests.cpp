@@ -17,6 +17,7 @@
 #include <fstream>
 #include <cctype>
 #include <iterator>
+#include <limits>
 #include <iostream>
 #include <locale>
 #include <set>
@@ -2403,14 +2404,15 @@ int main()
 
         // M40: the contact point cap. A rigid world keeps a step's contact
         // points in memory together, so the parser bounds how many it could
-        // have to hold: every colliding pair and every collider against every
-        // ground plane, at the most points that contact reports (rigid3d box
-        // pair or box-plane 8, anything else 1; rigid box pair 2, box-ground 4,
-        // anything else 1), at most 250000. Each file below is built to sit
-        // EXACTLY at 250000, so it parses and potential_contact_points reports
-        // 250000, and one more body or plane is refused on that line. A weight
+        // have to hold: every pair that can make contact and every such body
+        // against every ground plane, at the most points that contact reports
+        // (rigid3d box pair or box-plane 8, anything else 1; rigid box pair 2,
+        // box-ground 4, anything else 1; in rigid, two immovable bodies, or one
+        // and a ground, none), at most 2000000. Each file below is built to sit
+        // EXACTLY at 2000000, so it parses and potential_contact_points reports
+        // 2000000, and one more body or plane is refused on that line. A weight
         // that drifts either way fails one side or the other. `steps 0` keeps
-        // the work far inside its own budget, so the cap is tested alone.
+        // the work inside its own budget, so the cap is tested alone.
         {
             const auto repeat = [](int count, const std::string& line) {
                 std::string lines;
@@ -2431,7 +2433,8 @@ int main()
             const std::string static2 = "rigid_static 0.5 0 0 0\n";
             const std::string ghost2 = "rigid_body 1 0.125 0 0 0 0 0 0 0 0 0\n";
             const std::string ground = "ground 0 1 -100\n";
-            const std::string refusal = "scenario exceeds the maximum contact point count (250000)";
+            const std::string refusal =
+                "scenario exceeds the maximum contact point count (2000000)";
 
             // Parses `at`, which must sit exactly at the cap, then `at` plus
             // `extra`, which must be refused on line `line`. Lines follow the
@@ -2446,7 +2449,7 @@ int main()
                 const std::string expected = "line " + std::to_string(line) + ": " + refusal;
                 const std::uint64_t points =
                     inside.ok ? malloy::scenario::potential_contact_points(inside.scenario) : 0;
-                if (!inside.ok || points != 250000 || over.ok || over.error != expected)
+                if (!inside.ok || points != 2000000 || over.ok || over.error != expected)
                 {
                     std::cerr << label << ": at the cap ok=" << inside.ok << " ("
                               << inside.error << "), points " << points
@@ -2456,53 +2459,59 @@ int main()
                 return true;
             };
 
-            // rigid3d boxes and planes: 8 x (125 x 124 / 2) + 8 x 188 x 125
-            // = 62000 + 188000. The 126th box is line 3 + 188 + 126 = 317;
-            // a 189th plane after the boxes is line 3 + 188 + 125 + 1 = 317.
-            const std::string boxes3 = head3 + repeat(188, plane3) + repeat(125, box3);
-            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d boxes, one more box", boxes3, box3, 317));
-            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d boxes, one more plane", boxes3, plane3, 317));
+            // rigid3d boxes and planes: 8 x (625 x 624 / 2) + 8 x 88 x 625
+            // = 1560000 + 440000. The 626th box is line 3 + 88 + 626 = 717;
+            // an 89th plane after the boxes is line 3 + 88 + 625 + 1 = 717.
+            const std::string boxes3 = head3 + repeat(88, plane3) + repeat(625, box3);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d boxes, one more box", boxes3, box3, 717));
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d boxes, one more plane", boxes3, plane3, 717));
 
-            // rigid3d spheres and planes: 625 x 624 / 2 + 88 x 625
-            // = 195000 + 55000, one point each.
-            const std::string spheres3 = head3 + repeat(88, plane3) + repeat(625, sphere3);
-            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d spheres", spheres3, sphere3, 3 + 88 + 626));
+            // rigid3d spheres and planes: 1280 x 1279 / 2 + 923 x 1280
+            // = 818560 + 1181440, one point each.
+            const std::string spheres3 = head3 + repeat(923, plane3) + repeat(1280, sphere3);
+            MALLOY_CHECK_TRUE(
+                at_cap_edge("rigid3d spheres", spheres3, sphere3, 3 + 923 + 1281));
 
-            // rigid3d, every kind at once: 176 boxes, 21 spheres and 86 planes,
-            // 8 x 15400 + 176 x 21 + 210 + 86 x (8 x 176 + 21)
-            // = 123200 + 3696 + 210 + 122894. One more sphere adds 176 + 21 + 86.
+            // rigid3d, every kind at once: 398 boxes, 48 spheres and 417 planes,
+            // 8 x 79003 + 398 x 48 + 1128 + 417 x (8 x 398 + 48)
+            // = 632024 + 19104 + 1128 + 1347744. One more sphere adds
+            // 398 + 48 + 417.
             const std::string mixed3 =
-                head3 + repeat(86, plane3) + repeat(176, box3) + repeat(21, sphere3);
-            MALLOY_CHECK_TRUE(at_cap_edge("rigid3d mixed", mixed3, sphere3, 3 + 86 + 176 + 22));
+                head3 + repeat(417, plane3) + repeat(398, box3) + repeat(48, sphere3);
+            MALLOY_CHECK_TRUE(
+                at_cap_edge("rigid3d mixed", mixed3, sphere3, 3 + 417 + 398 + 49));
 
-            // rigid boxes and grounds: 2 x (125 x 124 / 2) + 4 x 469 x 125
-            // = 15500 + 234500.
-            const std::string boxes2 = head2 + repeat(469, ground) + repeat(125, box2);
-            MALLOY_CHECK_TRUE(at_cap_edge("rigid boxes", boxes2, box2, 3 + 469 + 126));
+            // rigid boxes and grounds: 2 x (625 x 624 / 2) + 4 x 644 x 625
+            // = 390000 + 1610000.
+            const std::string boxes2 = head2 + repeat(644, ground) + repeat(625, box2);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid boxes", boxes2, box2, 3 + 644 + 626));
 
-            // rigid discs and grounds, half of them immovable (a static disc
-            // still collides with a movable one): 625 x 624 / 2 + 88 x 625.
+            // rigid discs and grounds, 1280 movable and 500 immovable: each
+            // movable pair and each movable disc beside an immovable one,
+            // 818560 + 640000, and each movable disc on each ground, 423 x 1280
+            // = 541440. The 124750 pairs of immovable discs, and the immovable
+            // discs on the grounds, count nothing: the world never detects them.
             const std::string discs2 =
-                head2 + repeat(88, ground) + repeat(313, disc2) + repeat(312, static2);
-            MALLOY_CHECK_TRUE(at_cap_edge("rigid discs", discs2, static2, 3 + 88 + 626));
+                head2 + repeat(423, ground) + repeat(1280, disc2) + repeat(500, static2);
+            MALLOY_CHECK_TRUE(at_cap_edge("rigid discs", discs2, static2, 3 + 423 + 1280 + 501));
             MALLOY_CHECK_TRUE(at_cap_edge("rigid discs, one more ground", discs2, ground,
-                                          3 + 88 + 626));
+                                          3 + 423 + 1280 + 501));
 
-            // One point over is refused: 189 boxes, 2 spheres and 71 planes are
-            // 8 x 17766 + 378 + 1 + 71 x 1514 = 250001, crossed by the second
-            // sphere on line 3 + 71 + 189 + 2. Without it, 249740, inside.
+            // One point over is refused: 363 boxes, 42 spheres and 495 planes
+            // are 8 x 65703 + 15246 + 861 + 495 x 2946 = 2000001, crossed by the
+            // 42nd sphere on line 3 + 495 + 363 + 42 = 903. Without it, 1999102.
             {
                 const std::string almost =
-                    head3 + repeat(71, plane3) + repeat(189, box3) + sphere3;
+                    head3 + repeat(495, plane3) + repeat(363, box3) + repeat(41, sphere3);
                 std::istringstream inside(almost);
                 const ScenarioParseResult in = parse_scenario(inside);
                 MALLOY_CHECK_TRUE(in.ok);
-                MALLOY_CHECK_TRUE(in.ok &&
-                                  malloy::scenario::potential_contact_points(in.scenario) == 249740);
+                MALLOY_CHECK_TRUE(in.ok && malloy::scenario::potential_contact_points(
+                                               in.scenario) == 1999102);
                 std::istringstream one_over(almost + sphere3 + "# past the cap\n");
                 const ScenarioParseResult r = parse_scenario(one_over);
                 MALLOY_CHECK_FALSE(r.ok);
-                MALLOY_CHECK_EQ(r.error, "line 265: " + refusal);
+                MALLOY_CHECK_EQ(r.error, "line 903: " + refusal);
             }
 
             // A body that collides with nothing holds no contact points, so any
@@ -2519,9 +2528,16 @@ int main()
                 std::istringstream in(file);
                 const ScenarioParseResult r = parse_scenario(in);
                 MALLOY_CHECK_TRUE(r.ok);
-                MALLOY_CHECK_TRUE(r.ok &&
-                                  malloy::scenario::potential_contact_points(r.scenario) == 250000);
+                MALLOY_CHECK_TRUE(r.ok && malloy::scenario::potential_contact_points(
+                                              r.scenario) == 2000000);
             }
+
+            // Immovable bodies hold none among themselves or on the ground:
+            // 3000 immovable discs over 10 grounds count nothing.
+            std::istringstream walls(head2 + repeat(10, ground) + repeat(3000, static2));
+            const ScenarioParseResult w = parse_scenario(walls);
+            MALLOY_CHECK_TRUE(w.ok);
+            MALLOY_CHECK_TRUE(w.ok && malloy::scenario::potential_contact_points(w.scenario) == 0);
 
             // Only the rigid domains keep contact points: 1000 particles, which
             // collide, count none.
@@ -2535,10 +2551,12 @@ int main()
         // Issue #25: the WORK budget, steps plus reports, times the work a step
         // does, at most 1e11 units (a report's diagnostics cost about a step).
         // Issue #46 weighted it: a step costs a unit per body plus its tests,
-        // nbody counts every ORDERED pair, as its world evaluates them, and the
-        // rigid domains weight each pair and plane test by kind (box-box 250,
-        // box-sphere 25, sphere pair 10, box-plane 40, sphere-plane 4 in 3D;
-        // box-box 40, any other pair 5, box-ground 20, disc-ground 4 in 2D).
+        // and nbody counts every ORDERED pair, as its world evaluates them. The
+        // rigid domains charge a body 15 (3D) or 10 (2D), and each pair and
+        // plane test its worst case under the M40 solver: detection, plus the
+        // most points the contact reports, each at its fixed cost and 100
+        // sweeps a phase (two phases when restitution is above 0, one at 0);
+        // a test that cannot make contact costs 1 (src/scenario/scenario.cpp).
         //
         // Each case below states its work per step W by hand. With output_every
         // 0 there is one report, so s steps do (s + 1) W: the most steps inside
@@ -2618,41 +2636,88 @@ int main()
             MALLOY_CHECK_TRUE(at_budget_edge("type nbody\n", bodies, 1000000));
             // nbody3d tests each pair once: 499500 + 1000 = 500500.
             MALLOY_CHECK_TRUE(at_budget_edge("type nbody3d\n", repeat(1000, body3_line), 500500));
-            // rigid3d, 100 boxes: 250 x 4950 + 100 = 1237600.
+
+            // The rigid domains (M40), restitution 1 by default, so two phases:
+            // a 3D point with a box costs 75 + 200 x 28 = 5675 and one between
+            // spheres 50 + 200 x 13 = 2650, a 2D point 75 + 200 x 6.5 = 1375.
+            // rigid3d, 100 boxes: 4950 x (460 + 8 x 5675) + 15 x 100
+            // = 4950 x 45860 + 1500 = 227008500.
             const std::string boxes = repeat(100, box3_line);
-            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", boxes, 1237600));
-            // rigid3d, 100 spheres: 10 x 4950 + 100 = 49600.
-            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", repeat(100, sphere3_line), 49600));
-            // rigid3d, 10 boxes, 10 spheres and a plane: 250 x 45 + 25 x 100 +
-            // 10 x 45 pairs, 40 x 10 + 4 x 10 plane tests, 20 bodies: 14660.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", boxes, 227008500));
+            // rigid3d, 100 spheres: 4950 x (45 + 2650) + 1500 = 13341750.
+            MALLOY_CHECK_TRUE(
+                at_budget_edge("type rigid3d\n", repeat(100, sphere3_line), 13341750));
+            // rigid3d, 10 boxes, 10 spheres and a plane: 45 box pairs x 45860,
+            // 100 box-sphere pairs x (80 + 5675), 45 sphere pairs x 2695, and
+            // the plane 10 x (200 + 8 x 5675) + 10 x 2695, 20 bodies x 15:
+            // 2063700 + 575500 + 121275 + 482950 + 300 = 3243725.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid3d\nplane3 0 0 1 -100\n",
-                repeat(10, box3_line) + repeat(10, sphere3_line), 14660));
+                repeat(10, box3_line) + repeat(10, sphere3_line), 3243725));
             // rigid3d, a box and a sphere under 1000 planes, where the plane
-            // tests dominate: 25 + 1000 x (40 + 4) + 2 = 44027.
+            // tests dominate: 5755 + 1000 x (45600 + 2695) + 30 = 48300785.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid3d\n" + repeat(1000, [](int) { return "plane3 0 0 1 -100\n"; }),
-                repeat(1, box3_line) + repeat(1, sphere3_line), 44027));
-            // rigid, 100 boxes: 40 x 4950 + 100 = 198100.
-            MALLOY_CHECK_TRUE(at_budget_edge("type rigid\n", repeat(100, box2_line), 198100));
-            // rigid, 100 discs and 10 grounds: 5 x 4950 + 10 x 4 x 100 + 100 = 28850.
+                repeat(1, box3_line) + repeat(1, sphere3_line), 48300785));
+            // rigid3d, a box and a body without a collider under 1000 planes:
+            // the pair and each plane test of the bare body cost 1, so
+            // 1 + 1000 x (45600 + 1) + 30 = 45601031.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid3d\n" + repeat(1000, [](int) { return "plane3 0 0 1 -100\n"; }),
+                repeat(1, box3_line) +
+                    "rigid_body3d 1 1 1 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0\n",
+                45601031));
+            // rigid, 100 boxes: 4950 x (85 + 2 x 1375) + 10 x 100 = 14034250.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid\n", repeat(100, box2_line), 14034250));
+            // rigid, 100 discs and 10 grounds: 4950 x (35 + 1375)
+            // + 10 x 100 x (20 + 1375) + 1000 = 6979500 + 1395000 + 1000 = 8375500.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid\n" + repeat(10, [](int) { return "ground 0 1 -100\n"; }),
-                repeat(100, disc2_line), 28850));
-            // rigid, 10 boxes, 10 bodies of radius 0 and a ground: 40 x 45 +
-            // 5 x (100 + 45) pairs, 20 x 10 + 4 x 10 ground tests, 20 bodies: 2785.
+                repeat(100, disc2_line), 8375500));
+            // rigid, 10 boxes, 10 bodies of radius 0 and a ground: 45 box pairs
+            // x 2835 and 145 pairs that cannot touch x 1; the ground 10 x (75 +
+            // 4 x 1375) + 10 x 1; 20 bodies x 10: 127575 + 145 + 55760 + 200
+            // = 183680.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid\nground 0 1 -100\n", repeat(10, box2_line) + repeat(10, point2_line),
-                2785));
-            // rigid, a box and a body of radius 0 under 1000 grounds: 5 +
-            // 1000 x (20 + 4) + 2 = 24007.
+                183680));
+            // rigid, a box and a body of radius 0 under 1000 grounds: 1 +
+            // 1000 x (5575 + 1) + 20 = 5576021.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid\n" + repeat(1000, [](int) { return "ground 0 1 -100\n"; }),
-                repeat(1, box2_line) + repeat(1, point2_line), 24007));
+                repeat(1, box2_line) + repeat(1, point2_line), 5576021));
+
+            // Restitution 0 has one phase: a 3D point with a box 75 + 100 x 28
+            // = 2875, between spheres 50 + 100 x 13 = 1350, a 2D point 75 +
+            // 100 x 6.5 = 725. rigid3d, 100 spheres: 4950 x 1395 + 1500
+            // = 6906750.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\nrestitution 0\n",
+                                             repeat(100, sphere3_line), 6906750));
+            // rigid3d, 10 boxes, 10 spheres and a plane: 45 x (460 + 8 x 2875)
+            // + 100 x (80 + 2875) + 45 x 1395 + 10 x (200 + 8 x 2875) + 10 x
+            // 1395 + 300 = 1055700 + 295500 + 62775 + 245950 + 300 = 1660225.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid3d\nrestitution 0\nplane3 0 0 1 -100\n",
+                repeat(10, box3_line) + repeat(10, sphere3_line), 1660225));
+            // rigid, 100 boxes and a ground: 4950 x (85 + 2 x 725) + 100 x (75 +
+            // 4 x 725) + 1000 = 7598250 + 297500 + 1000 = 7896750.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid\nrestitution 0\nground 0 1 -100\n",
+                                             repeat(100, box2_line), 7896750));
+            // rigid, 50 movable and 50 immovable discs under 10 grounds: the
+            // 1225 + 50 x 50 pairs a movable disc is in x (35 + 725), the 1225
+            // immovable pairs x 1, and on each ground 50 x (20 + 725) + 50 x 1;
+            // 100 bodies x 10: 2831000 + 1225 + 373000 + 1000 = 3206225.
+            MALLOY_CHECK_TRUE(at_budget_edge(
+                "type rigid\nrestitution 0\n" +
+                    repeat(10, [](int) { return "ground 0 1 -100\n"; }),
+                repeat(50, disc2_line) +
+                    repeat(50, [](int i) { return "rigid_static 0.5 " + std::to_string(2 * i) +
+                                                  " 20 0\n"; }),
+                3206225));
 
             // Issue #46's file: 100 separated boxes for 19799000 steps, 4828
             // bytes, inside the old budget at 5050 pair tests a step and about
-            // 2.35 hours in Release. Now 1237600 units a step, far over.
+            // 2.35 hours in Release. Now 227008500 units a step, far over.
             {
                 std::istringstream issue("type rigid3d\nsteps 19799000\noutput_every 100000\n" +
                                          boxes);
@@ -2676,9 +2741,9 @@ int main()
             MALLOY_CHECK_FALSE(parse_scenario(tiny).ok);
 
             // A ground plane costs a test per body per step in the rigid
-            // domains: 1000 planes and 100 static discs for 1e6 steps is 4 x
-            // 1000 x 100 plane tests plus 5 x 4950 pairs and 100 bodies a
-            // step, 4.2e11, over.
+            // domains, even one that cannot make contact: 1000 planes and 100
+            // immovable discs for 1e6 steps is 1000 x 100 plane tests and 4950
+            // pairs at 1 each, plus 100 bodies at 10, a step: 1.06e11, over.
             std::ostringstream planes;
             planes << "type rigid\noutput_every 0\nsteps 1000000\n";
             for (int i = 0; i < 1000; ++i)
@@ -2728,6 +2793,29 @@ int main()
             MALLOY_CHECK_EQ(work_of("type springs\nspring_body 1 0 0 0 0\nspring_body 1 1 0 0 0\n"
                                     "spring_body 1 2 0 0 0\nspring 0 1 1 1 0\nspring 1 2 1 1 0\n"),
                             5.0); // 3 bodies + 2 springs
+
+            // An immovable 2D box cannot be written in a file (a rigid_box
+            // has a finite mass), but the exported functions take any
+            // scenario: two movable boxes, an immovable one and a ground. Its
+            // points: the movable pair 2, each movable box beside the
+            // immovable one 2 x 2, each movable box on the ground 2 x 4, and
+            // the immovable box on the ground none: 14. Its work (restitution
+            // 1, two phases): 3 box pairs x 2835, the ground 2 x 5575 + 1 x 1
+            // for the immovable box, and 3 bodies x 10: 19686.
+            {
+                malloy::scenario::Scenario s;
+                s.type = malloy::scenario::ScenarioType::Rigid;
+                malloy::rigid::RigidBody2D box;
+                box.half_extents = malloy::math::Vec2{0.5, 0.5};
+                malloy::rigid::RigidBody2D wall = box;
+                wall.mass = std::numeric_limits<Real>::infinity();
+                wall.inertia = std::numeric_limits<Real>::infinity();
+                s.rigid_bodies = {box, box, wall};
+                s.rigid_settings.ground.push_back(
+                    malloy::collide::Halfplane{malloy::math::Vec2{0.0, 1.0}, 0.0});
+                MALLOY_CHECK_EQ(malloy::scenario::potential_contact_points(s), std::uint64_t{14});
+                MALLOY_CHECK_EQ(malloy::scenario::step_work(s), 19686.0);
+            }
         }
 
         // Issue #25: at most 1e5 reports, which bounds the output volume.

@@ -135,35 +135,47 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 
         // The contact point cap (M40), through the parser's own count, and an
         // independent lower bound on that count: every pair of rigid bodies
-        // that collide (a box, or a radius above 0), and every such body
-        // against every ground plane, holds at least one point.
+        // that can make contact, and every such body against every ground
+        // plane, holds at least one point. A body collides when it is a box or
+        // its radius is above 0; in 2D only bodies of one kind meet (box
+        // against disc is not built, issue #48), and an immovable one meets
+        // only a movable one, never a ground.
         const std::uint64_t points = malloy::scenario::potential_contact_points(s);
-        if (points > 250000)
+        if (points > 2000000)
         {
-            fail("a successful parse exceeds the contact point cap (250000)");
+            fail("a successful parse exceeds the contact point cap (2000000)");
         }
-        std::uint64_t colliders = 0;
-        for (const malloy::rigid::RigidBody2D& body : s.rigid_bodies)
-        {
-            if ((body.half_extents.x > 0.0 && body.half_extents.y > 0.0) || body.radius > 0.0)
-            {
-                ++colliders;
-            }
-        }
+        const auto pairs = [](std::uint64_t n) { return n > 0 ? n * (n - 1) / 2 : 0; };
+        std::uint64_t colliders3 = 0;
         for (const malloy::rigid::RigidBody3D& body : s.rigid_bodies3d)
         {
             if ((body.half_extents.x > 0.0 && body.half_extents.y > 0.0 &&
                  body.half_extents.z > 0.0) ||
                 body.radius > 0.0)
             {
-                ++colliders;
+                ++colliders3;
             }
         }
-        const std::uint64_t collider_pairs = colliders > 0 ? colliders * (colliders - 1) / 2 : 0;
-        if (points < collider_pairs + colliders * (planes2 + planes3))
+        std::uint64_t movable2[2] = {0, 0};   // boxes, discs
+        std::uint64_t immovable2[2] = {0, 0}; // boxes, discs
+        for (const malloy::rigid::RigidBody2D& body : s.rigid_bodies)
         {
-            fail("the parser's contact point count is below one point per colliding pair "
-                 "and plane");
+            const bool box = body.half_extents.x > 0.0 && body.half_extents.y > 0.0;
+            if (box || body.radius > 0.0)
+            {
+                ++(body.is_static() ? immovable2 : movable2)[box ? 0 : 1];
+            }
+        }
+        std::uint64_t at_least = pairs(colliders3) + colliders3 * planes3 +
+                                 (movable2[0] + movable2[1]) * planes2;
+        for (int kind = 0; kind < 2; ++kind)
+        {
+            at_least += pairs(movable2[kind]) + movable2[kind] * immovable2[kind];
+        }
+        if (points < at_least)
+        {
+            fail("the parser's contact point count is below one point per pair and plane "
+                 "that can make contact");
         }
 
         // No line, counted in bytes up to its newline, may pass 4096.

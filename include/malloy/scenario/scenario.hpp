@@ -433,25 +433,37 @@ struct ScenarioParseResult
 //                        there; up to about three hours in Debug). A step
 //                        is N units for its N bodies, N + springs for springs,
 //                        plus its pair tests: N(N-1) for nbody, which evaluates
-//                        every ordered pair, N(N-1)/2 for the other pairwise
-//                        domains, and in the rigid domains each pair and each
-//                        body-plane test weighted by kind, as measured (issue
-//                        #46): rigid3d box-box 250, box-sphere 25, sphere pair
-//                        10, box-plane 40, sphere-plane 4; rigid box-box 40,
-//                        any other pair 5, box-ground 20, disc-ground 4. A body
-//                        is a box when all its half-extents are positive
-//   contact points       at most 250000 that a rigid or rigid3d world could
-//                        have to hold in memory at once (M40): every pair of
-//                        bodies that collide, and every such body against
-//                        every ground plane, each counted at the most points
-//                        that contact can report. In rigid3d that is 8 for a
-//                        box against a box (a clipped face polygon) or against
-//                        a plane (the corners past it), and 1 for any other
-//                        pair or plane; in rigid, 2 for a box against a box, 4
-//                        for a box against a ground, and 1 for any other pair
-//                        or ground. A body collides when it is a box or its
-//                        radius is above 0; one that is neither counts
-//                        nothing. Checked as each line is read
+//                        every ordered pair, and N(N-1)/2 for the other
+//                        pairwise domains. The rigid domains charge a body 15
+//                        (rigid3d) or 10 (rigid), and each pair and each
+//                        body-plane test its worst case under the M40 contact
+//                        solver (issue #46, re-measured for M40): detection,
+//                        plus the most points the contact can report times
+//                        each point's fixed cost and 100 sweeps in each of its
+//                        phases, two when restitution is above 0 and one at 0.
+//                        With two phases: rigid3d box-box 45860, box-plane
+//                        45600, box-sphere 5755, sphere pair or sphere-plane
+//                        2695; rigid box-box 2835, box-ground 5575, disc pair
+//                        1410, disc-ground 1395. With one: 23460, 23200, 2955,
+//                        1395; 1535, 2975, 760, 745. A test that cannot make
+//                        contact (a body without a collider, two immovable 2D
+//                        bodies, an immovable 2D body against a ground, a 2D
+//                        box with a disc) costs 1. A body is a box when all its
+//                        half-extents are positive
+//   contact points       at most 2000000 that a rigid or rigid3d world could
+//                        have to hold in memory at once (M40, about 1 KiB
+//                        each): every pair of bodies that can make contact,
+//                        and every such body against every ground plane, each
+//                        counted at the most points that contact can report.
+//                        In rigid3d that is 8 for a box against a box (a
+//                        clipped face polygon) or against a plane (its
+//                        corners), and 1 for any other pair or plane; in rigid,
+//                        2 for a box against a box, 4 for a box against a
+//                        ground, and 1 for any other pair or ground. A body
+//                        collides when it is a box or its radius is above 0;
+//                        in rigid, two immovable bodies, or one and a ground,
+//                        count nothing, nor does a box with a disc. Checked as
+//                        each line is read
 //   reports              at most 1e5 (steps / output_every + 1); output_every
 //                        0 prints only the step-0 report
 //   line length          at most 4096 characters, comments included; the
@@ -486,9 +498,11 @@ std::size_t entity_count(const Scenario& scenario);
 double step_work(const Scenario& scenario);
 
 // The most contact points `scenario`'s world could have to hold at once, the
-// quantity the `contact points` cap above bounds: each pair of bodies that
-// collide, and each such body against each ground plane, counted at the most
-// points that contact can report. Zero for every domain but rigid and rigid3d,
+// quantity the `contact points` cap above bounds: each pair of bodies that can
+// make contact, and each such body against each ground plane, counted at the
+// most points that contact can report (in rigid, two immovable bodies, or one
+// and a ground, and a box with a disc, count none, since the world never
+// detects them). Zero for every domain but rigid and rigid3d,
 // which are the ones that keep a step's contact points (M40). Exported for the
 // same reason as step_work.
 std::uint64_t potential_contact_points(const Scenario& scenario);

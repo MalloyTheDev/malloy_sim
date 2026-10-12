@@ -19,10 +19,13 @@
 // Every input must finish in milliseconds, so the run is bounded here, on top
 // of the parser's own caps. A scenario with more than 64 entities is skipped (it
 // still joins the corpus for the parser coverage it found). Any other scenario
-// runs, but only for its first steps: as many as fit in 1e4 work units, counted
+// runs, but only for its first steps: as many as fit in 1e6 work units, counted
 // by the parser's own step_work (issue #84: this file used to carry a copy of
 // the formula, which went stale when issue #46 weighted it), and in 32 reports.
-// A step costlier than 1e4 units runs none, only its step-0 report. Cutting a run
+// A step costlier than 1e6 units runs none, only its step-0 report. 1e6 units is
+// at most about 10 ms of Release work; it was 1e4 until M40, whose worst-case
+// rigid weights charge one pair of boxes 45860 units a step, so 1e4 stepped no
+// scenario holding a box at all. Cutting a run
 // short rather than skipping it means every shipped template, all of which run
 // for thousands of steps, still runs its opening.
 //
@@ -72,7 +75,7 @@ namespace malloy_fuzz
 {
 // The bounds on one run, described above.
 constexpr std::size_t max_entities = 64;
-constexpr double max_work = 1e4;
+constexpr double max_work = 1e6;
 constexpr long long max_reports = 32;
 
 // The parse of the current input, handed to the app by the stand-in, and

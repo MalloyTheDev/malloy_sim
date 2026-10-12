@@ -61,52 +61,90 @@ constexpr std::size_t max_entities = 100000; // total bodies plus springs
 // Release time each: one cheap pair test (an nbody or particle pair), plus one
 // per body per step. Since issue #46 the costlier tests are weighted by what
 // they cost (see the weights below), so 1e11 units is at most about 20 minutes
-// in Release whatever the file holds (caged piles at the limit, the worst case
-// below, ran 5 to 17 minutes), and up to about three hours in Debug, where a
-// unit costs up to about 100 ns (the same piles: 38 minutes to 2 hours). The
-// largest shipped template uses 3e7 (a lattice gas), and the largest rigid one
-// 5e6.
+// in Release whatever the file holds (caged piles at the limit ran 5 to 17
+// minutes under the #46 weights; the M40 rigid weights are worst-case bounds,
+// of which the slowest piles measured reached about half), and up to about
+// three hours in Debug, where a unit costs up to about 100 ns (the same caged
+// piles: 38 minutes to 2 hours). The largest shipped template uses 3.8e8
+// (dropped_bodies.scn, a rigid one), the largest other 3e7 (a lattice gas).
 constexpr double max_work = 1e11;
 
-// Issue #46: what each test costs, in work units, for the domains where tests
-// differ in kind. Every pair once cost one unit, but a 3D box pair runs the
-// separating-axis test and clips a contact manifold, allocating as it goes, and
-// costs over a hundred cheap pairs, so a 5 KB file of boxes inside the old
-// budget ran for hours. Each weight is the slowest Release cost measured for
-// its kind, in units of 10 ns, rounded. Measured with EVERY pair overlapping
-// on every step, the worst case and one a file can hold: bodies larger than a
-// cage of ground planes stay piled together. Per test, in Release:
+// What each test costs, in work units, for the rigid domains, whose tests
+// differ in kind. Issue #46 first weighted them by what detection cost; since
+// M40 a contact also feeds the per-point solver, which dominates. A step
+// detects, then gives each contact point a fixed cost (its effective masses,
+// the warm start, the prepass, the position projection and the warm-start
+// cache) and, per sweep, a residual check and a sweep. Each phase sweeps until
+// its tolerance or until kMaxSweeps, 100 (src/rigid/rigid.cpp, rigid3d.cpp), and
+// a step has two phases when restitution is above 0 (impact, then rest) and one
+// at 0. So the worst case a file can hold, every pair overlapping and every
+// phase stopped by the cap, costs per test
 //
-//   3D box-box      about 1.1 us in a caged pile; the clipping alone takes up
-//                   to about 2.5 us for the slowest configurations (99th
-//                   percentile of 300 random overlaps)                  250
-//   3D box-sphere   0.17 to 0.22 us                                      25
-//   3D sphere pair  0.03 to 0.09 us (the friction path, spinning)        10
-//   3D box-plane    0.37 us (the corner manifold allocates)              40
-//   3D sphere-plane 0.03 us                                               4
-//   2D box-box      0.12 to 0.14 us in a pile; the clipping alone up to
-//                   0.36 us (99th percentile)                            40
-//   2D disc pair    0.02 to 0.04 us, and a box with a body that is not   5
-//                   a box (radius 0: a box cannot hold a colliding disc,
-//                   see the box-against-disc refusal below)
-//   2D box-ground   0.18 us                                              20
-//   2D disc-ground  0.03 us                                               4
+//   detection + (most points it reports) x (fixed + phases x 100 x sweep)
 //
-// For comparison, one unit: an nbody pair 0.004 us (2D, per ordered pair) or
-// 0.008 us (3D), a packed particle pair 0.008 to 0.012 us. Debug is about ten
-// times slower throughout (a caged 3D box pair 11 us). A body is classified as
-// its world classifies it: a box when every half-extent is positive. These are
-// the costs of the contact code as it stands; a change to it (a per-point
-// solve, a cheap bounding-sphere reject) should be measured again here.
-constexpr double box3_box3_work = 250.0;
-constexpr double box3_sphere3_work = 25.0;
-constexpr double sphere3_sphere3_work = 10.0;
-constexpr double box3_plane_work = 40.0;
-constexpr double sphere3_plane_work = 4.0;
-constexpr double box2_box2_work = 40.0;
-constexpr double disc2_pair_work = 5.0;
-constexpr double box2_ground_work = 20.0;
-constexpr double disc2_ground_work = 4.0;
+// with the points the contact point cap counts below: 8 for a 3D box against a
+// box or a plane, 2 for a 2D box pair, 4 for a 2D box on a ground, and 1 for any
+// other pair or plane. Measured in Release on fresh piles in which every pair
+// overlaps deeply (bodies within 0.1 of one another, approaching at up to 1,
+// friction 0.5, restitution 0.5 and 0), with every phase forced to the cap, and
+// split by running the same piles with the cap at 0 and with detection alone.
+// Each figure is the slowest measured, rounded up into units of 10 ns:
+//
+//   detection, per overlapping test: 3D box-box 4.53 us (460), box-plane 1.99
+//     (200), box-sphere at most 0.81 (80, the average of a mixed pile, box
+//     pairs included), sphere pair 0.43 (45), sphere-plane 0.42 (45); 2D
+//     box-box 0.80 (85), box-ground 0.72 (75), disc pair 0.31 (35),
+//     disc-ground 0.19 (20)
+//   fixed, per point: 3D, a contact with a box 0.72 us (75), spheres only 0.46
+//     (50); 2D 0.73 (75)
+//   sweep, per point and sweep, in the rest phase, the dearer of the two. It
+//     grows with the contact list as it outgrows the caches; measured from a
+//     few hundred points to 2.6e5 (the mixed-phase cost grew 0.12 to 0.17 us
+//     for 3D boxes, 0.046 to 0.071 for spheres, 0.020 to 0.035 for 2D), scaled
+//     by that growth: 3D, a contact with a box 0.20 to 0.28 us (28), spheres
+//     only 0.084 to 0.127 (13); 2D 0.036 to 0.062 (6.5)
+//
+// With two phases that gives 45860 for a 3D box pair, 45600 for a box-plane
+// test, 5755 for a box-sphere pair, 2695 for a sphere pair or sphere-plane test,
+// and in 2D 2835 for a box pair, 5575 for a box-ground test, 1410 for a disc
+// pair and 1395 for a disc-ground test; with one phase 23460, 23200, 2955,
+// 1395, 1535, 2975, 760 and 745. A test that cannot make contact costs 1 (1.4 ns
+// in 3D, 2.2 ns in 2D): a pair or plane test where a body has no collider, two
+// immovable 2D bodies, an immovable 2D body against a ground, or a 2D box with
+// a disc (issue #48), all of which the worlds skip before detecting. A rigid
+// body costs 15 units a step in 3D and 10 in 2D: its integration, validation,
+// and entries in the phases' per-body arrays (0.08 us measured, 0.15 us in the
+// solver's own figures). A body is classified as its world classifies it: a box
+// when every half-extent is positive, otherwise round when its radius is above
+// 0, and in 2D immovable when its mass and inertia are both infinite.
+//
+// The bound is far above a typical step. A box resting on a plane took 2.5 us
+// a step in 3D and 0.9 us in 2D, a three-box stack 11 us and 3 us (under one
+// sweep a step), and a five-box 3D stack twisted 0.3 rad a level 91 us (20
+// sweeps), where its bound is 6.9 ms. Debug ran these piles 3 to 8 times slower
+// than Release (a forced-cap 3D box pile 240 us a test against 70 us, a 2D disc
+// pile 18 us against 2.5 us), so a unit stays under the 100 ns allowed above
+// wherever the work is large; only a body's own cost runs about 30 times
+// slower, which matters in small scenes, far inside the budget.
+constexpr double sweeps_per_phase = 100.0; // kMaxSweeps in src/rigid
+constexpr double rigid3_body_work = 15.0;
+constexpr double rigid2_body_work = 10.0;
+constexpr double no_contact_work = 1.0;
+constexpr double box3_box3_detect = 460.0;
+constexpr double box3_plane_detect = 200.0;
+constexpr double box3_sphere3_detect = 80.0;
+constexpr double sphere3_sphere3_detect = 45.0;
+constexpr double sphere3_plane_detect = 45.0;
+constexpr double box3_point_fixed = 75.0;
+constexpr double sphere3_point_fixed = 50.0;
+constexpr double box3_point_sweep = 28.0;
+constexpr double sphere3_point_sweep = 13.0;
+constexpr double box2_box2_detect = 85.0;
+constexpr double box2_ground_detect = 75.0;
+constexpr double disc2_pair_detect = 35.0;
+constexpr double disc2_ground_detect = 20.0;
+constexpr double point2_fixed = 75.0;
+constexpr double point2_sweep = 6.5;
 
 // How many diagnostic reports a run may print. Output volume is bounded only by
 // this, and a report with its ASCII frame is about 2 KB, so 1e5 reports is about
@@ -122,29 +160,33 @@ constexpr std::size_t max_planes = 1000;
 // keeps the last step's as warm-start state, so memory grows with the pairs that
 // touch, which neither the entity cap nor the work budget bounds: a file of a
 // few thousand coincident bodies, inside both, could ask for tens of GB. This
-// caps the POTENTIAL count, every colliding pair and every body-plane test at
-// the most points that contact can report (see potential_contact_points below),
-// so it holds however the bodies end up arranged.
+// caps the POTENTIAL count, every pair and every body-plane test that can make
+// contact, at the most points that contact can report (see
+// potential_contact_points below), so it holds however the bodies end up
+// arranged.
 //
-// The value is a memory ceiling of 1 GiB divided by a generous bound on what a
-// point costs. A 3D point record of the M40 design carries about nine vectors
-// (normal, point, two arms, two body-frame anchors, a tangent basis and the
-// accumulated friction) and a dozen scalars, about 330 bytes, taken as 512 to
-// cover padding and the 2D record. A point can be live in four copies at once:
-// the step's list, the impact phase's, the warm-start cache that is world state,
-// and that cache's rollback snapshot (2 KiB). Allowing as much again for the
-// per-manifold records and for std::vector growth gives 4 KiB a point, and
-// 1 GiB / 4 KiB = 262144, rounded down to 250000. The rigid templates hold at
-// most 190 (dropped_bodies.scn), over a thousand times inside.
-constexpr std::uint64_t max_contact_points = 250000;
+// The value is a memory ceiling of 2 GiB over what a point costs. At the peak
+// of a step a point is held in the step's list (a 3D ContactPoint is 328 bytes,
+// a 2D one 200), in at most one manifold record (32 bytes), and in the world's
+// warm-start cache and that cache's rollback snapshot (a WarmContact is 80
+// bytes in 3D, 56 in 2D): 520 bytes in 3D, 344 in 2D (MSVC x64). A std::vector
+// can hold up to twice its size while it grows (libstdc++ doubles; MSVC adds
+// half), so a point costs at most 1040 bytes, 1 KiB. 2 GiB / 1 KiB is 2097152,
+// rounded down to 2000000. A body's own per-step arrays (a 3D solver body is
+// 160 bytes) are bounded by the entity cap instead. The rigid templates hold at
+// most 54 (dropped_bodies.scn). A pile of 1994 spheres in a box of six planes,
+// or of 1997 discs in three grounds, is the largest of its kind that loads.
+constexpr std::uint64_t max_contact_points = 2000000;
 
 // The most points one contact can report, by kind, as the collide layer builds
-// them. In 3D a box face clipped against another box is a polygon of at most 8
-// vertices (a quad cut by four side planes), and a box sunk into a plane has at
-// most its 8 corners past it; every other 3D pair or plane is one point. In 2D a
+// them, margin-aware queries included. In 3D a box face clipped against another
+// box is a polygon of at most 8 vertices (a quad cut by four side planes, each
+// cut adding at most one), and a box near a plane has at most its 8 corners; an
+// edge-edge contact, and every other 3D pair or plane, is one point. In 2D a
 // clipped box edge has 2 ends and a box has 4 corners for a ground line; a disc
-// is one point. Box against disc is refused in 2D (issue #48) and counted as one
-// point, which is what it will be.
+// is one point. A pair the world skips before detecting (two immovable 2D
+// bodies, an immovable 2D body against a ground, a 2D box with a disc, issue
+// #48) makes none.
 constexpr std::uint64_t box3_box3_points = 8;
 constexpr std::uint64_t box3_plane_points = 8;
 constexpr std::uint64_t box2_box2_points = 2;
@@ -239,14 +281,18 @@ std::string quoted(const std::string& token)
 
 // How many rigid bodies of each collider kind a scenario holds, as its world
 // classifies them: a box when every half-extent is positive, otherwise a round
-// body (a sphere, or a disc in 2D, static or not) when its radius is above 0. A
-// body that is neither collides with nothing and is not counted. `seen` is how
-// many bodies have been classified so far, so the parser counts as it reads, in
-// time proportional to the file rather than to its square.
+// body (a sphere, or a disc in 2D) when its radius is above 0. A body that is
+// neither collides with nothing and is not counted. In 2D a body is also
+// immovable when its mass and inertia are both infinite (rigid_static): two
+// immovable bodies, or one and a ground, are never detected. `seen` is how many
+// bodies have been classified so far, so the parser counts as it reads, in time
+// proportional to the file rather than to its square.
 struct ColliderCount
 {
-    std::uint64_t boxes{0};
-    std::uint64_t rounds{0};
+    std::uint64_t boxes{0};          // in 2D, the movable ones
+    std::uint64_t rounds{0};         // in 2D, the movable ones
+    std::uint64_t immovable_boxes{0};  // 2D only
+    std::uint64_t immovable_rounds{0}; // 2D only
     std::size_t seen{0};
 };
 
@@ -275,40 +321,47 @@ void count_colliders(const Scenario& scenario, ColliderCount& count)
         for (; count.seen < scenario.rigid_bodies.size(); ++count.seen)
         {
             const rigid::RigidBody2D& body = scenario.rigid_bodies[count.seen];
+            const bool immovable = body.is_static();
             if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0})
             {
-                ++count.boxes;
+                ++(immovable ? count.immovable_boxes : count.boxes);
             }
             else if (body.radius > math::Real{0})
             {
-                ++count.rounds;
+                ++(immovable ? count.immovable_rounds : count.rounds);
             }
         }
     }
 }
 
+// Pairs among `n`, and pairs with at least one of `n` beside `others`.
+std::uint64_t pairs_of(std::uint64_t n) { return n > 0 ? n * (n - 1) / 2 : 0; }
+std::uint64_t pairs_with(std::uint64_t n, std::uint64_t others) { return pairs_of(n) + n * others; }
+
 // The potential contact points of a scenario with these colliders (see
-// max_contact_points): each colliding pair, and each collider against each
-// ground plane, at the most points that kind of contact reports. Exact in
-// unsigned 64-bit arithmetic: inside the parser the entity cap keeps a count at
-// or below 1e5, so the largest term is 8 x 1e5 x 1e5 / 2 = 4e10, and overflow
-// would need about 2e9 bodies.
+// max_contact_points): each pair that can make contact, and each collider that
+// can against each ground plane, at the most points that kind of contact
+// reports. Exact in unsigned 64-bit arithmetic: inside the parser the entity
+// cap keeps a count at or below 1e5, so the largest term is 8 x 1e5 x 1e5 / 2 =
+// 4e10, and overflow would need about 2e9 bodies.
 std::uint64_t contact_points(const Scenario& scenario, const ColliderCount& count)
 {
     const std::uint64_t boxes = count.boxes;
     const std::uint64_t rounds = count.rounds;
-    const std::uint64_t box_pairs = boxes > 0 ? boxes * (boxes - 1) / 2 : 0;
-    const std::uint64_t round_pairs = rounds > 0 ? rounds * (rounds - 1) / 2 : 0;
     if (scenario.type == ScenarioType::Rigid3D)
     {
         const std::uint64_t planes = scenario.rigid3d_settings.ground.size();
-        return box3_box3_points * box_pairs + single_points * (boxes * rounds + round_pairs) +
+        return box3_box3_points * pairs_of(boxes) +
+               single_points * (boxes * rounds + pairs_of(rounds)) +
                planes * (box3_plane_points * boxes + single_points * rounds);
     }
     if (scenario.type == ScenarioType::Rigid)
     {
+        // An immovable body counts only beside a movable one, and never
+        // against a ground; a box and a disc are skipped (issue #48).
         const std::uint64_t planes = scenario.rigid_settings.ground.size();
-        return box2_box2_points * box_pairs + single_points * (boxes * rounds + round_pairs) +
+        return box2_box2_points * pairs_with(boxes, count.immovable_boxes) +
+               single_points * pairs_with(rounds, count.immovable_rounds) +
                planes * (box2_ground_points * boxes + single_points * rounds);
     }
     return 0;
@@ -1461,7 +1514,7 @@ ScenarioParseResult parse_scenario(std::istream& input)
         if (contact_points(scenario, colliders) > max_contact_points)
         {
             return make_error(line_number,
-                              "scenario exceeds the maximum contact point count (250000)");
+                              "scenario exceeds the maximum contact point count (2000000)");
         }
     }
 
@@ -1591,39 +1644,52 @@ double step_work(const Scenario& scenario)
     {
         return n * (n - 1.0) + n;
     }
-    if (scenario.type == ScenarioType::Rigid3D)
+    if (scenario.type == ScenarioType::Rigid3D || scenario.type == ScenarioType::Rigid)
     {
-        double boxes = 0.0;
-        for (const rigid::RigidBody3D& body : scenario.rigid_bodies3d)
+        // The weights above: detection plus, for every point the contact can
+        // report, its fixed cost and the sweeps of each phase at the cap.
+        ColliderCount count;
+        count_colliders(scenario, count);
+        const bool three = scenario.type == ScenarioType::Rigid3D;
+        const math::Real restitution =
+            three ? scenario.rigid3d_settings.restitution : scenario.rigid_settings.restitution;
+        const double phases = restitution > math::Real{0} ? 2.0 : 1.0;
+        const double sweeps = phases * sweeps_per_phase;
+        const double boxes = static_cast<double>(count.boxes);
+        const double rounds = static_cast<double>(count.rounds);
+        const double all_pairs = n * (n - 1.0) / 2.0;
+        if (three)
         {
-            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0} &&
-                body.half_extents.z > math::Real{0})
-            {
-                boxes += 1.0;
-            }
+            const double planes = static_cast<double>(scenario.rigid3d_settings.ground.size());
+            const double box_point = box3_point_fixed + sweeps * box3_point_sweep;
+            const double round_point = sphere3_point_fixed + sweeps * sphere3_point_sweep;
+            const double box_pairs = static_cast<double>(pairs_of(count.boxes));
+            const double mixed_pairs = boxes * rounds;
+            const double round_pairs = static_cast<double>(pairs_of(count.rounds));
+            const double box_points = static_cast<double>(box3_box3_points);
+            const double plane_points = static_cast<double>(box3_plane_points);
+            return rigid3_body_work * n +
+                   no_contact_work * (all_pairs - box_pairs - mixed_pairs - round_pairs) +
+                   box_pairs * (box3_box3_detect + box_points * box_point) +
+                   mixed_pairs * (box3_sphere3_detect + box_point) +
+                   round_pairs * (sphere3_sphere3_detect + round_point) +
+                   planes * (boxes * (box3_plane_detect + plane_points * box_point) +
+                             rounds * (sphere3_plane_detect + round_point) +
+                             (n - boxes - rounds) * no_contact_work);
         }
-        const double spheres = n - boxes;
-        const double planes = static_cast<double>(scenario.rigid3d_settings.ground.size());
-        return box3_box3_work * boxes * (boxes - 1.0) / 2.0 +
-               box3_sphere3_work * boxes * spheres +
-               sphere3_sphere3_work * spheres * (spheres - 1.0) / 2.0 +
-               planes * (box3_plane_work * boxes + sphere3_plane_work * spheres) + n;
-    }
-    if (scenario.type == ScenarioType::Rigid)
-    {
-        double boxes = 0.0;
-        for (const rigid::RigidBody2D& body : scenario.rigid_bodies)
-        {
-            if (body.half_extents.x > math::Real{0} && body.half_extents.y > math::Real{0})
-            {
-                boxes += 1.0;
-            }
-        }
-        const double discs = n - boxes;
         const double planes = static_cast<double>(scenario.rigid_settings.ground.size());
-        return box2_box2_work * boxes * (boxes - 1.0) / 2.0 +
-               disc2_pair_work * (boxes * discs + discs * (discs - 1.0) / 2.0) +
-               planes * (box2_ground_work * boxes + disc2_ground_work * discs) + n;
+        const double point = point2_fixed + sweeps * point2_sweep;
+        const double box_pairs = static_cast<double>(pairs_with(count.boxes, count.immovable_boxes));
+        const double round_pairs =
+            static_cast<double>(pairs_with(count.rounds, count.immovable_rounds));
+        const double box_points = static_cast<double>(box2_box2_points);
+        const double ground_points = static_cast<double>(box2_ground_points);
+        return rigid2_body_work * n + no_contact_work * (all_pairs - box_pairs - round_pairs) +
+               box_pairs * (box2_box2_detect + box_points * point) +
+               round_pairs * (disc2_pair_detect + point) +
+               planes * (boxes * (box2_ground_detect + ground_points * point) +
+                         rounds * (disc2_ground_detect + point) +
+                         (n - boxes - rounds) * no_contact_work);
     }
     return n * (n - 1.0) / 2.0 + n;
 }
