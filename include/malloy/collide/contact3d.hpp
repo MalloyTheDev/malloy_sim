@@ -12,7 +12,9 @@ namespace malloy::collide
 // sibling of `Contact`, with the same conventions:
 //
 //   normal       unit vector pointing from `a` toward `b`.
-//   penetration  how deeply they overlap along `normal`; never negative.
+//   penetration  how deeply they overlap along `normal`; never negative,
+//                except from the speculative queries at the end of this
+//                file (M40), where a negative value is the gap.
 //                Moving `b` by `+normal * penetration`, or `a` by
 //                `-normal * penetration`, separates them exactly.
 //   point        a representative point in the overlap region, midway between
@@ -130,4 +132,33 @@ bool overlaps(const Box3& box, const Sphere& sphere);
 bool overlaps(const Sphere& sphere, const Box3& box);
 std::optional<Contact3> contact(const Box3& box, const Sphere& sphere);
 std::optional<Contact3> contact(const Sphere& sphere, const Box3& box);
+
+// --- Speculative queries (M40) ---
+//
+// The five contact queries the 3D rigid world resolves, with a `margin`: a pair
+// is reported while it is separated by up to `margin`, not only once it
+// touches. The iterative contact solver uses this to keep a resting contact
+// alive across rounding (a corner that drifts 1e-17 clear of the floor would
+// otherwise drop out and fall for a step) and to stop an approach exactly at
+// the surface. Each entry follows the conventions above with one difference:
+//
+//   penetration  SIGNED. Negative means the shapes are apart by -penetration
+//                (a gap of at most `margin`); the point is still midway
+//                between the two surfaces, so it lies in the gap.
+//
+// With `margin == 0` the sphere and box/plane queries return exactly what the
+// plain queries return (those delegate here). The box/box manifold differs from
+// `contacts(Box3, Box3)` in two ways: its depths and its single-point fallback
+// are signed rather than clamped at 0, and an edge axis that beats a
+// PENETRATING face by less than 5 per cent of the face's overlap does not win
+// when the face manifold keeps a point (the face preference ODE, Bullet and
+// Box2D use against face/edge flicker in resting stacks; see kFacePreference).
+// A margin that is negative or not finite is refused like an invalid shape: no
+// contact. Never throws.
+std::optional<Contact3> contact(const Sphere& sphere, const Plane3& plane,
+                                math::Real margin);
+std::optional<Contact3> contact(const Sphere& a, const Sphere& b, math::Real margin);
+std::vector<Contact3> contacts(const Box3& box, const Plane3& plane, math::Real margin);
+std::vector<Contact3> contacts(const Box3& a, const Box3& b, math::Real margin);
+std::optional<Contact3> contact(const Box3& box, const Sphere& sphere, math::Real margin);
 } // namespace malloy::collide

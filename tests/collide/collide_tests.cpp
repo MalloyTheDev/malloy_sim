@@ -1664,6 +1664,324 @@ int main()
         }
     }
 
+    // --- M40: the speculative (margin-aware) contact queries the iterative
+    //     contact solver resolves. A pair apart by a gap within the margin is
+    //     reported at penetration -gap, its point midway in the gap; with
+    //     margin 0 the plain query's answer comes back; a bad margin is refused
+    //     like a bad shape. ---
+    {
+        using malloy::collide::Box3;
+        using malloy::collide::Contact3;
+        using malloy::collide::contacts;
+        using malloy::collide::Obb2;
+        using malloy::collide::Plane3;
+        using malloy::collide::Sphere;
+        using malloy::math::from_axis_angle;
+        using malloy::math::normalize;
+        using malloy::math::Quat;
+        using malloy::math::rotate;
+        using malloy::math::Vec3;
+
+        // A fixed, fully specified generator, so every run repeats.
+        std::uint64_t state = 0x243F6A8885A308D3ULL;
+        const auto next = [&state]() {
+            state += 0x9E3779B97F4A7C15ULL; // splitmix64
+            std::uint64_t z = state;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+            z ^= z >> 31;
+            return static_cast<Real>(z >> 11) * (1.0 / 9007199254740992.0); // [0, 1)
+        };
+        const auto signed_unit = [&next]() { return 2.0 * next() - 1.0; };
+        const auto same2 = [](const Contact& x, const Contact& y) {
+            return x.normal.x == y.normal.x && x.normal.y == y.normal.y &&
+                   x.penetration == y.penetration && x.point.x == y.point.x &&
+                   x.point.y == y.point.y;
+        };
+        const auto same3 = [](const Contact3& x, const Contact3& y) {
+            return x.normal.x == y.normal.x && x.normal.y == y.normal.y &&
+                   x.normal.z == y.normal.z && x.penetration == y.penetration &&
+                   x.point.x == y.point.x && x.point.y == y.point.y && x.point.z == y.point.z;
+        };
+
+        // 2D, a circle 0.3 above a floor, margin 0.5: reported, depth -0.3,
+        // point halfway between the circle's bottom (y 0.3) and the floor.
+        {
+            const Halfplane floor{Vec2{0.0, 1.0}, 0.0};
+            const auto above = contact(Circle{Vec2{2.0, 1.3}, 1.0}, floor, 0.5);
+            MALLOY_CHECK_TRUE(above.has_value());
+            MALLOY_CHECK_NEAR(above->penetration, -0.3, 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(above->normal, (Vec2{0.0, -1.0}), 0.0);
+            MALLOY_CHECK_VEC2_NEAR(above->point, (Vec2{2.0, 0.15}), 1e-15);
+            MALLOY_CHECK_FALSE(contact(Circle{Vec2{2.0, 1.3}, 1.0}, floor, 0.25).has_value());
+            MALLOY_CHECK_FALSE(contact(Circle{Vec2{2.0, 1.3}, 1.0}, floor).has_value());
+            // Two circles 0.2 apart: reported at margin 0.25, not at 0.1.
+            const auto pair = contact(Circle{Vec2{}, 1.0}, Circle{Vec2{2.7, 0.0}, 1.5}, 0.25);
+            MALLOY_CHECK_TRUE(pair.has_value());
+            MALLOY_CHECK_NEAR(pair->penetration, -0.2, 1e-15);
+            MALLOY_CHECK_VEC2_NEAR(pair->point, (Vec2{1.1, 0.0}), 1e-15);
+            MALLOY_CHECK_FALSE(
+                contact(Circle{Vec2{}, 1.0}, Circle{Vec2{2.7, 0.0}, 1.5}, 0.1).has_value());
+            // A square 0.01 clear of the floor: margin 0.02 keeps its two lower
+            // corners at depth -0.01, margin 0.005 keeps neither.
+            const Obb2 box{Vec2{0.0, 0.51}, Vec2{0.5, 0.5}, 0.0};
+            const auto corners = contacts(box, floor, 0.02);
+            MALLOY_CHECK_EQ(corners.size(), std::size_t{2});
+            MALLOY_CHECK_NEAR(corners[0].penetration, -0.01, 1e-15);
+            MALLOY_CHECK_NEAR(corners[0].point.y, 0.005, 1e-15);
+            MALLOY_CHECK_TRUE(contacts(box, floor, 0.005).empty());
+            // Two squares 0.004 apart face to face: both ends of the face, at
+            // depth -0.004, with the plain query reporting nothing.
+            const Obb2 left{Vec2{-0.5, 0.0}, Vec2{0.5, 0.5}, 0.0};
+            const Obb2 right{Vec2{0.504, 0.1}, Vec2{0.5, 0.5}, 0.0};
+            const auto face = contacts(left, right, 0.01);
+            MALLOY_CHECK_EQ(face.size(), std::size_t{2});
+            for (const Contact& hit : face)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, -0.004, 1e-15);
+                MALLOY_CHECK_NEAR(hit.point.x, 0.002, 1e-15);
+            }
+            MALLOY_CHECK_TRUE(contacts(left, right).empty());
+            MALLOY_CHECK_TRUE(contacts(left, right, 0.003).empty());
+        }
+
+        // 3D, the same four facts for spheres, a box on a plane, a box against a
+        // sphere and two boxes.
+        {
+            const Plane3 floor{Vec3{0.0, 0.0, 1.0}, 0.0};
+            const auto sphere_hit = contact(Sphere{Vec3{1.0, 2.0, 1.3}, 1.0}, floor, 0.5);
+            MALLOY_CHECK_TRUE(sphere_hit.has_value());
+            MALLOY_CHECK_NEAR(sphere_hit->penetration, -0.3, 1e-15);
+            MALLOY_CHECK_NEAR(sphere_hit->point.z, 0.15, 1e-15);
+            MALLOY_CHECK_FALSE(contact(Sphere{Vec3{1.0, 2.0, 1.3}, 1.0}, floor, 0.25).has_value());
+            const auto spheres =
+                contact(Sphere{Vec3{}, 1.0}, Sphere{Vec3{0.0, 2.7, 0.0}, 1.5}, 0.25);
+            MALLOY_CHECK_TRUE(spheres.has_value());
+            MALLOY_CHECK_NEAR(spheres->penetration, -0.2, 1e-15);
+            MALLOY_CHECK_NEAR(spheres->point.y, 1.1, 1e-15);
+            const Box3 cube{Vec3{0.0, 0.0, 0.51}, Vec3{0.5, 0.5, 0.5}, Quat{}};
+            const auto corners = contacts(cube, floor, 0.02);
+            MALLOY_CHECK_EQ(corners.size(), std::size_t{4});
+            for (const Contact3& hit : corners)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, -0.01, 1e-15);
+            }
+            MALLOY_CHECK_TRUE(contacts(cube, floor, 0.005).empty());
+            // The cube's top is at 1.01; a ball of radius 0.3 at 1.34 is 0.03
+            // clear of it, the point halfway down the gap at 1.025.
+            const auto ball = contact(cube, Sphere{Vec3{0.0, 0.0, 1.34}, 0.3}, 0.05);
+            MALLOY_CHECK_TRUE(ball.has_value());
+            MALLOY_CHECK_NEAR(ball->penetration, -0.03, 1e-15);
+            MALLOY_CHECK_NEAR(ball->point.z, 1.025, 1e-15);
+            MALLOY_CHECK_FALSE(
+                contact(cube, Sphere{Vec3{0.0, 0.0, 1.41}, 0.3}, 0.05).has_value());
+            const Box3 above{Vec3{0.1, 0.0, 1.514}, Vec3{0.5, 0.5, 0.5}, Quat{}};
+            const auto face = contacts(cube, above, 0.01);
+            MALLOY_CHECK_EQ(face.size(), std::size_t{4});
+            for (const Contact3& hit : face)
+            {
+                MALLOY_CHECK_NEAR(hit.penetration, -0.004, 1e-15);
+                MALLOY_CHECK_NEAR(hit.point.z, 1.012, 1e-15);
+            }
+            MALLOY_CHECK_TRUE(contacts(cube, above).empty());
+            MALLOY_CHECK_TRUE(contacts(cube, above, 0.003).empty());
+        }
+
+        // A margin that is negative or not finite is refused like a bad shape.
+        for (const Real bad : {-1e-9, nan, inf})
+        {
+            const Circle c{Vec2{}, 1.0};
+            MALLOY_CHECK_FALSE(contact(c, Halfplane{Vec2{0.0, 1.0}, 0.0}, bad).has_value());
+            MALLOY_CHECK_FALSE(contact(c, c, bad).has_value());
+            const Obb2 square{Vec2{}, Vec2{0.5, 0.5}, 0.0};
+            MALLOY_CHECK_TRUE(contacts(square, Halfplane{Vec2{0.0, 1.0}, 0.0}, bad).empty());
+            MALLOY_CHECK_TRUE(contacts(square, square, bad).empty());
+            const Sphere s{Vec3{}, 1.0};
+            const Box3 cube{Vec3{}, Vec3{0.5, 0.5, 0.5}, Quat{}};
+            MALLOY_CHECK_FALSE(contact(s, Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}, bad).has_value());
+            MALLOY_CHECK_FALSE(contact(s, s, bad).has_value());
+            MALLOY_CHECK_TRUE(contacts(cube, Plane3{Vec3{0.0, 0.0, 1.0}, 0.0}, bad).empty());
+            MALLOY_CHECK_TRUE(contacts(cube, cube, bad).empty());
+            MALLOY_CHECK_FALSE(contact(cube, s, bad).has_value());
+        }
+
+        // Margin 0 gives back exactly what the plain query gives, bit for bit,
+        // over random configurations (the plain queries now delegate to these,
+        // so this pins that the margin adds nothing at 0). The box/box manifold
+        // is signed where the plain one clamps at 0, so its depths are compared
+        // after the same clamp; in 3D only where a face wins outright (the face
+        // preference is the speculative query's own, checked below).
+        for (int it = 0; it < 4000; ++it)
+        {
+            const Vec2 p{signed_unit(), signed_unit()};
+            const Halfplane plane{normalize(Vec2{signed_unit(), signed_unit() + 2.0}),
+                                  0.3 * signed_unit()};
+            const Circle c1{p, 0.2 + next()};
+            const Circle c2{Vec2{signed_unit(), signed_unit()}, 0.2 + next()};
+            const auto plain_cp = contact(c1, plane);
+            const auto zero_cp = contact(c1, plane, 0.0);
+            MALLOY_CHECK_EQ(plain_cp.has_value(), zero_cp.has_value());
+            MALLOY_CHECK_TRUE(!plain_cp || same2(*plain_cp, *zero_cp));
+            const auto plain_cc = contact(c1, c2);
+            const auto zero_cc = contact(c1, c2, 0.0);
+            MALLOY_CHECK_EQ(plain_cc.has_value(), zero_cc.has_value());
+            MALLOY_CHECK_TRUE(!plain_cc || same2(*plain_cc, *zero_cc));
+            const Obb2 b1{p, Vec2{0.1 + next(), 0.1 + next()}, 3.0 * signed_unit()};
+            const Obb2 b2{Vec2{signed_unit(), signed_unit()}, Vec2{0.1 + next(), 0.1 + next()},
+                          3.0 * signed_unit()};
+            const auto plain_bp = contacts(b1, plane);
+            const auto zero_bp = contacts(b1, plane, 0.0);
+            MALLOY_CHECK_EQ(plain_bp.size(), zero_bp.size());
+            for (std::size_t k = 0; k < plain_bp.size() && k < zero_bp.size(); ++k)
+            {
+                MALLOY_CHECK_TRUE(same2(plain_bp[k], zero_bp[k]));
+            }
+            const auto plain_bb = contacts(b1, b2);
+            auto zero_bb = contacts(b1, b2, 0.0);
+            MALLOY_CHECK_EQ(plain_bb.size(), zero_bb.size());
+            for (std::size_t k = 0; k < plain_bb.size() && k < zero_bb.size(); ++k)
+            {
+                zero_bb[k].penetration = std::fmax(0.0, zero_bb[k].penetration);
+                MALLOY_CHECK_TRUE(same2(plain_bb[k], zero_bb[k]));
+            }
+
+            const Vec3 q{signed_unit(), signed_unit(), signed_unit()};
+            const Plane3 plane3{
+                normalize(Vec3{signed_unit(), signed_unit(), signed_unit() + 2.0}), 0.3 * signed_unit()};
+            const Sphere s1{q, 0.2 + next()};
+            const Sphere s2{Vec3{signed_unit(), signed_unit(), signed_unit()}, 0.2 + next()};
+            const auto plain_sp = contact(s1, plane3);
+            const auto zero_sp = contact(s1, plane3, 0.0);
+            MALLOY_CHECK_EQ(plain_sp.has_value(), zero_sp.has_value());
+            MALLOY_CHECK_TRUE(!plain_sp || same3(*plain_sp, *zero_sp));
+            const auto plain_ss = contact(s1, s2);
+            const auto zero_ss = contact(s1, s2, 0.0);
+            MALLOY_CHECK_EQ(plain_ss.has_value(), zero_ss.has_value());
+            MALLOY_CHECK_TRUE(!plain_ss || same3(*plain_ss, *zero_ss));
+            const Box3 x1{q, Vec3{0.1 + next(), 0.1 + next(), 0.1 + next()},
+                          normalize(Quat{signed_unit(), Vec3{signed_unit(), signed_unit(),
+                                                             signed_unit()}})};
+            const Box3 x2{Vec3{signed_unit(), signed_unit(), signed_unit()},
+                          Vec3{0.1 + next(), 0.1 + next(), 0.1 + next()},
+                          normalize(Quat{signed_unit(), Vec3{signed_unit(), signed_unit(),
+                                                             signed_unit()}})};
+            const auto plain_xp = contacts(x1, plane3);
+            const auto zero_xp = contacts(x1, plane3, 0.0);
+            MALLOY_CHECK_EQ(plain_xp.size(), zero_xp.size());
+            for (std::size_t k = 0; k < plain_xp.size() && k < zero_xp.size(); ++k)
+            {
+                MALLOY_CHECK_TRUE(same3(plain_xp[k], zero_xp[k]));
+            }
+            const auto plain_xs = contact(x1, s2);
+            const auto zero_xs = contact(x1, s2, 0.0);
+            MALLOY_CHECK_EQ(plain_xs.has_value(), zero_xs.has_value());
+            MALLOY_CHECK_TRUE(!plain_xs || same3(*plain_xs, *zero_xs));
+            const auto plain_xx = contacts(x1, x2);
+            auto zero_xx = contacts(x1, x2, 0.0);
+            if (plain_xx.size() >= 2) // a face won outright: same manifold
+            {
+                MALLOY_CHECK_EQ(plain_xx.size(), zero_xx.size());
+                for (std::size_t k = 0; k < plain_xx.size() && k < zero_xx.size(); ++k)
+                {
+                    zero_xx[k].penetration = std::fmax(0.0, zero_xx[k].penetration);
+                    MALLOY_CHECK_TRUE(same3(plain_xx[k], zero_xx[k]));
+                }
+            }
+            MALLOY_CHECK_EQ(plain_xx.empty(), zero_xx.empty());
+        }
+
+        // The face preference (kFacePreference), and its proof. Issue #22's fix
+        // kept a 5 per cent face margin OUT of the single-point contact, because
+        // there a face winning where the contact is really edge on edge put the
+        // point outside the boxes (3 of 85000 random pairs). The speculative
+        // manifold applies it only where the face manifold keeps a point, and a
+        // kept point lies on the incident box and inside the reference box's
+        // side slabs. The property: every point of every manifold lies within
+        // |penetration| (plus rounding, 1e-9 of the size) of BOTH boxes, over
+        // 100000 configurations scaled across twelve orders of magnitude, half
+        // fully random and half near-flat stacks (twisted, tilted up to 0.08
+        // rad, overhanging, a touch to 0.02 deep), at margin 0 and at the
+        // solver's 1e-4 of the size. The preference must actually fire (it
+        // turns a plain one-point edge contact into a face patch) and never
+        // breaks the property. Research run: 400000 configurations, 89338
+        // firings, 0 violations, the worst point at 0.5 of its bound (a
+        // midpoint, by construction).
+        {
+            const auto distance_outside = [](const Box3& box, const Vec3& p) {
+                const Vec3 d = rotate(malloy::math::conjugate(box.orientation), p - box.center);
+                const Real dx = std::fmax(0.0, std::abs(d.x) - box.half_extents.x);
+                const Real dy = std::fmax(0.0, std::abs(d.y) - box.half_extents.y);
+                const Real dz = std::fmax(0.0, std::abs(d.z) - box.half_extents.z);
+                return std::sqrt(dx * dx + dy * dy + dz * dz);
+            };
+            int manifolds = 0;
+            int fired = 0;
+            for (int it = 0; it < 100000; ++it)
+            {
+                const Real scale = std::pow(10.0, -6.0 + 12.0 * next());
+                Box3 a;
+                Box3 b;
+                if (it % 2 == 0)
+                {
+                    a = Box3{Vec3{signed_unit(), signed_unit(), signed_unit()} * scale,
+                             Vec3{0.1 + 0.9 * next(), 0.1 + 0.9 * next(), 0.1 + 0.9 * next()} *
+                                 scale,
+                             normalize(Quat{signed_unit(), Vec3{signed_unit(), signed_unit(),
+                                                                signed_unit()}})};
+                    b = Box3{Vec3{signed_unit(), signed_unit(), signed_unit()} * scale,
+                             Vec3{0.1 + 0.9 * next(), 0.1 + 0.9 * next(), 0.1 + 0.9 * next()} *
+                                 scale,
+                             normalize(Quat{signed_unit(), Vec3{signed_unit(), signed_unit(),
+                                                                signed_unit()}})};
+                }
+                else
+                {
+                    const Quat r = normalize(
+                        Quat{signed_unit(), Vec3{signed_unit(), signed_unit(), signed_unit()}});
+                    const Vec3 ha{0.2 + 0.8 * next(), 0.2 + 0.8 * next(), 0.2 + 0.8 * next()};
+                    const Vec3 hb{0.2 + 0.8 * next(), 0.2 + 0.8 * next(), 0.2 + 0.8 * next()};
+                    const Real tilt = 0.08 * signed_unit();
+                    const Vec3 tilt_axis{signed_unit(), signed_unit(), 0.0};
+                    const Real twist = 3.14159 * signed_unit();
+                    const Quat q = normalize(r * from_axis_angle(tilt_axis, tilt) *
+                                             from_axis_angle(Vec3{0.0, 0.0, 1.0}, twist));
+                    const Vec3 up = rotate(r, Vec3{0.0, 0.0, 1.0});
+                    const Vec3 lateral =
+                        rotate(r, Vec3{signed_unit() * ha.x, signed_unit() * ha.y, 0.0});
+                    const Real depth = 0.02 * signed_unit();
+                    a = Box3{Vec3{}, ha * scale, r};
+                    b = Box3{(lateral + up * (ha.z + hb.z - depth)) * scale, hb * scale, q};
+                }
+                const Real size =
+                    std::fmax(std::fmax(std::fmax(a.half_extents.x, a.half_extents.y),
+                                        a.half_extents.z),
+                              std::fmax(std::fmax(b.half_extents.x, b.half_extents.y),
+                                        b.half_extents.z));
+                for (const Real margin : {0.0, 1e-4 * size})
+                {
+                    const auto hits = contacts(a, b, margin);
+                    if (hits.empty())
+                    {
+                        continue;
+                    }
+                    ++manifolds;
+                    if (contacts(a, b).size() == 1 && hits.size() > 1)
+                    {
+                        ++fired;
+                    }
+                    for (const Contact3& hit : hits)
+                    {
+                        const Real bound = std::abs(hit.penetration) + 1e-9 * size;
+                        MALLOY_CHECK_TRUE(distance_outside(a, hit.point) <= bound);
+                        MALLOY_CHECK_TRUE(distance_outside(b, hit.point) <= bound);
+                    }
+                }
+            }
+            MALLOY_CHECK_TRUE(manifolds > 100000); // exercised at both margins
+            MALLOY_CHECK_TRUE(fired > 10000);      // the preference really fired
+        }
+    }
+
     std::cout << "malloy_collide_tests passed\n";
     return 0;
 }

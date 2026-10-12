@@ -42,24 +42,59 @@ public:
     // body).
     sim_core::StepStatus validate() const;
 
-    // Advance by exactly one fixed step:
+    // Advance by exactly one fixed step (M40 order; every constant named here
+    // is defined once in rigid.cpp with its derivation, the same values as the
+    // 3D world's):
+    //
+    //   A. DETECT contacts at the START-of-step poses, in a fixed order so a run
+    //      repeats (docs/04): every pair of bodies in ascending pair order (two
+    //      discs, M14; two boxes, M36; two immovable bodies and a box with a
+    //      disc are skipped), then every movable body against every ground
+    //      plane in ascending body then plane order (discs M16, boxes M37).
+    //      Each pair gives a MANIFOLD of points in the collide layer's order (up
+    //      to 2 for a box). The queries are SPECULATIVE (kMarginFraction): a
+    //      pair still apart by up to 1e-4 times the smaller body's size is kept,
+    //      at a negative penetration (the gap), so a resting contact cannot drop
+    //      out on rounding.
+    //
+    //   B. IMPACT phase, only when the restitution is above 0: on the
+    //      start-of-step velocities, a point is an impact when its normal
+    //      velocity at the MIDDLE of this step's gravity (v_n + delta/2, delta
+    //      what step 1 adds there) approaches faster than the threshold
+    //      4 dt |g| (kThresholdFactor), and it is touching or would close its gap
+    //      within the step. Those points are driven by sequential impulses to
+    //      the Newton target -e (v_n + delta/2) - delta/2, so after the gravity
+    //      each leaves at e times its mid-step approach. Points that were not
+    //      approaching take no part, so the phase never raises the kinetic
+    //      energy.
     //
     //   1. add gravity * dt to every velocity whose body has finite mass;
-    //   2. move the centre of mass by the UPDATED velocity * dt, which keeps
+    //
+    //   C. REST phase, every point: sequential impulses drive each point's
+    //      normal velocity to 0 (to -gap/dt for a point still apart), with
+    //      Coulomb friction clamped to friction times that point's ACCUMULATED
+    //      normal impulse (M17, per point). Impulses are accumulated and
+    //      clamped (normal never below 0), WARM-STARTED from the last step's
+    //      rest-phase impulses of the matching point (box corner index on a
+    //      plane; nearest point in body a's frame within 0.05 of its size for
+    //      two boxes; the one point of a disc pair). Per sweep, manifolds in
+    //      detection order, each its normal rows then its friction rows; each
+    //      manifold first takes one impulse at its weighted centroid. The
+    //      sweeps stop when no point's constraint is violated by more than
+    //      1e-8 of the velocity scale (1e-12 in the impact phase), or after
+    //      100 sweeps (kMaxSweeps). Only bodies that received a nonzero impulse
+    //      are written back, and an immovable body never is.
+    //
+    //   2. move the centre of mass by the solved velocity * dt, which keeps
     //      the integration semi-implicit (symplectic) Euler;
     //   3. advance the angle by angular_velocity * dt;
-    //   4. resolve body-against-body contacts in ascending pair order;
-    //   5. resolve every body against every ground plane, in ascending body
-    //      then plane order.
     //
-    // Ground comes last on purpose: a body pushed by a pair impulse in step 4
-    // gets the floor's answer in the same step rather than the next one.
-    //
-    // Within one contact the normal impulse is applied first and the friction
-    // impulse second, computed from the relative velocity that REMAINS after
-    // it. That ordering is observable, so it is fixed here rather than left to
-    // the implementation: computing friction from the pre-impulse velocity
-    // would resist a motion that no longer exists.
+    //   D. PROJECT positions (nonlinear Gauss-Seidel, 3 passes): each point's
+    //      penetration beyond the slop (1e-6 times the pair's size) is removed a
+    //      fifth at a time (kProjectionFactor), at most 0.2 times the size per
+    //      push, by moving and turning the movable bodies along the normal; a
+    //      LEVEL manifold is first lifted whole at its centroid. Velocities are
+    //      not touched, so this adds no kinetic energy.
     //
     // Step 2 integrates EVERY body, including immovable ones. That is
     // deliberate: an immovable body with a velocity you set is a kinematic
@@ -76,8 +111,11 @@ public:
     // with one owner (ADR 0007); forcing it into the state transition would
     // introduce discontinuities and complicate comparison.
     //
-    // On validation failure, before or after the update, the state is left
-    // unchanged and the failing status is returned. Never throws.
+    // The world's state is the bodies AND the warm-start impulses: a world
+    // rebuilt from `bodies()` alone starts without them and so differs for its
+    // first steps, deterministically. On validation failure, before or after
+    // the update, both are left unchanged and the failing status is returned.
+    // Never throws.
     sim_core::StepResult step();
 
     // Apply an impulse at a world point. Changes linear velocity by J/m always,
@@ -102,11 +140,32 @@ public:
         return simulation_settings_;
     }
 
+    // One rest-phase contact point remembered for the next step's warm start
+    // (M40), the part of the world's state that is not in `bodies()`.
+    struct WarmContact
+    {
+        std::size_t a{0};
+        std::size_t b{0};        // the other body, or the plane index when `ground`
+        bool ground{false};
+        int key{-1};             // box corner index, 0 for a disc pair, -1: by position
+        math::Vec2 local{};      // the contact point in body a's frame
+        math::Real normal_impulse{0.0};
+        math::Real tangent_impulse{0.0};
+    };
+
+    // Read-only, so the whole state can be compared (a failed step restores
+    // it with the bodies); there is no way to set it.
+    const std::vector<WarmContact>& warm_contacts() const { return warm_; }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     RigidSettings settings_;
     std::vector<RigidBody2D> bodies_;
     std::vector<RigidBody2D> previous_;
+    // Ordered as the manifolds are detected (pairs, then ground), so matching
+    // is one merge per step. Snapshotted and rolled back with the bodies.
+    std::vector<WarmContact> warm_;
+    std::vector<WarmContact> previous_warm_;
     std::optional<time::FixedStep> step_;
 };
 
