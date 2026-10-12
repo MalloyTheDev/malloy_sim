@@ -6600,7 +6600,7 @@ int main()
     // =========================================================================
     // M40 acceptance (issue #73): the per-point iterative contact solver.
     //
-    // Criteria AC-1 to AC-16, in 2D and 3D. Every tolerance is DERIVED from
+    // Criteria AC-1 to AC-17, in 2D and 3D. Every tolerance is DERIVED from
     // the documented constants of the contact step (the world headers' step
     // contract), never fitted to a run:
     //
@@ -7366,11 +7366,12 @@ int main()
         // (v_scale_max = the impact speed plus g dt). Frictionless, the normals
         // are exactly vertical, so the horizontal velocity stays exactly 0;
         // with friction it stays within the rest speed bound. And the box ends
-        // AT REST (no micro-bounce) at its resting HEIGHT: the landing is found
-        // a step late, up to u dt = 7e-3 deep, and the projection must take all
-        // of that out but the slop, 1e-6 x size, plus what the rest speed can
-        // sink while it does, 4 v_rest dt (it removes 1 - 0.8^3 of the excess
-        // per step, so 1e-28 of it is left 100 steps after the last bounce).
+        // AT REST (no micro-bounce) at its resting HEIGHT, within the slop,
+        // 1e-6 x size, plus what the rest speed can sink while the projection
+        // works, 4 v_rest dt (it removes 1 - 0.8^3 of the excess per step). The
+        // first landing is found a step late, up to u dt = 7e-3 deep, but at
+        // e 0.5 the bounce lifts the box out within that same step, so these
+        // drops pass with the projection switched off; AC-17 tests it directly.
         // ---------------------------------------------------------------------
         {
             const Real g = 4.0;
@@ -8221,6 +8222,78 @@ int main()
             }
             differ += m40_same2(with2.bodies()[2], alone2.bodies()[0]) ? 0 : 1;
             m40_check("AC-16 untouched bodies are bit-identical (differing)", differ, 0.0);
+        }
+
+        // ---------------------------------------------------------------------
+        // AC-17. An overlap is projected out by positions alone. A box placed
+        // level and at rest 0.01 into the floor (deeper than the slop, and
+        // within one capped push, 0.2 x size) is lifted in ONE step to the
+        // slop's depth, 1e-6 x size: the level manifold's centroid push takes
+        // the whole excess out at once, and the per-point pushes after it find
+        // none. The push is exact to rounding (1e-12, about 1e4 ulps of the
+        // height), and the step's own motion is the solved velocity times dt,
+        // at most v_rest dt. The push must not touch a velocity, so the box
+        // leaves the step within the rest bounds, |v| <= v_rest and
+        // |omega| <= omega_rest for r = 1e-8 (|g| dt + |v| + |w| size), not at
+        // the 0.01 / dt = 5 m/s a velocity-level correction would give it. Then
+        // it stays: 1000 steps on, it is at the slop's depth within 4 v_rest dt.
+        // With the projection off it would stay 0.01 deep, and with a larger
+        // slop it would stop short of 1e-6 x size.
+        // ---------------------------------------------------------------------
+        {
+            const Real d0 = 0.01;
+            const std::vector<Vec2> halves2{Vec2{0.5, 0.5}, Vec2{0.5, 0.25}};
+            for (const Vec2 h : halves2)
+            {
+                RigidWorld w{SimulationSettings{m40_dt},
+                             {m40_box2(1.0, h, Vec2{0.0, h.y - d0}, 0.0, Vec2{}, 0.0)},
+                             m40_floor2(m40_g, 0.5, 0.5)};
+                const Real slop = m40_slop_rel * std::fmax(h.x, h.y);
+                const Real wmin = 2.0 * std::fmin(h.x, h.y);
+                w.step();
+                const Real r = m40_rest_tol * (m40_gdt + m40_scale2(w.bodies()));
+                const Real v_rest = m40_rest_speed(r, wmin, length(h));
+                m40_check("AC-17 2D overlap: one step leaves it at the slop's depth, |y - (h - slop)|",
+                          std::fabs(w.bodies()[0].position.y - (h.y - slop)), v_rest * m40_dt + 1e-12);
+                m40_check("AC-17 2D overlap: the push left the velocity at rest, |v|", m40_vmax2(w.bodies()),
+                          v_rest);
+                m40_check("AC-17 2D overlap: and the spin, |omega|", std::fabs(w.bodies()[0].angular_velocity),
+                          m40_rest_spin(r, wmin));
+                for (int i = 0; i < 1000; ++i)
+                {
+                    w.step();
+                }
+                const Real rr = m40_rest_tol * (m40_gdt + m40_scale2(w.bodies()));
+                m40_check("AC-17 2D overlap: it stays there, |y - (h - slop)|",
+                          std::fabs(w.bodies()[0].position.y - (h.y - slop)),
+                          4.0 * m40_rest_speed(rr, wmin, length(h)) * m40_dt + 1e-12);
+            }
+            const std::vector<Vec3> halves3{Vec3{0.5, 0.5, 0.5}, Vec3{0.7, 0.3, 0.2}};
+            for (const Vec3 h : halves3)
+            {
+                Rigid3DWorld w{SimulationSettings{m40_dt},
+                               {m40_box3(1.0, h, Vec3{0.0, 0.0, h.z - d0}, Quat{}, Vec3{}, Vec3{})},
+                               m40_floor3(m40_g, 0.5, 0.5)};
+                const Real slop = m40_slop_rel * std::fmax(std::fmax(h.x, h.y), h.z);
+                const Real wmin = 2.0 * std::fmin(h.x, h.y);
+                w.step();
+                const Real r = m40_rest_tol * (m40_gdt + m40_scale3(w.bodies()));
+                const Real v_rest = m40_rest_speed(r, wmin, length(h));
+                m40_check("AC-17 3D overlap: one step leaves it at the slop's depth, |z - (h - slop)|",
+                          std::fabs(w.bodies()[0].position.z - (h.z - slop)), v_rest * m40_dt + 1e-12);
+                m40_check("AC-17 3D overlap: the push left the velocity at rest, |v|", m40_vmax3(w.bodies()),
+                          v_rest);
+                m40_check("AC-17 3D overlap: and the spin, |omega|", length(w.bodies()[0].angular_velocity),
+                          m40_rest_spin(r, wmin));
+                for (int i = 0; i < 1000; ++i)
+                {
+                    w.step();
+                }
+                const Real rr = m40_rest_tol * (m40_gdt + m40_scale3(w.bodies()));
+                m40_check("AC-17 3D overlap: it stays there, |z - (h - slop)|",
+                          std::fabs(w.bodies()[0].position.z - (h.z - slop)),
+                          4.0 * m40_rest_speed(rr, wmin, length(h)) * m40_dt + 1e-12);
+            }
         }
 
         std::cout << "  M40 acceptance: " << m40_failed << " criteria failed\n";
