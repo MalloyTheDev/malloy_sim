@@ -6597,7 +6597,6 @@ int main()
         }
     }
 
-#ifdef MALLOY_M40_ACCEPTANCE
     // =========================================================================
     // M40 acceptance (issue #73): the per-point iterative contact solver.
     //
@@ -6605,14 +6604,18 @@ int main()
     // the documented constants of the contact step (the world headers' step
     // contract), never fitted to a run:
     //
-    //   rest phase    stops when every contact residual <= 1e-8 v_scale, or
-    //                 after 100 sweeps; v_scale = max(|g| dt, largest body
-    //                 speed) when the phase starts;
+    //   rest phase    sweeps until no contact constraint is violated by
+    //                 more than 1e-8 v_scale (checked before every sweep), or
+    //                 100 sweeps; v_scale is the larger of one step of the
+    //                 external acceleration (|g| dt) and the fastest material
+    //                 point in contact, |v| + |w| size, taken after the warm
+    //                 start and the centroid prepass;
     //   impact phase  the same with 1e-12 v_scale;
-    //   correction    NGS on positions only (velocities untouched), slop
-    //                 1e-6 x size;
+    //   correction    NGS on positions only: linear velocities untouched, and
+    //                 through a turn the body's WORLD angular momentum kept;
+    //                 slop 1e-6 x size;
     //   restitution   Newton on the mid-step normal velocity, only for
-    //                 approach faster than v_th = 2 dt (|g| + |F| / m_min);
+    //                 approach faster than v_th = 4 dt (|g| + |F| / m_min);
     //   margin        corners within 1e-4 x size join the manifold.
     //
     // A residual r bounds what a resting body can keep. Every contact-point
@@ -6620,8 +6623,9 @@ int main()
     // of its target 0, and the face contacts are at least w apart with every
     // corner within R of the centre of mass, so |omega| <= 2 sqrt(3) r / w
     // and |v| <= 3 r (1 + 2 R / w). Those two numbers, and the kinetic energy
-    // they allow, are the rest bounds below. The step's v_scale is at most
-    // |g| dt plus the largest body speed before it, which the tests measure.
+    // they allow, are the rest bounds below. At rest the warm start and the
+    // prepass leave every speed near zero, so the step's v_scale is at most
+    // |g| dt plus the largest |v| + |w| size the tests measure around it.
     //
     // Each criterion prints its value and bound, and the block fails at the
     // end if any failed, so one run reports every number.
@@ -6737,6 +6741,30 @@ int main()
             }
             return v;
         };
+        // The contract's velocity scale: the fastest material point,
+        // |v| + |w| times the collider size (a box's largest half-width).
+        const auto m40_scale2 = [](const std::vector<RigidBody2D>& bodies) {
+            Real v = 0.0;
+            for (const RigidBody2D& b : bodies)
+            {
+                const Real size = b.half_extents.x > 0.0 && b.half_extents.y > 0.0
+                                      ? std::fmax(b.half_extents.x, b.half_extents.y)
+                                      : b.radius;
+                v = std::fmax(v, length(b.velocity) + std::fabs(b.angular_velocity) * size);
+            }
+            return v;
+        };
+        const auto m40_scale3 = [](const std::vector<RigidBody3D>& bodies) {
+            Real v = 0.0;
+            for (const RigidBody3D& b : bodies)
+            {
+                const Real size = b.half_extents.x > 0.0 && b.half_extents.y > 0.0 && b.half_extents.z > 0.0
+                                      ? std::fmax(std::fmax(b.half_extents.x, b.half_extents.y), b.half_extents.z)
+                                      : b.radius;
+                v = std::fmax(v, length(b.velocity) + length(b.angular_velocity) * size);
+            }
+            return v;
+        };
         const auto m40_ke3 = [](const std::vector<RigidBody3D>& bodies) {
             return malloy::rigid::total_kinetic_energy3d(bodies);
         };
@@ -6829,6 +6857,48 @@ int main()
                    a.angular_velocity.z == b.angular_velocity.z;
         };
 
+        const auto m40_same_warm2 = [](const RigidWorld& x, const RigidWorld& y) {
+            const auto& p = x.warm_contacts();
+            const auto& q = y.warm_contacts();
+            if (p.size() != q.size())
+            {
+                return false;
+            }
+            for (std::size_t k = 0; k < p.size(); ++k)
+            {
+                if (p[k].a != q[k].a || p[k].b != q[k].b || p[k].ground != q[k].ground ||
+                    p[k].key != q[k].key || p[k].local.x != q[k].local.x ||
+                    p[k].local.y != q[k].local.y || p[k].normal_impulse != q[k].normal_impulse ||
+                    p[k].tangent_impulse != q[k].tangent_impulse)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto m40_same_warm3 = [](const Rigid3DWorld& x, const Rigid3DWorld& y) {
+            const auto& p = x.warm_contacts();
+            const auto& q = y.warm_contacts();
+            if (p.size() != q.size())
+            {
+                return false;
+            }
+            for (std::size_t k = 0; k < p.size(); ++k)
+            {
+                if (p[k].a != q[k].a || p[k].b != q[k].b || p[k].ground != q[k].ground ||
+                    p[k].key != q[k].key || p[k].local.x != q[k].local.x ||
+                    p[k].local.y != q[k].local.y || p[k].local.z != q[k].local.z ||
+                    p[k].normal_impulse != q[k].normal_impulse ||
+                    p[k].tangent_impulse.x != q[k].tangent_impulse.x ||
+                    p[k].tangent_impulse.y != q[k].tangent_impulse.y ||
+                    p[k].tangent_impulse.z != q[k].tangent_impulse.z)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         const Real m40_g = 9.8;
         const Real m40_dt = 0.002;
         const Real m40_gdt = m40_g * m40_dt;
@@ -6873,8 +6943,8 @@ int main()
                 {
                     late2 = std::fmax(late2, total_kinetic_energy(w2.bodies()));
                     late3 = std::fmax(late3, m40_ke3(w3.bodies()));
-                    v2 = std::fmax(v2, m40_vmax2(w2.bodies()));
-                    v3 = std::fmax(v3, m40_vmax3(w3.bodies()));
+                    v2 = std::fmax(v2, m40_scale2(w2.bodies()));
+                    v3 = std::fmax(v3, m40_scale3(w3.bodies()));
                 }
             }
             const RigidBody3D& b3 = w3.bodies()[0];
@@ -6931,8 +7001,8 @@ int main()
                     {
                         late2 = std::fmax(late2, total_kinetic_energy(w2.bodies()));
                         late3 = std::fmax(late3, m40_ke3(w3.bodies()));
-                        v2 = std::fmax(v2, m40_vmax2(w2.bodies()));
-                        v3 = std::fmax(v3, m40_vmax3(w3.bodies()));
+                        v2 = std::fmax(v2, m40_scale2(w2.bodies()));
+                        v3 = std::fmax(v3, m40_scale3(w3.bodies()));
                     }
                 }
                 const bool elastic = e > 0.5;
@@ -6968,7 +7038,9 @@ int main()
         // <= r sum(lambda_n + |lambda_t|) <= (1 + mu) r Lambda. Lambda bounds
         // the total normal impulse: each manifold's is at most what crosses it,
         // sum m (|dv| + |g| dt) over all bodies, and there are at most
-        // n (n + 1) / 2 manifolds. The NGS correction moves no velocity.
+        // n (n + 1) / 2 manifolds. The NGS correction moves no velocity. r is
+        // 1e-8 times the larger of the pre-solve and solved states' scale (the
+        // warm start and the prepass act between the two) plus |g| dt.
         // Setups: a tilted landing, a nudged box, a staggered 3-stack.
         // ---------------------------------------------------------------------
         {
@@ -6995,7 +7067,8 @@ int main()
                             flow += pre[k].mass *
                                     (length(w.bodies()[k].velocity - pre[k].velocity) + m40_gdt);
                         }
-                        const Real r = m40_rest_tol * (m40_gdt + m40_vmax2(pre));
+                        const Real r = m40_rest_tol *
+                                       (m40_gdt + std::fmax(m40_scale2(pre), m40_scale2(w.bodies())));
                         const Real allowed = (1.0 + mu) * r * 0.5 * n * (n + 1.0) * flow +
                                              64.0 * m40_eps * total_kinetic_energy(pre);
                         const Real gain = total_kinetic_energy(w.bodies()) - total_kinetic_energy(pre);
@@ -7025,7 +7098,8 @@ int main()
                             flow += pre[k].mass *
                                     (length(w.bodies()[k].velocity - pre[k].velocity) + m40_gdt);
                         }
-                        const Real r = m40_rest_tol * (m40_gdt + m40_vmax3(pre));
+                        const Real r = m40_rest_tol *
+                                       (m40_gdt + std::fmax(m40_scale3(pre), m40_scale3(w.bodies())));
                         const Real allowed = (1.0 + mu) * r * 0.5 * n * (n + 1.0) * flow +
                                              64.0 * m40_eps * m40_ke3(pre);
                         const Real gain = m40_ke3(w.bodies()) - m40_ke3(pre);
@@ -7043,16 +7117,22 @@ int main()
         // momentum and angular momentum each step's contact impulse is
         // recovered; then every corner leaves at normal speed >= -r, a corner
         // carrying load leaves at |speed| <= r, a corner leaving faster than r
-        // carries none, and no impulse pulls. r = 1e-8 v_scale plus rounding;
-        // the impulse tolerance is the recovery's rounding, 1e-12 m v_scale.
+        // carries none, and no impulse pulls. r = 1e-8 V plus rounding, V a
+        // bound on the scale the sweeps use: it is taken after the centroid
+        // prepass (no warm start on a first step), whose one impulse is at
+        // most m (|v| + |w| R) (it stops the centroid's approach, K >= 1/m),
+        // so V <= (|v| + |w| s) + (|v| + |w| R)(1 + m R s / I), s the size and
+        // R the corner distance. The impulse tolerance is the recovery's
+        // rounding, 1e-12 m V.
         // 2D: two corners (two unknowns, solved exactly); spins 0.7 and 5 rad/s
         // (at 5 one corner separates while both are in). 3D: a CUBE's four
         // corners; the centre of pressure must lie in the hull of the corners
         // that can carry load. A cube, because its world-frame spin is
         // unchanged by the step's rotation (isotropic inertia), so the
         // impulse's moment is I times the change of the world-frame spin
-        // whatever the position phase does to the orientation, provided the
-        // correction keeps the world-frame spin (as AC-13b requires).
+        // whatever the position phase does to the orientation: the correction
+        // keeps the world angular momentum, which for a cube is the world
+        // spin times I (AC-13b checks the same on a frictionless floor).
         // ---------------------------------------------------------------------
         for (const Real spin : {0.7, 5.0})
         {
@@ -7063,8 +7143,10 @@ int main()
             const RigidBody2D pre = m40_presolve2(w)[0];
             w.step();
             const RigidBody2D& post = w.bodies()[0];
-            const Real vs = length(pre.velocity);
-            const Real tol_v = m40_rest_tol * vs + 64.0 * m40_eps * (vs + std::fabs(spin));
+            const Real reach = length(pre.velocity) + std::fabs(pre.angular_velocity) * m40_brick_R;
+            const Real vs = m40_scale2({pre}) +
+                            reach * (1.0 + pre.mass * m40_brick_R * 0.5 / pre.inertia);
+            const Real tol_v = m40_rest_tol * vs + 64.0 * m40_eps * vs;
             const Real tol_l = 1e-12 * pre.mass * vs;
             // The two bottom corners of the START pose, midway to the surface.
             Vec2 arm[2];
@@ -7116,8 +7198,10 @@ int main()
             const RigidBody3D pre = m40_presolve3(w)[0];
             w.step();
             const RigidBody3D& post = w.bodies()[0];
-            const Real vs = length(pre.velocity);
-            const Real tol_v = m40_rest_tol * vs + 64.0 * m40_eps * (vs + length(b0.angular_velocity));
+            const Real reach = length(pre.velocity) + length(pre.angular_velocity) * length(cube);
+            const Real vs = m40_scale3({pre}) +
+                            reach * (1.0 + pre.mass * length(cube) * 0.5 / pre.inertia.x);
+            const Real tol_v = m40_rest_tol * vs + 64.0 * m40_eps * vs;
             const Real tol_l = 1e-12 * pre.mass * vs;
             // The impulse's moment about the start-of-step centre: the moment
             // of inertia times the change of the world-frame spin.
@@ -7193,7 +7277,7 @@ int main()
         //     with v_mid = v + (half a step of gravity), so the step ends at
         //     v_out = -e (v_in - g dt / 2) - g dt / 2, to the impact tolerance
         //     plus rounding, and with no spin. g 0 and g 9.8; |v_mid| is far
-        //     above v_th = 2 g dt.
+        //     above v_th = 4 g dt.
         // (b) Two corners of a tilted brick land at DIFFERENT speeds (g 0): each
         //     loaded corner leaves at exactly -e times its own approach speed.
         // (c) Below the threshold a resting box keeps no micro-bounce: placed at
@@ -7255,7 +7339,7 @@ int main()
             Rigid3DWorld w3{SimulationSettings{m40_dt},
                             {m40_box3(1.0, m40_block, Vec3{0.0, 0.0, 0.25}, Quat{}, Vec3{}, Vec3{})},
                             m40_floor3(m40_g, e, 0.0)};
-            Real v2 = 0.0, v3 = 0.0;
+            Real v2 = 0.0, v3 = 0.0, s23 = 0.0;
             for (int i = 1; i <= 500; ++i)
             {
                 w2.step();
@@ -7264,9 +7348,10 @@ int main()
                 {
                     v2 = std::fmax(v2, m40_vmax2(w2.bodies()));
                     v3 = std::fmax(v3, m40_vmax3(w3.bodies()));
+                    s23 = std::fmax(s23, std::fmax(m40_scale2(w2.bodies()), m40_scale3(w3.bodies())));
                 }
             }
-            const Real r = m40_rest_tol * (m40_gdt + std::fmax(v2, v3));
+            const Real r = m40_rest_tol * (m40_gdt + s23);
             m40_check(e > 0.75 ? "AC-6c 2D at rest, e 1: no micro-bounce" : "AC-6c 2D at rest, e .5: no micro-bounce",
                       v2, m40_rest_speed(r, 0.5, m40_brick_R));
             m40_check(e > 0.75 ? "AC-6c 3D at rest, e 1: no micro-bounce" : "AC-6c 3D at rest, e .5: no micro-bounce",
@@ -7281,7 +7366,11 @@ int main()
         // (v_scale_max = the impact speed plus g dt). Frictionless, the normals
         // are exactly vertical, so the horizontal velocity stays exactly 0;
         // with friction it stays within the rest speed bound. And the box ends
-        // AT REST: no micro-bounce.
+        // AT REST (no micro-bounce) at its resting HEIGHT: the landing is found
+        // a step late, up to u dt = 7e-3 deep, and the projection must take all
+        // of that out but the slop, 1e-6 x size, plus what the rest speed can
+        // sink while it does, 4 v_rest dt (it removes 1 - 0.8^3 of the excess
+        // per step, so 1e-28 of it is left 100 steps after the last bounce).
         // ---------------------------------------------------------------------
         {
             const Real g = 4.0;
@@ -7300,7 +7389,7 @@ int main()
                         const RigidBody2D& b = w.bodies()[0];
                         spin = std::fmax(spin, std::fabs(b.angular_velocity));
                         side = std::fmax(side, std::fabs(b.velocity.x));
-                        vmax = std::fmax(vmax, length(b.velocity));
+                        vmax = std::fmax(vmax, m40_scale2(w.bodies()));
                     }
                     const Real r = m40_rest_tol * (vmax + g * m40_dt);
                     const Real wmin = 2.0 * std::fmin(h.x, h.y);
@@ -7308,9 +7397,13 @@ int main()
                               spin, m40_rest_spin(r, wmin));
                     m40_check(mu > 0 ? "AC-7 2D symmetric drop mu .5: max |vx|" : "AC-7 2D symmetric drop mu 0: max |vx|",
                               side, mu > 0 ? m40_rest_speed(r, wmin, length(h)) : 0.0);
-                    const Real rr = m40_rest_tol * (g * m40_dt + m40_vmax2(w.bodies()));
+                    const Real rr = m40_rest_tol * (g * m40_dt + m40_scale2(w.bodies()));
                     m40_check("AC-7 2D symmetric drop ends at rest: |v|", m40_vmax2(w.bodies()),
                               m40_rest_speed(rr, wmin, length(h)));
+                    m40_check("AC-7 2D symmetric drop rests at its height: |y - h|",
+                              std::fabs(w.bodies()[0].position.y - h.y),
+                              m40_slop_rel * std::fmax(h.x, h.y) +
+                                  4.0 * m40_rest_speed(rr, wmin, length(h)) * m40_dt);
                 }
                 const std::vector<Vec3> halves3{Vec3{0.5, 0.5, 0.5}, Vec3{0.7, 0.3, 0.2}};
                 for (const Vec3 h : halves3)
@@ -7325,7 +7418,7 @@ int main()
                         const RigidBody3D& b = w.bodies()[0];
                         spin = std::fmax(spin, length(b.angular_velocity));
                         side = std::fmax(side, std::fabs(b.velocity.x) + std::fabs(b.velocity.y));
-                        vmax = std::fmax(vmax, length(b.velocity));
+                        vmax = std::fmax(vmax, m40_scale3(w.bodies()));
                     }
                     const Real r = m40_rest_tol * (vmax + g * m40_dt);
                     const Real wmin = 2.0 * std::fmin(h.x, h.y);
@@ -7333,9 +7426,13 @@ int main()
                               spin, m40_rest_spin(r, wmin));
                     m40_check(mu > 0 ? "AC-7 3D symmetric drop mu .5: max |vx| + |vy|" : "AC-7 3D symmetric drop mu 0: max |vx| + |vy|",
                               side, mu > 0 ? 2.0 * m40_rest_speed(r, wmin, length(h)) : 0.0);
-                    const Real rr = m40_rest_tol * (g * m40_dt + m40_vmax3(w.bodies()));
+                    const Real rr = m40_rest_tol * (g * m40_dt + m40_scale3(w.bodies()));
                     m40_check("AC-7 3D symmetric drop ends at rest: |v|", m40_vmax3(w.bodies()),
                               m40_rest_speed(rr, wmin, length(h)));
+                    m40_check("AC-7 3D symmetric drop rests at its height: |z - h|",
+                              std::fabs(w.bodies()[0].position.z - h.z),
+                              m40_slop_rel * std::fmax(std::fmax(h.x, h.y), h.z) +
+                                  4.0 * m40_rest_speed(rr, wmin, length(h)) * m40_dt);
                 }
             }
         }
@@ -7443,7 +7540,7 @@ int main()
                     if (i > 4000)
                     {
                         late = std::fmax(late, total_kinetic_energy(w.bodies()));
-                        vlate = std::fmax(vlate, m40_vmax2(w.bodies()));
+                        vlate = std::fmax(vlate, m40_scale2(w.bodies()));
                     }
                 }
                 const Real r = m40_rest_tol * (m40_gdt + vlate);
@@ -7492,7 +7589,7 @@ int main()
                     if (i > 4000)
                     {
                         late = std::fmax(late, m40_ke3(w.bodies()));
-                        vlate = std::fmax(vlate, m40_vmax3(w.bodies()));
+                        vlate = std::fmax(vlate, m40_scale3(w.bodies()));
                     }
                 }
                 const Real r = m40_rest_tol * (m40_gdt + vlate);
@@ -7533,7 +7630,7 @@ int main()
                     if (i > 4000)
                     {
                         late = std::fmax(late, m40_ke3(w.bodies()));
-                        vlate = std::fmax(vlate, m40_vmax3(w.bodies()));
+                        vlate = std::fmax(vlate, m40_scale3(w.bodies()));
                     }
                 }
                 const Real r = m40_rest_tol * (m40_gdt + vlate);
@@ -7613,8 +7710,8 @@ int main()
             {
                 w2.step();
                 w3.step();
-                v2 = std::fmax(v2, m40_vmax2(w2.bodies()));
-                v3 = std::fmax(v3, m40_vmax3(w3.bodies()));
+                v2 = std::fmax(v2, m40_scale2(w2.bodies()));
+                v3 = std::fmax(v3, m40_scale3(w3.bodies()));
             }
             const Real moved2 = dot(w2.bodies()[0].position - n2 * 0.25, Vec2{std::cos(th), -std::sin(th)});
             const Real moved3 = dot(w3.bodies()[0].position - n3 * 0.25, Vec3{std::cos(th), 0.0, -std::sin(th)});
@@ -7813,8 +7910,8 @@ int main()
         //     from the documented contract, not by golden literals. Two discs
         //     (spheres in 3D) stacked on the floor, exactly touching, sliding
         //     together at 10 m/s so v_scale is 10 and the solve stops early
-        //     enough for its path to show: the pair manifold comes before the
-        //     ground, each sweep then checks the residual. The reversed order
+        //     enough for its path to show: the residual is checked before every
+        //     sweep, and the pair manifold comes before the ground. The reversed order
         //     lands 5e-8 m/s away; the replica agrees to rounding, bounded by a
         //     separation of 4 ulp turned into a speculative target, 4 ulp / dt
         //     (5.5e-13), times 4.
@@ -7854,6 +7951,9 @@ int main()
                 differ += m40_same3(a.bodies()[k], b.bodies()[k]) ? 0 : 1;
                 differ += m40_same3(a.bodies()[k], c.bodies()[k]) ? 0 : 1;
             }
+            differ += m40_same_warm3(a, b) ? 0 : 1;
+            differ += m40_same_warm3(a, c) ? 0 : 1;
+            differ += a.warm_contacts().empty() ? 1 : 0; // the cache was in play
             const auto scene2 = [&]() {
                 return std::vector<RigidBody2D>{
                     m40_box2(1.0, m40_brick, Vec2{0.0, 0.25}, 0.0, Vec2{}, 0.0),
@@ -7879,7 +7979,11 @@ int main()
                 differ += m40_same2(a2.bodies()[k], b2.bodies()[k]) ? 0 : 1;
                 differ += m40_same2(a2.bodies()[k], c2.bodies()[k]) ? 0 : 1;
             }
-            m40_check("AC-14a rerun and mid-run copy are bit-identical (bodies differing)", differ, 0.0);
+            differ += m40_same_warm2(a2, b2) ? 0 : 1;
+            differ += m40_same_warm2(a2, c2) ? 0 : 1;
+            differ += a2.warm_contacts().empty() ? 1 : 0;
+            m40_check("AC-14a rerun and mid-run copy are bit-identical, caches too (differences)", differ,
+                      0.0);
         }
         {
             // The disc replica: masses 2 (radius 0.5) and 0.5 (radius 0.25),
@@ -7901,6 +8005,12 @@ int main()
             Real lp = 0.0, lg = 0.0;
             for (int it = 0; it < 100; ++it)
             {
+                const Real res = std::fmax(lp > 0.0 ? std::fabs(v1 - v0) : std::fmax(0.0, v0 - v1),
+                                           lg > 0.0 ? std::fabs(v0) : std::fmax(0.0, -v0));
+                if (res <= m40_rest_tol * vs)
+                {
+                    break;
+                }
                 {
                     const Real vn = v1 - v0;
                     Real d = -vn / (1.0 / m0 + 1.0 / m1);
@@ -7917,12 +8027,6 @@ int main()
                     d = nl - lg;
                     lg = nl;
                     v0 += d / m0;
-                }
-                const Real res = std::fmax(lp > 0.0 ? std::fabs(v1 - v0) : std::fmax(0.0, v0 - v1),
-                                           lg > 0.0 ? std::fabs(v0) : std::fmax(0.0, -v0));
-                if (res <= m40_rest_tol * vs)
-                {
-                    break;
                 }
             }
             const Real tol = 4.0 * 4.0 * 1.25 * m40_eps / m40_dt;
@@ -7945,7 +8049,6 @@ int main()
             w.step();
             const Real I = m40_brick_I;
             Real vx = 2.0, vy = -m40_gdt, om = 0.0;
-            const Real vs = std::sqrt(vx * vx + vy * vy);
             const Vec2 arms[2]{Vec2{-0.5, -0.25}, Vec2{0.5, -0.25}};
             Real ln[2]{0.0, 0.0}, lt[2]{0.0, 0.0};
             // The box is body a, the floor b; n = (0, -1) from box to floor,
@@ -7970,8 +8073,34 @@ int main()
                 push(rc, Vec2{P, 0.0});
                 lt[0] = lt[1] = P * 0.5;
             }
+            // v_scale after the prepass: |v| + |w| size (0.5), or g dt.
+            const Real vs = std::fmax(m40_gdt, std::sqrt(vx * vx + vy * vy) + std::fabs(om) * 0.5);
+            const auto residual = [&]() {
+                Real res = 0.0;
+                for (int k = 0; k < 2; ++k)
+                {
+                    const Vec2 r = arms[k];
+                    const Real vn = vy + om * r.x;
+                    const Real vt = -(vx - om * r.y);
+                    res = std::fmax(res, ln[k] > 0.0 ? std::fabs(vn) : std::fmax(0.0, -vn));
+                    const Real lim = mu * ln[k];
+                    if (std::fabs(lt[k]) < lim * (1.0 - 1e-12))
+                    {
+                        res = std::fmax(res, std::fabs(vt));
+                    }
+                    else if (lt[k] != 0.0)
+                    {
+                        res = std::fmax(res, std::fmax(0.0, vt * (lt[k] > 0.0 ? 1.0 : -1.0)));
+                    }
+                }
+                return res;
+            };
             for (int it = 0; it < 100; ++it)
             {
+                if (residual() <= m40_rest_tol * vs)
+                {
+                    break;
+                }
                 for (int k = 0; k < 2; ++k)
                 {
                     const Vec2 r = arms[k];
@@ -7992,27 +8121,6 @@ int main()
                     d = nl - lt[k];
                     lt[k] = nl;
                     push(r, Vec2{d, 0.0});
-                }
-                Real res = 0.0;
-                for (int k = 0; k < 2; ++k)
-                {
-                    const Vec2 r = arms[k];
-                    const Real vn = vy + om * r.x;
-                    const Real vt = -(vx - om * r.y);
-                    res = std::fmax(res, ln[k] > 0.0 ? std::fabs(vn) : std::fmax(0.0, -vn));
-                    const Real lim = mu * ln[k];
-                    if (std::fabs(lt[k]) < lim * (1.0 - 1e-12))
-                    {
-                        res = std::fmax(res, std::fabs(vt));
-                    }
-                    else if (lt[k] != 0.0)
-                    {
-                        res = std::fmax(res, std::fmax(0.0, vt * (lt[k] > 0.0 ? 1.0 : -1.0)));
-                    }
-                }
-                if (res <= m40_rest_tol * vs)
-                {
-                    break;
                 }
             }
             const RigidBody2D& b = w.bodies()[0];
@@ -8048,6 +8156,8 @@ int main()
             const Vec2 J{1e154, 0.0};
             w.apply_impulse_at(2, J, w.bodies()[2].position);
             const bool failed = !w.step().ok();
+            int restored = m40_same_warm2(w, copy) ? 0 : 1; // the cache, right after
+            restored += copy.warm_contacts().empty() ? 1 : 0; // and it held something
             w.apply_impulse_at(2, J * -1.0, w.bodies()[2].position);
             copy.apply_impulse_at(2, J, copy.bodies()[2].position);
             copy.apply_impulse_at(2, J * -1.0, copy.bodies()[2].position);
@@ -8061,8 +8171,10 @@ int main()
             {
                 differ += m40_same2(w.bodies()[k], copy.bodies()[k]) ? 0 : 1;
             }
+            differ += m40_same_warm2(w, copy) ? 0 : 1;
             m40_check("AC-15 the trigger step failed", failed ? 0.0 : 1.0, 0.0);
-            m40_check("AC-15 after a rolled-back step, bodies differing from a copy", differ, 0.0);
+            m40_check("AC-15 the failed step left the warm-start cache as it was", restored, 0.0);
+            m40_check("AC-15 after a rolled-back step, differences from a copy (bodies, cache)", differ, 0.0);
         }
 
         // ---------------------------------------------------------------------
@@ -8114,7 +8226,6 @@ int main()
         std::cout << "  M40 acceptance: " << m40_failed << " criteria failed\n";
         MALLOY_CHECK_EQ(m40_failed, 0);
     }
-#endif // MALLOY_M40_ACCEPTANCE
     std::cout << "malloy_rigid_tests passed\n";
     return 0;
 }

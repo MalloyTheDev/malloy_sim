@@ -53,7 +53,8 @@ lattice 10 10  1.0 0.2 2.0
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   E 2.00000000e+02   T 2.00000000e+00   Q min_x 0   Q max_x 0
+#   step      0   E 2.00000000e+02   T 2.00000000e+00
+#                 Q min_x  0.00000000e+00   Q max_x  0.00000000e+00
 #   step   4000   E 2.26168329e+02   T 2.26168329e+00
 #                 Q min_x  4.78903006e+02   Q max_x -4.52734677e+02
 #

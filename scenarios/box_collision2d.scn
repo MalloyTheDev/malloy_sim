@@ -9,13 +9,16 @@
 # the contact normal; the pair is resolved through the SAME impulse core the
 # discs and the ground use (ADR 0008).
 #
-# The edge-on-edge touch is clipped to the overlap and reduced to ONE contact at
-# its centroid: enough for a correct bounce, not a resting stack (that needs an
-# iterative solver a later milestone owns). For two aligned squares that centroid
-# lies on the line of centres, so the impulse makes no torque and the result is
-# exactly the one-dimensional collision. (Until the review pass after M37 the
-# contact sat on a single corner, which invented a lever arm; this template then
-# ended at 0.425 instead of the correct 0.5.)
+# The edge-on-edge touch is clipped to the overlap, two points of contact. Since
+# M40 each is a contact of its own, solved by sequential impulses until neither
+# is violated (issue #73), after one impulse at their weighted centroid. For two
+# aligned squares that centroid lies on the line of centres, so that one
+# impulse makes no torque and already satisfies both points, and the result is
+# exactly the one-dimensional collision. (Before M40 the pair was reduced to
+# that one centroid contact for good: a correct bounce, but no resting stack,
+# which `box_stack2d.scn` now shows. Until the review pass after M37 the contact
+# sat on a single corner, which invented a lever arm; this template then ended
+# at 0.425 instead of the correct 0.5.)
 #
 # A heavy box (mass 2) on the left moving right meets a light box (mass 1) on the
 # right moving left. They collide near the origin, bounce with restitution 0.5,
@@ -42,11 +45,13 @@ rigid_box 1.0  0.5 0.5   1.2 0.0  0.0  -1.0 0.0  0.0
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   energy 1.50000000e+00   momentum_x 1.00000000e+00
-#   step   2000   energy 5.00000000e-01   momentum_x 1.00000000e+00
+#   step      0   E   1.50000000e+00   L   0.00000000e+00   p   1.00000000e+00  0.00000000e+00
+#   step    400   E   5.00000000e-01   L   0.00000000e+00   p   1.00000000e+00  0.00000000e+00
+#   step   2000   E   5.00000000e-01   L   0.00000000e+00   p   1.00000000e+00  0.00000000e+00
 #
-# (`energy` is the rigid kinetic energy; with no gravity there is no potential
-# term, so it is the whole energy, translational plus rotational.)
+# (E, and the checks' `energy`, is the rigid energy; with no gravity there is
+# no potential term, so it is the kinetic energy, translational plus
+# rotational. p is the total momentum, x then y.)
 #
 # The invariants:
 #

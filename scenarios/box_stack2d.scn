@@ -1,0 +1,98 @@
+# MalloySim scenario: a stack of three boxes standing on the floor, in 2D (M40).
+#
+# The 2D sibling of box_stack.scn. Until M40 a box contact manifold (a box on
+# a ground plane, M37; box against box, M36) was reduced to ONE contact at its
+# centroid, and one contact cannot stop two corners at once: a stack's boxes
+# kept a phantom downward velocity while the positional correction pushed them
+# back, and a staggered stack crept sideways until it fell. This one, on the
+# solver before M40: its top box drifted 0.055 m in the first 10 s and the
+# stack fell at 26.1 s.
+#
+# M40 resolves every point of every manifold (issue #73), with accumulated
+# impulses clamped to push only and to the Coulomb bound, iterated until the
+# contact residual is below 1e-8 v_scale (v_scale is the larger of |g| dt and
+# the fastest contact body's |v| + |omega| x its size) or 100 sweeps, warm
+# started from the last step. The contacts are solved BEFORE the positions
+# move, and a nonlinear Gauss-Seidel pass then removes any depth beyond a slop
+# of 1e-6 x the pair's size (the smaller box's larger half-width) without
+# touching a velocity.
+#
+# Three boxes of different sizes and masses, each offset by 0.08 to the right
+# of the one below, placed exactly touching and at rest. They must stand. The
+# 2D checks read whole-system quantities (energy, kinetic energy, momentum,
+# angular momentum), so standing is checked through them: a box that sinks
+# lowers the potential energy, one that creeps carries momentum, one that
+# rocks carries angular momentum and kinetic energy.
+
+type rigid
+
+dt 0.002
+steps 5000
+output_every 500
+
+gravity 0.0 -9.8
+restitution 0.0
+friction 0.5
+ground 0.0 1.0 0.0
+
+# rigid_box <mass> <hx hy> <px py> <angle> <vx vy> <omega>
+#
+# Bottom, middle, top. The bottom box's top edge is at y = 0.5, the middle
+# box's bottom; the middle box's top edge is at y = 0.9, the top box's bottom.
+rigid_box 1.2  0.50 0.25   0.00 0.25   0.0   0.0 0.0   0.0
+rigid_box 0.9  0.45 0.20   0.08 0.70   0.0   0.0 0.0   0.0
+rigid_box 0.6  0.40 0.15   0.16 1.05   0.0   0.0 0.0   0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   1.52880000e+01   L   0.00000000e+00   p   0.00000000e+00  0.00000000e+00
+#   step    500   E   1.52880000e+01   L   2.61123982e-12   p  -7.99993414e-12 -2.41605682e-12
+#   step   5000   E   1.52880000e+01   L   2.47709929e-11   p  -6.68043178e-12 -3.57467265e-11
+#
+# E holds at its starting value to the eight digits printed for the whole run.
+# L and p are the solver's residual, 1e-10 at most at any report: rounding
+# that will differ between compilers, which is why the checks below bound them
+# rather than pin them. The top box stays within 2e-10 of where it was put.
+#
+# The invariants and where each tolerance comes from. The rest phase stops at
+# a residual r = 1e-8 |g| dt = 1.96e-10, and a box resting on a support at that
+# residual moves at most v_rest = 3 r (1 + 2 R / w) and turns at most
+# omega_rest = 2 sqrt(3) r / w, for R its corner distance and w its smaller
+# width: v_rest is 2.26e-9, 2.04e-9 and 1.90e-9 for the top, middle and bottom
+# box, all below 2.3e-9, and omega_rest 2.26e-9 at most. Box k up rests on k
+# interfaces, so it moves at most k times one interface's allowance.
+#
+# 1. The energy starts as the potential sum m g y = 9.8 (1.2 x 0.25 +
+#    0.9 x 0.70 + 0.6 x 1.05) = 15.288, all of it.
+#
+# 2. At the end it is the same less what the sag allows. Each interface sits
+#    within the slop, 1e-6 x 0.5, 1e-6 x 0.45 and 1e-6 x 0.40 from the bottom
+#    up, plus 4 v_rest dt (1.9e-11); the cap's share, 0.75^100 of a step's
+#    gravity, is below 1e-16. Box k up sinks by the slops of the k interfaces
+#    below it: 9.8 (1.2 x 5e-7 + 0.9 x 9.5e-7 + 0.6 x 1.35e-6) = 2.22e-5, plus
+#    the kinetic bound; 2.3e-5.
+#
+# 3. It is at rest: kinetic energy at most n^2 = 9 times the sum of each box's
+#    rest bound (1/2 m v_rest^2 + 1/2 I omega_rest^2), 5.3e-17, rounded up to
+#    1e-16; momentum at most sum m k 2.3e-9 = 4.8 x 2.3e-9 = 1.1e-8, rounded
+#    up to 1.2e-8; angular momentum about the origin at most
+#    sum (I k omega_rest + m |r| k 2.3e-9) = 0.38 x 2.26e-9 + 3.48 x 2.3e-9 =
+#    8.9e-9, rounded up to 9e-9.
+#
+# A stack that falls changes the energy by joules; one that creeps or rocks
+# leaves momentum, angular momentum and kinetic energy far above these bounds.
+# (On the solver before M40 the angular momentum at step 5000 was -2.6e-2.)
+#
+# On the ASCII view (an orthographic view of the plane): three points, the
+# boxes' centres, stepping up and to the right, that never move.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# The rigid `energy` quantity adds the gravitational potential.
+# check step 0    energy      1.52880000e+01   tol 1e-12
+# check step 0    kinetic     0.00000000e+00   tol 0
+# check step 5000 energy      1.52880000e+01   tol 2.3e-5
+# check step 5000 kinetic     0.00000000e+00   tol 1e-16
+# check step 5000 momentum_x  0.00000000e+00   tol 1.2e-8
+# check step 5000 momentum_y  0.00000000e+00   tol 1.2e-8
+# check step 5000 angular     0.00000000e+00   tol 9e-9

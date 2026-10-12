@@ -8,26 +8,29 @@
 # A box against a plane needs no separating-axis search: a plane has one
 # normal, so the box is inside the solid exactly where its corners are, and the
 # eight corners tested against that normal are the whole story. Up to four touch
-# at once (a flat face), so the contact is a manifold. That manifold is resolved
-# as a single contact at the CENTROID of the penetrating corners: for a flat
-# face the centroid sits directly below the centre of mass, so the normal
-# impulse passes through it and applies NO torque.
+# at once (a flat face), so the contact is a manifold. Since M40 every corner of
+# it is resolved, by sequential impulses that iterate until no corner's
+# constraint is violated (issue #73), and a flat landing still stays exactly
+# symmetric: the manifold first takes one impulse at its weighted centroid,
+# which for a flat face sits directly below the centre of mass, so it passes
+# through it and applies NO torque, and is the whole answer for a level
+# landing. The per-corner sweeps run only when some corner is still violated
+# after it, so for this landing none run, and nothing that depends on the
+# order of the corners ever touches it.
 #
 # That is the invariant to watch here. A unit cube is dropped flat, with no
 # spin, straight down onto the floor. It must land flat and stay flat: its
 # angular momentum stays exactly zero through the bounce, because a symmetric
-# landing exerts no net torque. A per-corner solver that resolved the four
-# corners one at a time would break the symmetry and spin the cube up out of
-# nothing; this one does not.
+# landing exerts no net torque.
 #
 # The cube's inertia is not typed in: `rigid_box3d` computes it from the box and
 # the mass (M26). It falls from a height, bounces with restitution 0.5 losing
-# energy each time, and settles on the floor with its centre of mass at half a
-# side height. "Settles" is not exact rest: the solver has no restitution
-# threshold, so each step's one step of gravity is bounced back at restitution
-# 0.5 and the cube keeps a steady micro-bounce of vertical speed
-# e*g*dt/(1+e) = 0.5*4*0.002/1.5 = 2.67e-3. That is the |p| residue in the
-# expected output below. It never grows, and a threshold is deferred work.
+# energy each time, and comes to REST on the floor with its centre of mass at
+# half a side height, by step 1400. A bounce slower than the restitution
+# threshold, 4 g dt = 0.032 here, is resolved as resting contact, so the last
+# small bounces end. (The solver before M40 had no threshold, bounced each
+# step's gravity back at restitution 0.5, and left a micro-bounce of vertical
+# speed e g dt / (1 + e) = 2.67e-3 for ever.)
 
 type rigid3d
 
@@ -50,22 +53,27 @@ rigid_box3d 1.0  0.5 0.5 0.5   0.0 0.0 2.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0
 # Expected, from a real run of the shipped binary:
 #
 #   step      0   E   8.00000000e+00   |L|   0.00000000e+00   |p|   0.00000000e+00
-#   step   2000   E   2.00000356e+00   |L|   0.00000000e+00   |p|   ~2.7e-03
+#   step    600   E   3.49147400e+00   |L|   0.00000000e+00   |p|   4.02000000e-01
+#   step   1000   E   2.36671650e+00   |L|   0.00000000e+00   |p|   2.03000000e-01
+#   step   1200   E   2.02260403e+00   |L|   0.00000000e+00   |p|   1.28250000e-01
+#   step   1400   E   2.00000000e+00   |L|   0.00000000e+00   |p|   0.00000000e+00
+#   step   2000   E   2.00000000e+00   |L|   0.00000000e+00   |p|   0.00000000e+00
 #
 # The invariants:
 #
 # 1. Angular momentum is zero at every step. In free fall there is no torque; at
-#    the landing the centroid contact sits below the centre of mass, so the
-#    normal impulse makes none either. A flat drop stays flat. This is the
-#    headline: the manifold is resolved without a spurious torque.
+#    the landing the centroid impulse acts below the centre of mass, so it makes
+#    none either. A flat drop stays flat. This is the headline: the manifold is
+#    resolved corner by corner without a spurious torque.
 #
 # 2. There is no horizontal motion. The drop is symmetric, so momentum along x
 #    and y is exactly zero throughout.
 #
 # 3. Energy starts at the potential of a mass-1 body at height 2 in g = 4:
-#    -m (g . r) = -1 * (-4 * 2) = 8, with no kinetic part. It falls to about 2,
-#    the potential of the same body resting with its centre of mass at z = 0.5
-#    (-1 * (-4 * 0.5) = 2): the bounces at restitution 0.5 have shed the rest.
+#    -m (g . r) = -1 * (-4 * 2) = 8, with no kinetic part. It falls to 2, the
+#    potential of the same body resting with its centre of mass at z = 0.5
+#    (-1 * (-4 * 0.5) = 2): the bounces at restitution 0.5 have shed the rest,
+#    and the cube is at rest, |p| = 0.
 #
 # On the ASCII view (an orthographic projection down z): a single point at the
 # origin, since the cube's centre only moves along the viewing axis.
@@ -85,3 +93,13 @@ rigid_box3d 1.0  0.5 0.5 0.5   0.0 0.0 2.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0
 # check step 2000 spin_y      0.00000000e+00   tol 1e-9
 # check step 2000 spin_z      0.00000000e+00   tol 1e-9
 # check step 2000 angular_z   0.00000000e+00   tol 1e-9
+#
+# And at rest: no micro-bounce, and the cube neither sunk nor fallen through.
+# The solver stops at a contact residual of 1e-8 v_scale, and at rest v_scale
+# is g dt = 0.008, so r = 8e-11 and the cube's speed is at most
+# 3 r (1 + 2 R / w) = 6.6e-10 (R = 0.866 its corner distance, w = 1 its face):
+# that is the momentum's tolerance, 7e-10. Its resting height sits within the
+# projection's slop of the floor, 1e-6 x 0.5, so the energy is 2 to within
+# m g 5e-7 = 2e-6 (the kinetic part adds 2e-19), 2.1e-6.
+# check step 2000 momentum_z    0.00000000e+00   tol 7e-10
+# check step 2000 total_energy  2.00000000e+00   tol 2.1e-6

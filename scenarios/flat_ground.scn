@@ -59,12 +59,12 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   E   9.31950000e+01   p   0.00000000e+00
-#   step    500   E   9.31502523e+01   p   2.35562080e+00
-#   step   1000   E   9.31055025e+01   p   4.71002080e+00
-#   step   3000   E  -3.67974452e+01   p  -1.70679607e+00
-#   step   3500   E  -3.67974452e+01   p  -1.70679607e+00
-#   step   4000   E  -3.67974452e+01   p  -1.70679607e+00
+#   step      0   E   9.31950000e+01   L   0.00000000e+00   p   0.00000000e+00  0.00000000e+00
+#   step    500   E   9.31502502e+01   L  -3.42859500e+01   p   2.35440000e+00 -9.12330000e+00
+#   step   1000   E   9.31055004e+01   L  -6.85719000e+01   p   4.70880000e+00 -1.82466000e+01
+#   step   3000   E  -3.68097558e+01   L  -2.54392408e+00   p  -1.69594939e+00 -2.58126853e-15
+#   step   3500   E  -3.68097558e+01   L  -2.54392408e+00   p  -1.69594939e+00 -7.78543896e-15
+#   step   4000   E  -3.68097558e+01   L  -2.54392408e+00   p  -1.69594939e+00 -1.29896094e-14
 #
 # Three things in that table are checkable rather than merely observed.
 #
@@ -76,14 +76,22 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 #    sine is 0.6 accelerates down the slope at g*0.6 = 5.886, and the slope
 #    direction is (0.8, -0.6), so the HORIZONTAL acceleration is
 #    9.81 * 0.6 * 0.8 = 4.7088. Only the ramp body has horizontal motion while
-#    the other is still falling, and its mass is 1, so the p column is its
-#    velocity directly: (4.71002080 - 2.35562080) / 0.5 = 4.7088, matching the
-#    prediction to the full 9 significant figures the column prints, which is
-#    about 1e-8 relative. (Doing the same subtraction in double precision on
-#    the unrounded values gives 8.9e-15 relative, roughly 10 ulp. The printed
-#    digits cannot support a tighter claim than 1e-8.) That number is the
-#    milestone: on a floor built
+#    the other is still falling, and its mass is 1, so the first p column is
+#    its velocity directly, m g sin cos t: 2.3544 at 0.5 s and 4.7088 at 1 s,
+#    to every digit printed. That number is the milestone: on a floor built
 #    from discs there is no constant incline angle to predict it from.
+#
+#    It is exact because the body never sinks into the ramp. Since M40 the
+#    contacts are solved before the positions move, so the normal velocity is
+#    stopped first and the step then moves the body along the slope only. (The
+#    solver before M40 moved it first and pushed it back out, which lagged the
+#    slide a little: 4.71002080 at 1 s, not 4.7088.) The along-slope velocity
+#    is gravity's alone, as no normal impulse has an along-slope part, so the
+#    one departure is the normal velocity the solve may leave: at most twice
+#    its residual 1e-8 v_scale (once from the residual, once from a gap that
+#    residual can open, which the next step lets it close), with v_scale the
+#    body's 5.886 m/s at 1 s, and 0.6 of that is horizontal. That is 7.1e-8,
+#    the tolerance on the check.
 #
 # 3. Momentum is EXACTLY unchanged across steps 3000, 3500 and 4000, to every
 #    printed digit. One body is sliding along the flat floor and nothing slows
@@ -98,9 +106,12 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 #
 # The big fall in E between steps 1000 and 1500 is the impacts: the ramp body
 # reaches the floor and strikes the other one, and restitution 0.35 takes its
-# cut at every bounce. E is not conserved here and is not meant to be: the
-# planes are immovable, so they are external to the system, and the final
-# change at step 4500 is the RAMP, not the wall. Across that event the m=1.5
+# cut at every bounce. The bounces end: once a contact approaches slower than
+# the restitution threshold, 4 g dt, it is resolved as resting, so the second
+# p column settles to rounding (1e-14) rather than a micro-bounce. E is not
+# conserved here and is not meant to be: the planes are immovable, so they are
+# external to the system, and the change between steps 4000 and 4500 is the
+# RAMP, not the wall. Across that event the m=1.5
 # body accelerates at (+4.7088, -3.5316), which is the frictionless-ramp
 # signature derived in point 2 above, and its p_x RISES, which the wall's
 # normal of (-1, 0) could never do. The wall does act, earlier, between the
@@ -114,4 +125,4 @@ rigid_body 1.50  0.20  0.50   0.00  0.00    4.50  5.00  0.00    0.00  0.00  0.00
 # tests (issue #14). `step 0` is the state before any step, matching the column
 # the app prints, and the tolerance is absolute.
 # check step 0    energy      9.31950000e+01   tol 1e-9
-# check step 1000 momentum_x  4.71002080e+00   tol 1e-7
+# check step 1000 momentum_x  4.70880000e+00   tol 7.1e-8

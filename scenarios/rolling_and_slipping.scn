@@ -60,30 +60,41 @@ rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   E   1.23930000e+02   L  -8.50000000e+00   p   2.00000000e+01
-#   step   1500   E   6.62039426e+01   L  -8.49999368e+00   p   1.48497402e+01
-#   step   3000   E   5.69300114e+01   L  -8.49998937e+00   p   1.13333099e+01
-#   step   4500   E   5.69300114e+01   L  -8.49998937e+00   p   1.13333099e+01
-#   step   6000   E   5.69300114e+01   L  -8.49998937e+00   p   1.13333099e+01
+#   step      0   E   1.23930000e+02   L  -8.50000000e+00   p   2.00000000e+01  0.00000000e+00
+#   step   1500   E   6.62038896e+01   L  -8.50000000e+00   p   1.48497500e+01  0.00000000e+00
+#   step   3000   E   5.69300000e+01   L  -8.50000000e+00   p   1.13333333e+01  0.00000000e+00
+#   step   4500   E   5.69300000e+01   L  -8.50000000e+00   p   1.13333333e+01  0.00000000e+00
+#   step   6000   E   5.69300000e+01   L  -8.50000000e+00   p   1.13333333e+01  0.00000000e+00
 #
 # Four things there are derivable rather than merely observed.
 #
 # 1. The final momentum is the three closed-form speeds, summed. With all three
-#    masses at 2, p = 2 * (2.6667 - 0.3333 + 3.3333) = 11.33333, against a
-#    measured 11.3333099.
+#    masses at 2, p = 2 * (8/3 - 1/3 + 10/3) = 34/3 = 11.3333333, which is what
+#    the run prints, to every digit it prints.
 #
-#    The residual is about 2e-6 relative, and it is derivable rather than
-#    noise. The contact POINT is reported midway through the overlap, so the
-#    lever arm is R - depth/2 while the invariant above assumes R. Feeding
-#    a = R - depth/2 back through the same algebra predicts 11.3333099, which
-#    is what the run prints, to every digit it prints.
+#    It is exact because the discs never sink into the floor. Since M40 the
+#    contacts are solved before the positions move, so a disc resting on the
+#    floor is stopped there rather than pushed back out of it, and its contact
+#    point is on the floor's surface: the lever arm is R itself, the one the
+#    invariant assumes. (Before M40 each step sank the disc by g dt^2 and the
+#    contact point sat half that depth inside, an arm of R - depth/2, which
+#    left the final momentum at 11.3333099.)
 #
-#    In steady contact the penetration is g*dt^2/(1 + restitution), which is
-#    g*dt^2 here only because restitution is 0. Two other templates confirm the
-#    (1+e) factor independently: flat_ground's frozen p_y is exactly
-#    sum(m)*e*g*dt/(1+e), and so is projectile_arc's.
+#    The tolerance on the check is what the solve may leave. Rolling is
+#    reached when the slip v + omega R is 0; the sweeps stop once it is within
+#    r = 1e-8 v_scale, v_scale the fastest contact point, |v| + |omega| R =
+#    20/3 for disc 3. The invariant fixes I omega - m R v, so a slip s moves v
+#    by s / (1 + m R^2 / I) = s / 3, and the three discs' momentum by at most
+#    3 x 2 x r / 3 = 2 r = 1.3e-7, written as 1.4e-7.
 #
-# 2. Nothing changes at all after step 3000. E, L and p are identical to every
+# 2. The final energy is exact too: each disc rolling at v has (1/2) m v^2 +
+#    (1/2) I (v/R)^2 = 1.5 v^2, summed 1.5 x 165/9 = 27.5, and the potential is
+#    3 x 2 x 9.81 x 0.5 = 29.43, so E = 56.93. Its tolerance: the speeds above
+#    move the kinetic energy by at most sum(3 v dv) <= 3 x (8/3 + 1/3 + 10/3)
+#    x r / 3 = 4.2e-7, and a disc may sit up to the projection's slop, 1e-6 x
+#    0.5, into the floor, 6 x 9.81 x 5e-7 = 2.9e-5 of potential: 3e-5 in all.
+#
+# 3. Nothing changes at all after step 3000. E, L and p are identical to every
 #    printed digit at steps 3000, 4500 and 6000. That is the physical
 #    signature of friction switching itself off: once a disc rolls without
 #    slipping there is no tangential relative velocity left, so no friction
@@ -91,31 +102,20 @@ rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.
 #    scenarios/flat_ground.scn, where p is also constant but for the opposite
 #    reason: nothing was ever acting.
 #
-# 3. The starting angular momentum is exactly -8.5, and it is a hand sum. Each
+# 4. The starting angular momentum is exactly -8.5, and it is a hand sum. Each
 #    disc contributes I*omega + m*(r x v), and with every centre at y = 0.5 the
 #    orbital term is -0.5*m*vx:
 #        disc 1:  0        + 2*(-0.5*4) = -4.0
 #        disc 2:  0.25*18  + 2*(-0.5*4) = +0.5
 #        disc 3:  0.25*-12 + 2*(-0.5*2) = -5.0
 #
-# 4. L moves by about 1e-5 across the whole run, and FRICTION is the cause,
-#    not a residue left over from anything else.
-#
-#    The contact point is not on the line y = 0. It sits half a penetration
-#    away from it, because the overlap midpoint is where the contact is
-#    reported. A horizontal impulse applied half a penetration off the origin
-#    line does exert a torque about the origin, and summing it over the run
-#    gives (depth/2) * (p - p0), which is 1.226e-6 * -8.667 = 1.063e-5. That
-#    is the number in the table.
-#
-#    Gravity, the positional push-out and the normal impulse cancel EXACTLY in
-#    steady contact rather than nearly: per step they contribute
-#    -m*g*x_n*dt, -m*g*v*dt^2 and +m*g*x_(n+1)*dt, and x_(n+1) = x_n + v*dt
-#    makes the three sum to zero.
-#
-#    The clinching evidence is in the table above: after step 3000 friction
-#    switches off and L becomes bit-constant for 3000 further steps. A residue
-#    from gravity versus normal impulses would have kept accumulating.
+#    And it stays -8.5 to every printed digit for the whole run. The friction
+#    impulse acts at the contact point, which is on the line y = 0 (the discs
+#    do not sink in), so a horizontal impulse there has no moment about the
+#    origin; and gravity's moment about the origin is cancelled step by step
+#    by the floor's normal impulse at the same x. (Before M40 the contact point
+#    sat half a penetration below that line, and friction moved L by 1.06e-5
+#    over the run.)
 #
 # The big fall in E over the first 3000 steps is the slipping phase, and it is
 # the only place energy goes anywhere. Sliding dissipates; rolling does not.
@@ -125,5 +125,5 @@ rigid_body 2.00  0.25  0.50   0.00  0.00    6.00  0.50  0.00    2.00  0.00  -12.
 # the app prints, and the tolerance is absolute.
 # check step 0    energy      1.23930000e+02   tol 1e-9
 # check step 0    angular    -8.50000000e+00   tol 1e-12
-# check step 6000 momentum_x  1.13333099e+01   tol 1e-7
-# check step 6000 energy      5.69300114e+01   tol 1e-6
+# check step 6000 momentum_x  1.13333333333333e+01   tol 1.4e-7
+# check step 6000 energy      5.69300000000000e+01   tol 3e-5

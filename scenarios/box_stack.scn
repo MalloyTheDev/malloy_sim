@@ -1,0 +1,112 @@
+# MalloySim scenario: a stack of three boxes standing on the floor (M40).
+#
+# Until M40 a box contact manifold (a box on a plane, M30; box against box,
+# M33) was reduced to ONE contact at its centroid. One contact cannot stop
+# several corners at once, so a stack never stood: its boxes kept a phantom
+# downward velocity while the positional correction pushed them back, and a
+# staggered stack crept sideways until it fell. This one, on the solver before
+# M40: its top box drifted 0.19 m in the first 10 s and the stack fell at
+# 12.4 s.
+#
+# M40 resolves every point of every manifold (issue #73), with accumulated
+# impulses clamped to push only and to the Coulomb disc, iterated until the
+# contact residual is below 1e-8 v_scale (v_scale is the larger of |g| dt and
+# the fastest contact body's |v| + |w| x its size) or 100 sweeps, warm started
+# from the last step. The contacts are solved BEFORE the positions move, and a
+# nonlinear Gauss-Seidel pass then removes any depth beyond a slop of 1e-6 x
+# the pair's size (the smaller box's largest half-width) without touching a
+# velocity.
+#
+# Three boxes of different sizes and masses, each offset from the one below
+# by (0.08, 0.04), placed exactly touching and at rest. They must stand: no
+# drift, no tilt, no sag beyond the slop, no motion. The TOP box is listed
+# first, because the position, velocity and spin quantities of the checks read
+# the first body. (The listed order is also the solve order, pairs ascending
+# then ground; it does not change what a converged stack does.)
+
+type rigid3d
+
+dt 0.002
+steps 5000
+output_every 500
+
+gravity3 0.0 0.0 -9.8
+restitution 0.0
+friction 0.5
+plane3 0.0 0.0 1.0 0.0
+
+# rigid_box3d <mass> <hx hy hz> <px py pz> <axisx axisy axisz angle> <vx vy vz> <wx wy wz>
+#
+# Top, middle, bottom. The bottom box's top face is at z = 0.5, the middle
+# box's bottom; the middle box's top face is at z = 0.9, the top box's bottom.
+rigid_box3d 0.6  0.40 0.30 0.15   0.16 0.08 1.05   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0 0.0 0.0
+rigid_box3d 0.9  0.45 0.35 0.20   0.08 0.04 0.70   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0 0.0 0.0
+rigid_box3d 1.2  0.50 0.40 0.25   0.00 0.00 0.25   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0 0.0 0.0
+
+# Expected, from a real run of the shipped binary:
+#
+#   step      0   E   1.52880000e+01   |L|   0.00000000e+00   |p|   0.00000000e+00
+#   step    500   E   1.52880000e+01   |L|   2.54590314e-11   |p|   2.31771842e-11
+#   step   5000   E   1.52880000e+01   |L|   1.92846611e-11   |p|   2.11979085e-11
+#
+# E holds at its starting value to the eight digits printed for the whole run.
+# |L| and |p| are the solver's residual, about 1e-11 at every report: rounding
+# that will differ between compilers, which is why the checks below bound them
+# rather than pin them. The top box stays within 1e-9 of where it was put.
+#
+# The invariants and where each tolerance comes from. The rest phase stops at
+# a residual r = 1e-8 |g| dt = 1.96e-10, and a box resting on a support at that
+# residual moves at most v_rest = 3 r (1 + 2 R / w) and turns at most
+# omega_rest = 2 sqrt(3) r / w, for R its corner distance and w its smallest
+# width: v_rest is 2.63e-9, 2.36e-9 and 2.20e-9 for the top, middle and bottom
+# box, all below 2.7e-9, and omega_rest 2.26e-9 at most. Box k up rests on k
+# interfaces, so it moves at most k times one interface's allowance.
+#
+# 1. The energy starts as the potential sum m g z = 9.8 (0.6 x 1.05 +
+#    0.9 x 0.70 + 1.2 x 0.25) = 15.288, all of it, since nothing moves.
+#
+# 2. The stack stands: the top box stays where it was put. Horizontally within
+#    1 mm (a requirement: 1 per cent of the offset between boxes; a stack that
+#    falls moves it 0.25 or more). Vertically within the sag the solver allows,
+#    which is derived: each interface sits within the slop, 1e-6 x 0.40,
+#    1e-6 x 0.45 and 1e-6 x 0.5 from the top down, plus what a converged rest
+#    solve can still let sink in the steps the correction takes,
+#    4 v_rest dt = 2.2e-11; the cap's share is 0.75^100 of a step's gravity,
+#    below 1e-16. Three interfaces: 1.35e-6, rounded up to 1.4e-6.
+#
+# 3. It is at rest: kinetic energy at most n^2 = 9 times the sum of each box's
+#    rest bound (1/2 m v_rest^2 + 1/2 (Ix + Iy + Iz) omega_rest^2), 7.6e-17,
+#    rounded up to 1e-16; momentum at most sum m k 2.7e-9 = 4.8 x 2.7e-9 =
+#    1.3e-8; the top box's spin at most 3 omega_rest = 6.8e-9, rounded up to
+#    7e-9.
+#
+# 4. The total energy at the end is the starting potential less what the sag
+#    allows, box k up sinking by the slops of the k interfaces below it:
+#    9.8 (1.2 x 5e-7 + 0.9 x 9.5e-7 + 0.6 x 1.35e-6) = 2.22e-5, plus the
+#    kinetic bound; 2.3e-5.
+#
+# A stack that falls changes the energy by joules, and one that creeps or
+# rocks leaves momentum, spin and kinetic energy many orders of magnitude above
+# these bounds. (On the solver before M40 the total energy at step 5000 was
+# 3.9e-3 J above where it started, and the top box had drifted up to 0.19 m.)
+#
+# On the ASCII view (an orthographic projection down z): three points on a
+# diagonal, the boxes' centres seen from above, that never move.
+
+# Machine-checkable assertions, evaluated against a real run by the scenario
+# tests. `step 0` is the state before any step, and the tolerance is absolute.
+# The rigid3d `energy` quantity is the kinetic energy; `total_energy` adds the
+# potential.
+# check step 0    total_energy  1.52880000e+01   tol 1e-12
+# check step 0    position_x    1.60000000e-01   tol 0
+# check step 5000 position_x    1.60000000e-01   tol 1e-3
+# check step 5000 position_y    8.00000000e-02   tol 1e-3
+# check step 5000 position_z    1.05000000e+00   tol 1.4e-6
+# check step 5000 energy        0.00000000e+00   tol 1e-16
+# check step 5000 momentum_x    0.00000000e+00   tol 1.3e-8
+# check step 5000 momentum_y    0.00000000e+00   tol 1.3e-8
+# check step 5000 momentum_z    0.00000000e+00   tol 1.3e-8
+# check step 5000 spin_x        0.00000000e+00   tol 7e-9
+# check step 5000 spin_y        0.00000000e+00   tol 7e-9
+# check step 5000 spin_z        0.00000000e+00   tol 7e-9
+# check step 5000 total_energy  1.52880000e+01   tol 2.3e-5
