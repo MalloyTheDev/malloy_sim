@@ -9,13 +9,16 @@
 # its overlap is the penetration. The pair is then resolved through the SAME
 # impulse core the spheres and the ground use (ADR 0008).
 #
-# The face-on-face touch is a whole quad of contact, clipped to the overlap and
-# reduced to ONE contact at its centroid: enough for a correct bounce, not for a
-# resting stack (that needs an iterative solver a later milestone owns). For two
-# aligned cubes that centroid lies on the line of centres, so the impulse makes
-# no torque and the result is exactly the one-dimensional collision. (Until the
-# review pass after M37 the contact sat on a single face corner, which invented a
-# lever arm; this template then ended at 0.320 instead of the correct 0.5.)
+# The face-on-face touch is a whole quad of contact, clipped to the overlap.
+# Since M40 every point of it is a contact of its own, solved by sequential
+# impulses until none is violated (issue #73), after one impulse at the quad's
+# weighted centroid. For two aligned cubes that centroid lies on the line of
+# centres, so that one impulse makes no torque and already satisfies every
+# point, and the result is exactly the one-dimensional collision. (Before M40
+# the quad was reduced to that one centroid contact for good: a correct bounce,
+# but no resting stack, which `box_stack.scn` now shows. Until the review pass
+# after M37 the contact sat on a single face corner, which invented a lever
+# arm; this template then ended at 0.320 instead of the correct 0.5.)
 #
 # Two cubes approach head-on along x in free space (no gravity, no ground). The
 # heavier one (mass 2) starts on the left moving right; the lighter one (mass 1)
@@ -43,11 +46,13 @@ rigid_box3d 1.0  0.5 0.5 0.5    1.2 0.0 0.0   0.0 0.0 1.0 0.0   -1.0 0.0 0.0   0
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   energy 1.50000000e+00   momentum_x 1.00000000e+00
-#   step   2000   energy 5.00000000e-01   momentum_x 1.00000000e+00
+#   step      0   E   1.50000000e+00   |L|   0.00000000e+00   |p|   1.00000000e+00
+#   step    400   E   5.00000000e-01   |L|   0.00000000e+00   |p|   1.00000000e+00
+#   step   2000   E   5.00000000e-01   |L|   0.00000000e+00   |p|   1.00000000e+00
 #
-# (`energy` is the rigid3d kinetic energy; with no gravity there is no potential
-# term, so it is the whole energy.)
+# (With no gravity there is no potential term, so E, and the checks' `energy`,
+# the rigid3d kinetic energy, are the whole energy. |p| is the total momentum,
+# all of it along x.)
 #
 # The invariants:
 #

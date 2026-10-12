@@ -86,10 +86,10 @@ rigid_static 0.60   4.00 -1.20  0.00
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   E   2.07711000e+02   L  -5.52000000e+00
-#   step    500   E   2.07554616e+02   L  -2.30524320e+01
-#   step   1000   E   7.08361176e+01   L   4.11211687e+00
-#   step   5000   E   1.01970995e+01   L  -1.55706588e+01
+#   step      0   E   2.07711000e+02   L  -5.52000000e+00   p   1.20000000e+00  0.00000000e+00
+#   step    500   E   2.07554616e+02   L  -2.30524320e+01   p   1.20000000e+00 -3.18825000e+01
+#   step   1000   E   7.09803890e+01   L   4.22958279e+00   p  -3.48125040e+00 -2.76686374e+00
+#   step   5000   E   5.40605835e+00   L  -7.07232777e+00   p   9.83664932e-01  1.34537298e-01
 #
 # Everything is still falling at step 500, and E has moved by only 1.5638e-01,
 # or 0.075 per cent. That figure is not approximate. Semi-implicit Euler under a
@@ -104,27 +104,46 @@ rigid_static 0.60   4.00 -1.20  0.00
 # position, orientation or spin. The same constant was derived for the particle
 # domain in M12, because it is the same integrator on the same kind of field.
 #
+# The momentum at step 500 is exact as well: nothing horizontal acts, so p_x is
+# still the third body's 1.0 x 1.2, and gravity has given every body -g t, so
+# p_y = -(sum of m) g t = -6.5 x 9.81 x 0.5 = -31.8825.
+#
 # Between steps 500 and 1000 the bodies land, and E drops by two thirds: that is
 # restitution 0.45, not integrator drift. It keeps falling afterwards as they
-# bounce, rock and skip along the scalloped floor.
+# bounce, rock and skip along the scalloped floor. From there the run is a
+# chaotic pile: the normal swings from disc to disc, and a rounding-level
+# difference grows until it decides a bounce. So the late values in the table
+# (E 5.40605835 at step 5000, from the M40 solver; 10.1970995 before it) are
+# what this binary prints, not a law, and no check pins them.
 #
 # The starting angular momentum is exactly -5.52. Only the third body is moving,
 # and its centre of mass starts at (-3.75, 4.60) with velocity (1.20, 0.00), so
 # L = m(rx*vy - ry*vx) = 1.0 * (-4.60 * 1.20) = -5.52.
 #
-# The two bodies released at y = 3 touch down on the same step and hold the same
-# height, angle and vertical velocity for the whole run despite a tenfold mass
-# difference. Two separate reasons are at work, and only the first is gravity.
-# The FALL matches because gravity is an acceleration and never divides by a
-# mass. The BOUNCE matches because the contact response depends on the ratio
-# I/m, and these two share it: 0.08/0.5 = 0.80/5.0 = 0.16. Change one inertia
-# and only the fall would still agree.
+# The two bodies released at y = 3 touch down on the same step (809) and match
+# in height, angle and vertical velocity despite a tenfold mass difference. Two
+# separate reasons are at work, and only the first is gravity. The FALL matches
+# because gravity is an acceleration and never divides by a mass. The BOUNCE
+# matches because the contact response depends on the ratio I/m, and these two
+# share it: 0.08/0.5 = 0.80/5.0 = 0.16. Change one inertia and only the fall
+# would still agree.
 #
-# Both are asserted in tests/rigid/rigid_world_tests.cpp, which also ships the
-# negative control that breaks the ratio.
+# In this scene they match to rounding (1.8e-15) from their landing, not for
+# the whole run: at step 937 that rounding tips a contact decision one way for
+# one body and the other way for its twin, and they part by more than 1e-2 in
+# that one step. Isolated, the pair holds to 1e-12 for as long as
+# tests/rigid/rigid_world_tests.cpp runs it, which also ships the negative
+# control that breaks the ratio.
 
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests (issue #14). `step 0` is the state before any step, matching the column
 # the app prints, and the tolerance is absolute.
+# The free fall is exact, so it is what the checks pin: the energy after 500
+# steps is the start less 500 x (1/2)(sum of m)|g|^2 dt^2 = 0.156383663, and the
+# momentum is the start plus the gravity impulse. Tolerances: rounding, about
+# 4 eps per operation over a few operations a step for 500 steps, on values of
+# about 200 (energy) and 30 (momentum): 1e-9 and 1e-10.
 # check step 0    energy      2.07711000e+02   tol 1e-9
-# check step 5000 energy      1.01970995e+01   tol 1e-6
+# check step 500  energy      2.075546163375e+02 tol 1e-9
+# check step 500  momentum_x  1.20000000e+00   tol 1e-10
+# check step 500  momentum_y -3.18825000e+01   tol 1e-10

@@ -136,7 +136,7 @@ compare against a real run (the app reads it as a comment).
 
 The five physics domains each run in two dimensions and in three, and each of
 those worlds has its own scenario `type`, so the dispatch has ten.
-31 templates ship across those ten types, which the dispatch treats as
+33 templates ship across those ten types, which the dispatch treats as
 10 domains, and every template is parsed, validated and stepped by the test
 suite. Both numbers are checked against the directory by the scenario tests, so
 neither can go stale.
@@ -147,8 +147,8 @@ neither can go stale.
 | `nbody3d` | `inclined_orbits` |
 | `particles` | `bouncing_particles`, `projectile_arc`, `sliding_friction`, `hard_disk_gas`, `thermal_relaxation`, `heat_conduction` |
 | `particles3d` | `particle_collision3d`, `hard_sphere_gas` |
-| `rigid` | `spinning_bodies`, `tumbling_impact`, `dropped_bodies`, `flat_ground`, `rolling_and_slipping`, `box_collision2d`, `box_drop2d` |
-| `rigid3d` | `intermediate_axis`, `gyroscope`, `bouncing_sphere`, `rolling_sphere`, `sphere_collision`, `box_drop`, `box_collision`, `box_sphere_collision`, `applied_force` |
+| `rigid` | `spinning_bodies`, `tumbling_impact`, `dropped_bodies`, `flat_ground`, `rolling_and_slipping`, `box_collision2d`, `box_drop2d`, `box_stack2d` |
+| `rigid3d` | `intermediate_axis`, `gyroscope`, `bouncing_sphere`, `rolling_sphere`, `sphere_collision`, `box_drop`, `box_collision`, `box_sphere_collision`, `applied_force`, `box_stack` |
 | `springs` | `spring_chain` |
 | `springs3d` | `spring_tetrahedron` |
 | `charges` | `cyclotron` |

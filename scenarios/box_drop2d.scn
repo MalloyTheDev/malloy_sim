@@ -6,25 +6,26 @@
 # against a plane needs no separating-axis search: the plane has one normal, so
 # the box is inside the solid exactly where its corners are, and the four corners
 # tested against that normal are the whole story. Up to two touch at once (a flat
-# edge), so the contact is a manifold, resolved as a SINGLE contact at the
-# CENTROID of the penetrating corners: for a flat edge that centroid sits
-# directly below the centre of mass, so the normal impulse passes through it and
-# applies NO torque.
+# edge), so the contact is a manifold. Since M40 both corners are resolved, by
+# sequential impulses that iterate until neither corner's constraint is
+# violated (issue #73), and a flat landing stays exactly symmetric: the
+# manifold first takes one impulse at its weighted centroid, which for a flat
+# edge sits directly below the centre of mass, so it applies NO torque and is
+# the whole answer for a level landing. The per-corner sweeps run only when a
+# corner is still violated after it, so here none run.
 #
 # That is the invariant to watch. A unit square is dropped flat, with no spin,
 # straight down onto the floor. It must land flat and stay flat: its angular
 # momentum stays exactly zero through the bounce, because a symmetric landing
-# exerts no net torque, and it never drifts sideways. A per-corner solver that
-# resolved the two corners one at a time would break the symmetry and spin the
-# square up out of nothing; this one does not.
+# exerts no net torque, and it never drifts sideways.
 #
 # The square's inertia is computed from the box and the mass, not typed in. It
-# falls, bounces with restitution 0.5 losing energy each time, and settles on
-# the floor with its centre at half a side height (y = 0.5). "Settles" is not
-# exact rest: the solver has no restitution threshold, so each step's one step of
-# gravity is bounced back at restitution 0.5 and the square keeps a steady
-# micro-bounce of vertical speed e*g*dt/(1+e) = 0.5*4*0.002/1.5 = 2.67e-3. It
-# never grows, and a threshold is deferred work.
+# falls, bounces with restitution 0.5 losing energy each time, and comes to REST
+# on the floor with its centre at half a side height (y = 0.5), by step 1400. A
+# bounce slower than the restitution threshold, 4 g dt = 0.032 here, is
+# resolved as resting contact, so the last small bounces end. (The solver
+# before M40 had no threshold and left a micro-bounce of vertical speed
+# e g dt / (1 + e) = 2.67e-3 for ever.)
 
 type rigid
 
@@ -46,18 +47,25 @@ rigid_box 1.0  0.5 0.5  0.0 2.0  0.0  0.0 0.0  0.0
 
 # Expected, from a real run of the shipped binary:
 #
-#   step      0   momentum_x 0.00000000e+00   angular 0.00000000e+00
-#   step   2000   momentum_x 0.00000000e+00   angular 0.00000000e+00
+#   step      0   E   8.00000000e+00   L   0.00000000e+00   p   0.00000000e+00  0.00000000e+00
+#   step    600   E   3.49147400e+00   L   0.00000000e+00   p   0.00000000e+00  4.02000000e-01
+#   step   1000   E   2.36671650e+00   L   0.00000000e+00   p   0.00000000e+00 -2.03000000e-01
+#   step   1200   E   2.02260403e+00   L   0.00000000e+00   p   0.00000000e+00  1.28250000e-01
+#   step   1400   E   2.00000000e+00   L   0.00000000e+00   p   0.00000000e+00  0.00000000e+00
+#   step   2000   E   2.00000000e+00   L   0.00000000e+00   p   0.00000000e+00  0.00000000e+00
 #
 # The invariants:
 #
 # 1. Angular momentum is zero at every step. In free fall there is no torque; at
-#    the landing the centroid contact sits below the centre of mass, so the
-#    normal impulse makes none either. A flat drop stays flat. This is the
-#    headline: the manifold is resolved without a spurious torque.
+#    the landing the centroid impulse acts below the centre of mass, so it makes
+#    none either. A flat drop stays flat. This is the headline: the manifold is
+#    resolved corner by corner without a spurious torque.
 #
 # 2. There is no horizontal motion. The drop is symmetric, so momentum along x is
 #    exactly zero throughout.
+#
+# 3. It ends at rest at the resting potential: E = m g y = 1 x 4 x 0.5 = 2, and
+#    p = 0.
 #
 # On the ASCII view (an orthographic view of the plane): a single point on the y
 # axis that descends and halts, since the square's centre only moves along y.
@@ -72,3 +80,13 @@ rigid_box 1.0  0.5 0.5  0.0 2.0  0.0  0.0 0.0  0.0
 # check step 0    angular     0.00000000e+00   tol 1e-12
 # check step 2000 momentum_x  0.00000000e+00   tol 1e-12
 # check step 2000 angular     0.00000000e+00   tol 1e-9
+#
+# And at rest: no micro-bounce, and the square neither sunk nor fallen through.
+# The solver stops at a contact residual of 1e-8 v_scale, and at rest v_scale
+# is g dt = 0.008, so r = 8e-11 and the square's speed is at most
+# 3 r (1 + 2 R / w) = 5.8e-10 (R = 0.707 its corner distance, w = 1 its side):
+# the momentum's tolerance, 6e-10. Its resting height sits within the
+# projection's slop of the floor, 1e-6 x 0.5, so the energy is 2 to within
+# m g 5e-7 = 2e-6, 2.1e-6.
+# check step 2000 momentum_y  0.00000000e+00   tol 6e-10
+# check step 2000 energy      2.00000000e+00   tol 2.1e-6
