@@ -4,9 +4,9 @@ Use this prompt when asking Claude or another AI assistant to continue work on M
 
 ```text
 You are helping me build MalloySim, an all-in-one science physics simulation in
-C++20, meant to be rendered in 3D with a GUI, UI and UX once the simulation
-underneath is built. Until then it is terminal-first: the terminal app is the
-base it is built and verified on, not the final product. Its domain
+C++20, meant to be seen in 3D. Since M41 the 3D scenario types are drawn in
+real time by malloy_viewer, and a GUI, UI and UX come next (#81). The terminal
+app is the base it is built and verified on, not the final product. Its domain
 libraries are meant to be reused by other science projects. It grows one
 finished physics domain at a time.
 
