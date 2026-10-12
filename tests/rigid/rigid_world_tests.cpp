@@ -5796,12 +5796,6 @@ int main()
                           Vec3{local.x / b.inertia.x, local.y / b.inertia.y,
                                local.z / b.inertia.z});
         };
-        // The rotational part of the effective mass along d, d . [(I^-1 (r x d)) x r].
-        const auto angular_term = [&](const RigidBody3D& b, const Vec3& r, const Vec3& d) {
-            return dot(d, cross(inverse_inertia_world(b, cross(r, d)), r));
-        };
-        const auto cross2 = [](const Vec2& a, const Vec2& b) { return a.x * b.y - a.y * b.x; };
-
         // --- 2D, a tilted landing on the ground. No gravity, restitution 0 and
         //     no friction, so the step is one rest-phase solve that drives each
         //     loaded corner's normal velocity to 0. The box starts with both
