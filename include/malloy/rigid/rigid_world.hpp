@@ -153,6 +153,10 @@ public:
         math::Real tangent_impulse{0.0};
     };
 
+    // Read-only, so the whole state can be compared (a failed step restores
+    // it with the bodies); there is no way to set it.
+    const std::vector<WarmContact>& warm_contacts() const { return warm_; }
+
 private:
     sim_core::SimulationSettings simulation_settings_;
     RigidSettings settings_;

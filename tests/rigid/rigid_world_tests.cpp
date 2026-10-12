@@ -6214,6 +6214,233 @@ int main()
         }
     }
 
+    // --- M40 (issue #73): the warm-start impulses are part of the world's
+    //     state. A failed step restores them with the bodies, and they are
+    //     what lets a stack come to rest within the sweep cap. ---
+    {
+        using malloy::math::Vec3;
+        using malloy::rigid::box_inertia;
+        using malloy::rigid::Rigid3DSettings;
+        using malloy::rigid::Rigid3DWorld;
+        using malloy::rigid::RigidBody3D;
+
+        const auto same2 = [](const RigidWorld& x, const RigidWorld& y) {
+            bool same = x.bodies().size() == y.bodies().size() &&
+                        x.warm_contacts().size() == y.warm_contacts().size();
+            for (std::size_t i = 0; same && i < x.bodies().size(); ++i)
+            {
+                const RigidBody2D& p = x.bodies()[i];
+                const RigidBody2D& q = y.bodies()[i];
+                same = p.position.x == q.position.x && p.position.y == q.position.y &&
+                       p.velocity.x == q.velocity.x && p.velocity.y == q.velocity.y &&
+                       p.angle == q.angle && p.angular_velocity == q.angular_velocity;
+            }
+            for (std::size_t i = 0; same && i < x.warm_contacts().size(); ++i)
+            {
+                const RigidWorld::WarmContact& p = x.warm_contacts()[i];
+                const RigidWorld::WarmContact& q = y.warm_contacts()[i];
+                same = p.a == q.a && p.b == q.b && p.ground == q.ground && p.key == q.key &&
+                       p.local.x == q.local.x && p.local.y == q.local.y &&
+                       p.normal_impulse == q.normal_impulse &&
+                       p.tangent_impulse == q.tangent_impulse;
+            }
+            return same;
+        };
+
+        // 2D: two identical worlds hold a box tipping from a corner onto its
+        // face (its contact impulses change every step, so one step's cache
+        // differs from the next) and, far away, a body with no collider at
+        // x = 1.34e154, just inside the squarable range (issue #16). At step
+        // 20 one world gives that body an impulse of 1e154, so the next step
+        // carries it past 1.3408e154, where its square overflows: the step
+        // fails and must restore the bodies AND the cache. The opposite
+        // impulse then puts the body back exactly (1e154 - 1e154 = 0), and
+        // from there the two worlds must agree bit for bit, cache included. A
+        // world that kept the failed step's cache would warm-start from
+        // impulses one step ahead and differ at the rounding level.
+        {
+            const Real tilt = 0.1;
+            const auto make = [tilt] {
+                RigidBody2D box;
+                box.half_extents = Vec2{0.5, 0.25};
+                box.inertia = (0.25 + 0.0625) / 3.0;
+                box.angle = tilt;
+                box.position = Vec2{0.0, 0.5 * std::sin(tilt) + 0.25 * std::cos(tilt)};
+                RigidBody2D far;
+                far.inertia = 1.0;
+                far.position = Vec2{1.34e154, 0.0};
+                RigidSettings settings;
+                settings.gravity = Vec2{0.0, -9.8};
+                settings.restitution = 0.0;
+                settings.friction = 0.5;
+                settings.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+                return RigidWorld{SimulationSettings{0.002}, {box, far}, settings};
+            };
+            RigidWorld failing = make();
+            RigidWorld twin = make();
+            for (int i = 0; i < 20; ++i)
+            {
+                MALLOY_CHECK_TRUE(failing.step().ok());
+                MALLOY_CHECK_TRUE(twin.step().ok());
+            }
+            MALLOY_CHECK_FALSE(failing.warm_contacts().empty()); // tipping on its corner
+            const Vec2 far_centre = failing.bodies()[1].position;
+            MALLOY_CHECK_TRUE(failing.apply_impulse_at(1, Vec2{1e154, 0.0}, far_centre));
+            MALLOY_CHECK_TRUE(failing.step().status == StepStatus::InvalidState);
+            MALLOY_CHECK_EQ(failing.tick_count(), twin.tick_count());
+            MALLOY_CHECK_TRUE(failing.apply_impulse_at(1, Vec2{-1e154, 0.0}, far_centre));
+            MALLOY_CHECK_EQ(failing.bodies()[1].velocity.x, 0.0);
+            MALLOY_CHECK_TRUE(same2(failing, twin));
+            for (int i = 0; i < 200; ++i)
+            {
+                MALLOY_CHECK_TRUE(failing.step().ok());
+                MALLOY_CHECK_TRUE(twin.step().ok());
+                MALLOY_CHECK_TRUE(same2(failing, twin));
+            }
+        }
+
+        // 3D: the same, with a box tipping from an edge. There is no impulse
+        // to aim, so the far body starts at x = 1.3e154 moving at 1e154: it
+        // crosses 1.3408e154 at step 21 (20.4 steps of 2e151), which fails.
+        // That step must leave the bodies and the cache exactly as step 20
+        // left them, and so must every retry.
+        {
+            const Real tilt = 0.1;
+            const Vec3 half{0.5, 0.4, 0.25};
+            RigidBody3D box;
+            box.half_extents = half;
+            box.inertia = box_inertia(half, box.mass);
+            box.orientation = malloy::math::from_axis_angle(Vec3{0.0, 1.0, 0.0}, tilt);
+            box.position = Vec3{0.0, 0.0, 0.5 * std::sin(tilt) + 0.25 * std::cos(tilt)};
+            RigidBody3D far;
+            far.position = Vec3{1.3e154, 0.0, 0.0};
+            far.velocity = Vec3{1e154, 0.0, 0.0};
+            Rigid3DSettings settings;
+            settings.gravity = Vec3{0.0, 0.0, -9.8};
+            settings.restitution = 0.0;
+            settings.friction = 0.5;
+            settings.ground.push_back(malloy::collide::Plane3{Vec3{0.0, 0.0, 1.0}, 0.0});
+            Rigid3DWorld w{SimulationSettings{0.002}, {box, far}, settings};
+            int ok_steps = 0;
+            while (ok_steps < 40 && w.step().ok())
+            {
+                ++ok_steps;
+            }
+            MALLOY_CHECK_EQ(ok_steps, 20);
+            MALLOY_CHECK_FALSE(w.warm_contacts().empty());
+            const std::vector<RigidBody3D> bodies = w.bodies();
+            const std::vector<Rigid3DWorld::WarmContact> cache = w.warm_contacts();
+            for (int retry = 0; retry < 2; ++retry)
+            {
+                if (retry > 0)
+                {
+                    MALLOY_CHECK_TRUE(w.step().status == StepStatus::InvalidState);
+                }
+                MALLOY_CHECK_EQ(w.tick_count(), std::uint64_t{20});
+                bool same = w.bodies().size() == bodies.size() &&
+                            w.warm_contacts().size() == cache.size();
+                for (std::size_t i = 0; same && i < bodies.size(); ++i)
+                {
+                    const RigidBody3D& p = w.bodies()[i];
+                    const RigidBody3D& q = bodies[i];
+                    same = p.position.x == q.position.x && p.position.y == q.position.y &&
+                           p.position.z == q.position.z && p.velocity.x == q.velocity.x &&
+                           p.velocity.y == q.velocity.y && p.velocity.z == q.velocity.z &&
+                           p.orientation.w == q.orientation.w &&
+                           p.orientation.v.x == q.orientation.v.x &&
+                           p.orientation.v.y == q.orientation.v.y &&
+                           p.orientation.v.z == q.orientation.v.z &&
+                           p.angular_velocity.x == q.angular_velocity.x &&
+                           p.angular_velocity.y == q.angular_velocity.y &&
+                           p.angular_velocity.z == q.angular_velocity.z;
+                }
+                for (std::size_t i = 0; same && i < cache.size(); ++i)
+                {
+                    const Rigid3DWorld::WarmContact& p = w.warm_contacts()[i];
+                    const Rigid3DWorld::WarmContact& q = cache[i];
+                    same = p.a == q.a && p.b == q.b && p.ground == q.ground && p.key == q.key &&
+                           p.local.x == q.local.x && p.local.y == q.local.y &&
+                           p.local.z == q.local.z && p.normal_impulse == q.normal_impulse &&
+                           p.tangent_impulse.x == q.tangent_impulse.x &&
+                           p.tangent_impulse.y == q.tangent_impulse.y &&
+                           p.tangent_impulse.z == q.tangent_impulse.z;
+                }
+                MALLOY_CHECK_TRUE(same);
+            }
+        }
+
+        // A stack of three equal boxes resting on the floor stays at rest.
+        // At rest the velocity scale is one step of gravity, g dt, so every
+        // loaded point ends within r = 1e-8 g dt of 0. A box on face
+        // contacts w = 1 apart (2D: the width; 3D: the narrower side) with
+        // corners within R of its centre of mass then keeps |omega| <=
+        // 2 sqrt(3) r / w and |v| <= 3 r (1 + 2 R / w) relative to the box
+        // below it, so the k-th box up keeps at most k times that, and the
+        // stack's kinetic energy is at most sum_k (1/2) k^2 (m v^2 + I w^2)
+        // with those bounds: 1.6e-17 J in 3D, less in 2D. Over the last
+        // second of 10 s it stays inside. The warm start is what makes that
+        // possible within 100 sweeps: started from zero every step, the three
+        // stacked manifolds hit the cap and kept 2.5e-11 J (3D).
+        {
+            const Real g = 9.8;
+            const Real dt = 0.002;
+            const Real r = 1e-8 * g * dt;
+            std::vector<RigidBody2D> flat;
+            std::vector<RigidBody3D> deep;
+            for (int k = 0; k < 3; ++k)
+            {
+                RigidBody2D b2;
+                b2.half_extents = Vec2{0.5, 0.25};
+                b2.inertia = (0.25 + 0.0625) / 3.0;
+                b2.position = Vec2{0.0, 0.25 + 0.5 * k};
+                flat.push_back(b2);
+                RigidBody3D b3;
+                b3.half_extents = Vec3{0.5, 0.5, 0.25};
+                b3.inertia = box_inertia(b3.half_extents, b3.mass);
+                b3.position = Vec3{0.0, 0.0, 0.25 + 0.5 * k};
+                deep.push_back(b3);
+            }
+            RigidSettings s2;
+            s2.gravity = Vec2{0.0, -g};
+            s2.restitution = 0.0;
+            s2.friction = 0.5;
+            s2.ground.push_back(Halfplane{Vec2{0.0, 1.0}, 0.0});
+            Rigid3DSettings s3;
+            s3.gravity = Vec3{0.0, 0.0, -g};
+            s3.restitution = 0.0;
+            s3.friction = 0.5;
+            s3.ground.push_back(malloy::collide::Plane3{Vec3{0.0, 0.0, 1.0}, 0.0});
+            RigidWorld w2{SimulationSettings{dt}, flat, s2};
+            Rigid3DWorld w3{SimulationSettings{dt}, deep, s3};
+            Real late2 = 0.0;
+            Real late3 = 0.0;
+            for (int i = 1; i <= 5000; ++i)
+            {
+                MALLOY_CHECK_TRUE(w2.step().ok());
+                MALLOY_CHECK_TRUE(w3.step().ok());
+                if (i > 4500)
+                {
+                    late2 = std::fmax(late2, total_kinetic_energy(w2.bodies()));
+                    late3 = std::fmax(late3, malloy::rigid::total_kinetic_energy3d(w3.bodies()));
+                }
+            }
+            const auto bound = [r](Real reach, Real width, Real mass, Real moment) {
+                const Real v = 3.0 * r * (1.0 + 2.0 * reach / width);
+                const Real spin = 2.0 * std::sqrt(3.0) * r / width;
+                Real total = 0.0;
+                for (int k = 1; k <= 3; ++k)
+                {
+                    total += 0.5 * k * k * (mass * v * v + moment * spin * spin);
+                }
+                return total;
+            };
+            const Real moment3 = std::fmax(std::fmax(deep[0].inertia.x, deep[0].inertia.y),
+                                           deep[0].inertia.z);
+            MALLOY_CHECK_TRUE(late2 <= bound(std::sqrt(0.25 + 0.0625), 1.0, 1.0, flat[0].inertia));
+            MALLOY_CHECK_TRUE(late3 <= bound(0.75, 1.0, 1.0, moment3));
+        }
+    }
+
     // --- Issue #51: a huge mass or inertia must not validate while every energy
     //     the world reports is inf. Since #16 the position and velocity must be
     //     squarable, but nothing bounded the mass or inertia, so a body whose
