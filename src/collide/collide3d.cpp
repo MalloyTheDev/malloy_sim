@@ -49,6 +49,13 @@ math::Real signed_distance(const Plane3& plane, const math::Vec3& point)
 // Coincident-centre fallback, the 3D copy of the 2D one: arbitrary but fixed,
 // so a run repeats.
 const math::Vec3 fallback_normal{1.0, 0.0, 0.0};
+
+// A speculative margin (M40) is a distance: finite and not negative. Anything
+// else is refused like an invalid shape, so a query never sees a NaN gap.
+bool valid_margin(math::Real margin)
+{
+    return margin >= math::Real{0} && math::is_finite(margin);
+}
 } // namespace
 
 bool overlaps(const Sphere& sphere, const Plane3& plane)
@@ -63,14 +70,22 @@ bool overlaps(const Sphere& sphere, const Plane3& plane)
 
 std::optional<Contact3> contact(const Sphere& sphere, const Plane3& plane)
 {
-    if (!sphere.is_valid() || !plane.is_valid())
+    return contact(sphere, plane, math::Real{0});
+}
+
+std::optional<Contact3> contact(const Sphere& sphere, const Plane3& plane,
+                                math::Real margin)
+{
+    if (!sphere.is_valid() || !plane.is_valid() || !valid_margin(margin))
     {
         return std::nullopt;
     }
 
     const math::Real distance = signed_distance(plane, sphere.center);
     const math::Real depth = sphere.radius - distance;
-    if (depth < math::Real{0})
+    // With margin 0 exactly the touching test `depth < 0`; a positive margin
+    // also keeps a sphere up to `margin` clear of the plane, at a negative depth.
+    if (depth < -margin)
     {
         return std::nullopt;
     }
@@ -107,7 +122,12 @@ bool overlaps(const Sphere& a, const Sphere& b)
 
 std::optional<Contact3> contact(const Sphere& a, const Sphere& b)
 {
-    if (!a.is_valid() || !b.is_valid())
+    return contact(a, b, math::Real{0});
+}
+
+std::optional<Contact3> contact(const Sphere& a, const Sphere& b, math::Real margin)
+{
+    if (!a.is_valid() || !b.is_valid() || !valid_margin(margin))
     {
         return std::nullopt;
     }
@@ -120,7 +140,10 @@ std::optional<Contact3> contact(const Sphere& a, const Sphere& b)
     }
 
     const math::Real radius_sum = a.radius + b.radius;
-    if (distance_squared > radius_sum * radius_sum)
+    // `reach` is the sum itself when the margin is 0 (x + 0 == x for the
+    // non-negative sum), so the plain query is unchanged bit for bit.
+    const math::Real reach = radius_sum + margin;
+    if (distance_squared > reach * reach)
     {
         return std::nullopt;
     }
@@ -184,8 +207,13 @@ bool overlaps(const Box3& box, const Plane3& plane)
 
 std::vector<Contact3> contacts(const Box3& box, const Plane3& plane)
 {
+    return contacts(box, plane, math::Real{0});
+}
+
+std::vector<Contact3> contacts(const Box3& box, const Plane3& plane, math::Real margin)
+{
     std::vector<Contact3> result;
-    if (!box.is_valid() || !plane.is_valid())
+    if (!box.is_valid() || !plane.is_valid() || !valid_margin(margin))
     {
         return result;
     }
@@ -194,7 +222,9 @@ std::vector<Contact3> contacts(const Box3& box, const Plane3& plane)
     for (const math::Vec3& corner : corners)
     {
         const math::Real distance = signed_distance(plane, corner);
-        if (distance > math::Real{0})
+        // With margin 0 exactly the touching test; a positive margin also keeps
+        // a corner up to `margin` clear of the plane, at a negative depth.
+        if (distance > margin)
         {
             continue; // this corner is in free space
         }
@@ -326,6 +356,15 @@ constexpr math::Real kParallelEpsSq = 1e-8;
 // is not built, so it is not carried.)
 constexpr math::Real kEdgeTieTolerance = 1e-9;
 
+// The face preference of the speculative box/box manifold (M40): an edge axis
+// must beat a penetrating face by more than this FRACTION of the face's overlap
+// to win, the relative margin ODE, Bullet and Box2D apply against face/edge
+// flicker in resting stacks. Only the speculative query the contact solver
+// uses applies it, and only when the face manifold keeps a point (so no point
+// can lie outside either box, the defect that kept it out of issue #22's fix);
+// the plain queries keep the rounding-level rule above.
+constexpr math::Real kFacePreference = 0.05;
+
 // How far in front of the reference face a clipped point may lie and still be
 // kept (issue #23), as a fraction of the boxes' size. At a bare touch the SAT
 // depth is at rounding level and the clipped incident points sit within about
@@ -394,24 +433,27 @@ struct MinAxis
 // axis of least overlap. Two coincident centres are not special-cased: every
 // gap is zero, no axis separates, and the least-overlap axis is simply the one
 // of least combined projected radius, a fixed and repeatable choice.
-bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out)
+// The SAT sweep itself: the best (least-overlap) FACE axis and the best EDGE
+// axis, kept apart so a caller can weigh one against the other. `margin` (M40)
+// lets a gap of up to that width count as touching: an axis separates only when
+// its overlap is below -margin, and a winning overlap may then be negative (the
+// gap). With margin 0 the test is exactly `overlap < 0`, so `box_box_min_axis`
+// below, and every plain query built on it, is unchanged.
+bool box_box_axes(const Box3& a, const Box3& b, math::Real margin, MinAxis& face,
+                  MinAxis& edge, bool& have_edge)
 {
     const Obb box_a = make_obb(a);
     const Obb box_b = make_obb(b);
     const math::Vec3 t = b.center - a.center;
 
-    // The best face axis and the best edge axis are kept apart, so a tie
-    // between them can go to the face (kEdgeTieTolerance, issue #22).
-    MinAxis face{};
-    MinAxis edge{};
     bool have_face = false;
-    bool have_edge = false;
+    have_edge = false;
     auto test = [&](const math::Vec3& axis, AxisKind kind, int i, int j) -> bool
     {
         const math::Real gap = std::abs(math::dot(t, axis));
         const math::Real overlap =
             projected_radius(box_a, axis) + projected_radius(box_b, axis) - gap;
-        if (overlap < math::Real{0})
+        if (overlap < -margin)
         {
             return false; // a separating axis exists: the boxes are apart
         }
@@ -455,46 +497,46 @@ bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out)
             }
         }
     }
-
-    // A face axis unless an edge axis is better by more than rounding
-    // (kEdgeTieTolerance).
-    out = face;
-    if (have_edge)
-    {
-        const math::Real size =
-            std::fmax(std::fmax(std::fmax(box_a.e[0], box_a.e[1]), box_a.e[2]),
-                      std::fmax(std::fmax(box_b.e[0], box_b.e[1]), box_b.e[2]));
-        if (edge.overlap < face.overlap - kEdgeTieTolerance * size)
-        {
-            out = edge;
-        }
-    }
     return true;
 }
-} // namespace
 
-bool overlaps(const Box3& a, const Box3& b)
+// The larger half-extent of the two boxes, the size every tolerance here scales
+// with.
+math::Real pair_size(const Box3& a, const Box3& b)
 {
-    if (!a.is_valid() || !b.is_valid())
+    return std::fmax(
+        std::fmax(std::fmax(a.half_extents.x, a.half_extents.y), a.half_extents.z),
+        std::fmax(std::fmax(b.half_extents.x, b.half_extents.y), b.half_extents.z));
+}
+
+// The axis of least overlap: a face axis unless an edge axis is better by more
+// than rounding (kEdgeTieTolerance, issue #22).
+bool box_box_min_axis(const Box3& a, const Box3& b, MinAxis& out,
+                      math::Real margin = math::Real{0})
+{
+    MinAxis face{};
+    MinAxis edge{};
+    bool have_edge = false;
+    if (!box_box_axes(a, b, margin, face, edge, have_edge))
     {
         return false;
     }
-    MinAxis axis;
-    return box_box_min_axis(a, b, axis);
+    out = face;
+    if (have_edge && edge.overlap < face.overlap - kEdgeTieTolerance * pair_size(a, b))
+    {
+        out = edge;
+    }
+    return true;
 }
 
-std::optional<Contact3> contact(const Box3& a, const Box3& b)
+// The single representative contact for a SAT axis `m`: an edge axis at the
+// closest approach of the two edges, a face axis at the deepest vertex of the
+// other box, each moved half the depth back to the midpoint. `is_signed` keeps
+// a negative overlap (a speculative gap, M40) instead of clamping it to 0, which
+// is what the plain query does for a bare touch that rounds a hair negative.
+Contact3 box_point_contact(const Box3& a, const Box3& b, const MinAxis& m,
+                           bool is_signed)
 {
-    if (!a.is_valid() || !b.is_valid())
-    {
-        return std::nullopt;
-    }
-    MinAxis m;
-    if (!box_box_min_axis(a, b, m))
-    {
-        return std::nullopt;
-    }
-
     const Obb box_a = make_obb(a);
     const Obb box_b = make_obb(b);
     const math::Vec3 t = b.center - a.center;
@@ -509,8 +551,9 @@ std::optional<Contact3> contact(const Box3& a, const Box3& b)
         n = -n;
     }
     // A bare touch can round to a hair-negative overlap; never report a negative
-    // penetration (docs/04), matching the sphere and box/plane pairs.
-    const math::Real depth = std::max(math::Real{0}, m.overlap);
+    // penetration (docs/04), matching the sphere and box/plane pairs. The
+    // speculative query reports the gap instead.
+    const math::Real depth = is_signed ? m.overlap : std::max(math::Real{0}, m.overlap);
 
     Contact3 result;
     result.normal = n;
@@ -538,6 +581,31 @@ std::optional<Contact3> contact(const Box3& a, const Box3& b)
         result.point = support(box_a, n) - n * (depth / math::Real{2});
     }
     return result;
+}
+} // namespace
+
+bool overlaps(const Box3& a, const Box3& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return false;
+    }
+    MinAxis axis;
+    return box_box_min_axis(a, b, axis);
+}
+
+std::optional<Contact3> contact(const Box3& a, const Box3& b)
+{
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return std::nullopt;
+    }
+    MinAxis m;
+    if (!box_box_min_axis(a, b, m))
+    {
+        return std::nullopt;
+    }
+    return box_point_contact(a, b, m, false);
 }
 
 namespace
@@ -582,7 +650,12 @@ bool overlaps(const Sphere& sphere, const Box3& box)
 
 std::optional<Contact3> contact(const Box3& box, const Sphere& sphere)
 {
-    if (!box.is_valid() || !sphere.is_valid())
+    return contact(box, sphere, math::Real{0});
+}
+
+std::optional<Contact3> contact(const Box3& box, const Sphere& sphere, math::Real margin)
+{
+    if (!box.is_valid() || !sphere.is_valid() || !valid_margin(margin))
     {
         return std::nullopt;
     }
@@ -615,8 +688,10 @@ std::optional<Contact3> contact(const Box3& box, const Sphere& sphere)
         const math::Vec3 nearest = closest_point_on_obb(o, sphere.center);
         const math::Vec3 delta = sphere.center - nearest;
         const math::Real distance_squared = math::dot(delta, delta);
-        if (!math::is_finite(distance_squared) ||
-            distance_squared > sphere.radius * sphere.radius)
+        // `reach` is the radius itself when the margin is 0, so the plain query
+        // is unchanged; a positive margin keeps a sphere up to `margin` clear.
+        const math::Real reach = sphere.radius + margin;
+        if (!math::is_finite(distance_squared) || distance_squared > reach * reach)
         {
             return std::nullopt; // clear of the box, or too far to be finite
         }
@@ -720,26 +795,18 @@ std::vector<math::Vec3> clip_polygon(const std::vector<math::Vec3>& poly,
 }
 } // namespace
 
-std::vector<Contact3> contacts(const Box3& a, const Box3& b)
+namespace
 {
-    std::vector<Contact3> result;
-    if (!a.is_valid() || !b.is_valid())
-    {
-        return result;
-    }
-    MinAxis m;
-    if (!box_box_min_axis(a, b, m))
-    {
-        return result;
-    }
-    if (m.kind == Edge)
-    {
-        // Two crossing edges touch at a single point, which contact() already
-        // places at their closest approach.
-        result.push_back(*contact(a, b));
-        return result;
-    }
-
+// The face-clipped contact manifold for a FACE axis `m` (FaceA or FaceB),
+// appended to `out`. The reference box owns that face; the face of the other
+// box that points most against it is clipped to the reference face's four side
+// planes and kept where it lies behind the face, or within `keep` in front of
+// it. Every kept point lies on the incident box's surface and inside the
+// reference box's side slabs, so it is a genuine point of the touch whatever
+// axis won. Returns whether any point was kept.
+bool box_face_manifold(const Box3& a, const Box3& b, const MinAxis& m, math::Real keep,
+                       bool is_signed, std::vector<Contact3>& out)
+{
     const math::Vec3 t = b.center - a.center;
     math::Vec3 n = m.axis; // oriented from a toward b, exactly as contact() does
     if (math::dot(n, t) < math::Real{0})
@@ -788,28 +855,103 @@ std::vector<Contact3> contacts(const Box3& a, const Box3& b)
     const math::Real tolerance = kTouchTolerance * size;
     drop_redundant_vertices(poly, tolerance);
 
-    // Keep what lies inside the reference box (behind its face), or within a
-    // rounding-level tolerance in front of it (kTouchTolerance, issue #23).
+    // Keep what lies inside the reference box (behind its face), or within
+    // `keep` in front of it: a rounding-level tolerance for the plain query
+    // (kTouchTolerance, issue #23), the speculative margin for M40's.
+    bool any = false;
     for (const math::Vec3& v : poly)
     {
         const math::Real separation = math::dot(face_normal, v) - face_offset;
-        if (separation > tolerance)
+        if (separation > keep)
         {
             continue; // in front of the reference face: not touching
         }
         Contact3 hit;
         hit.normal = n;
-        hit.penetration = std::fmax(math::Real{0}, -separation);
+        hit.penetration = is_signed ? -separation : std::fmax(math::Real{0}, -separation);
         hit.point = v + face_normal * (-separation / math::Real{2});
-        result.push_back(hit);
+        out.push_back(hit);
+        any = true;
     }
-    if (result.empty())
+    return any;
+}
+} // namespace
+
+std::vector<Contact3> contacts(const Box3& a, const Box3& b)
+{
+    std::vector<Contact3> result;
+    if (!a.is_valid() || !b.is_valid())
+    {
+        return result;
+    }
+    MinAxis m;
+    if (!box_box_min_axis(a, b, m))
+    {
+        return result;
+    }
+    if (m.kind == Edge)
+    {
+        // Two crossing edges touch at a single point, which contact() already
+        // places at their closest approach.
+        result.push_back(box_point_contact(a, b, m, false));
+        return result;
+    }
+    if (!box_face_manifold(a, b, m, kTouchTolerance * pair_size(a, b), false, result))
     {
         // A bare touch can round every clipped point a hair outside while the
         // SAT still reports overlap; keep the single-point contact rather than
         // reporting nothing, so the manifold agrees with overlaps().
-        result.push_back(*contact(a, b));
+        result.push_back(box_point_contact(a, b, m, false));
     }
+    return result;
+}
+
+std::vector<Contact3> contacts(const Box3& a, const Box3& b, math::Real margin)
+{
+    std::vector<Contact3> result;
+    if (!a.is_valid() || !b.is_valid() || !valid_margin(margin))
+    {
+        return result;
+    }
+    MinAxis face{};
+    MinAxis edge{};
+    bool have_edge = false;
+    if (!box_box_axes(a, b, margin, face, edge, have_edge))
+    {
+        return result;
+    }
+    const math::Real size = pair_size(a, b);
+    const math::Real keep = std::fmax(kTouchTolerance * size, margin);
+
+    // The plain rule: an edge wins when it beats the best face by more than
+    // rounding (issue #22).
+    const bool edge_wins =
+        have_edge && edge.overlap < face.overlap - kEdgeTieTolerance * size;
+    // The resting-contact rule (M40, kFacePreference): an edge that beats a
+    // PENETRATING face by less than that fraction of the face's overlap does not
+    // win, provided the face manifold actually keeps a point. A stack of boxes
+    // twisted about their shared normal sits within rounding of such a tie, and
+    // letting the edge win collapses the face to one point the solver cannot
+    // stand a box on. The face manifold's points lie on the incident box and
+    // inside the reference box's slabs (see box_face_manifold), so preferring it
+    // never puts a point outside either box; an empty face manifold falls back
+    // to the edge.
+    const bool prefer_face = edge_wins && face.overlap > math::Real{0} &&
+                             edge.overlap >= (math::Real{1} - kFacePreference) * face.overlap -
+                                                 kEdgeTieTolerance * size;
+    if (edge_wins && !prefer_face)
+    {
+        result.push_back(box_point_contact(a, b, edge, true));
+        return result;
+    }
+    if (box_face_manifold(a, b, face, keep, true, result))
+    {
+        return result;
+    }
+    // Nothing survived clipping: the edge contact if the face was only
+    // preferred, else the face's single point, so the manifold is never empty
+    // while the boxes are within the margin.
+    result.push_back(box_point_contact(a, b, prefer_face ? edge : face, true));
     return result;
 }
 } // namespace malloy::collide

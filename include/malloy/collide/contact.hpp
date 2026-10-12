@@ -13,7 +13,9 @@ namespace malloy::collide
 // Conventions, which every query below obeys:
 //
 //   normal       unit vector pointing from `a` toward `b`.
-//   penetration  how deeply they overlap along `normal`; never negative.
+//   penetration  how deeply they overlap along `normal`; never negative,
+//                except from the speculative queries at the end of this
+//                file (M40), where a negative value is the gap.
 //                Moving `b` by `+normal * penetration`, or `a` by
 //                `-normal * penetration`, separates them exactly.
 //   point        a representative point in the overlap region, midway between
@@ -115,4 +117,29 @@ std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane);
 // single-point contact), so `!contacts(a, b).empty()` agrees with
 // `overlaps(a, b)`. Empty when apart or either box is invalid; never throws.
 std::vector<Contact> contacts(const Obb2& a, const Obb2& b);
+
+// --- Speculative queries (M40) ---
+//
+// The same four contact queries the rigid world resolves, with a `margin`: a
+// pair is reported while it is separated by up to `margin`, not only once it
+// touches. The iterative contact solver uses this to keep a resting contact
+// alive across rounding (a corner that drifts 1e-17 clear of the floor would
+// otherwise drop out and fall for a step) and to stop an approach exactly at
+// the surface. Each entry follows the conventions above with one difference:
+//
+//   penetration  SIGNED. Negative means the shapes are apart by -penetration
+//                (a gap of at most `margin`); the point is still midway
+//                between the two surfaces, so it lies in the gap.
+//
+// With `margin == 0` the circle and box/halfplane queries return exactly what
+// the plain queries return (those delegate here). The box/box manifold differs
+// only in sign: a point kept within rounding in front of the reference face
+// reports its tiny negative depth instead of 0, and the single-point fallback
+// is not clamped either. A margin that is negative or not finite is refused
+// like an invalid shape: no contact. Never throws.
+std::optional<Contact> contact(const Circle& circle, const Halfplane& plane,
+                               math::Real margin);
+std::optional<Contact> contact(const Circle& a, const Circle& b, math::Real margin);
+std::vector<Contact> contacts(const Obb2& box, const Halfplane& plane, math::Real margin);
+std::vector<Contact> contacts(const Obb2& a, const Obb2& b, math::Real margin);
 } // namespace malloy::collide
