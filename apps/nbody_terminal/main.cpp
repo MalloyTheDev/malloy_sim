@@ -5,6 +5,7 @@
 #include <malloy/particles/particles.hpp>
 #include <malloy/rigid/rigid.hpp>
 #include <malloy/springs/springs.hpp>
+#include <malloy/scenario/run.hpp>
 #include <malloy/scenario/scenario.hpp>
 #include <malloy/sim_core/sim_core.hpp>
 
@@ -12,75 +13,44 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
-#include <optional>
-#include <utility>
 #include <vector>
 
 // The terminal app (M5, M8): runs a scenario of any of the ten `type`s and
 // reports that domain's diagnostics together with an ASCII view of the body
 // positions (a 3D run is drawn as its projection onto the xy plane). The
 // scenario is loaded from a file given as the single argument, or, with no
-// argument, the built-in N-body scenarios run. The app stays dumb -- it owns no physics, no rendering
-// math, and has no CLI parser (docs/03, rules 14-15).
+// argument, the built-in N-body scenarios run. The app stays dumb: it owns no
+// physics, no rendering math, and has no CLI parser (docs/03, rules 14-15).
+//
+// Since M41 it builds each world, reads each world's diagnostics and formats
+// each report line through the run layer (malloy/scenario/run.hpp), which the
+// 3D viewer shares, so nothing a second front end needs lives only here. What
+// stays is the terminal's own part: the run headers, the ASCII view and its
+// framing, and the loop that steps to the end.
 
 using malloy::ascii::fit_viewport;
 using malloy::ascii::render;
 using malloy::ascii::Viewport;
-using malloy::math::distance;
+using malloy::charges::Charge3DWorld;
+using malloy::charges::ChargeWorld;
 using malloy::math::Real;
 using malloy::math::Vec2;
 using malloy::nbody::Body2D;
 using malloy::nbody::NBodySettings;
-using malloy::charges::Charge3DSettings;
-using malloy::charges::Charge3DWorld;
-using malloy::charges::ChargedParticle2D;
-using malloy::charges::ChargedParticle3D;
-using malloy::charges::ChargeSettings;
-using malloy::charges::ChargeWorld;
 using malloy::nbody::NBodyWorld;
-using malloy::nbody::total_angular_momentum;
-using malloy::particles::Particle2D;
-using malloy::rigid::RigidBody2D;
-using malloy::rigid::RigidSettings;
-using malloy::rigid::RigidWorld;
-using malloy::springs::SpringBody2D;
-using malloy::springs::SpringBody3D;
-using malloy::springs::SpringNetwork;
-using malloy::springs::SpringWorld;
-using malloy::springs::SpringWorld3D;
-using malloy::nbody::total_energy;
-using malloy::particles::total_energy;
-using malloy::particles::total_momentum;
-using malloy::particles::Particle3D;
 using malloy::particles::ParticleSettings;
 using malloy::particles::ParticleSettings3D;
 using malloy::particles::ParticleWorld;
 using malloy::particles::ParticleWorld3D;
+using malloy::rigid::RigidBody2D;
+using malloy::rigid::RigidWorld;
 using malloy::scenario::parse_scenario_file;
-using malloy::scenario::ScenarioType;
-
-namespace
-{
-// Three domains each define total_momentum / total_kinetic_energy in their
-// own namespace. Aliasing here keeps the runners readable without pulling
-// three same-named overload sets into one scope.
-constexpr auto& rigid_linear_momentum = malloy::rigid::total_linear_momentum;
-constexpr auto& rigid_angular_momentum = malloy::rigid::total_angular_momentum;
-constexpr auto& rigid_total_energy = malloy::rigid::total_energy;
-constexpr auto& charge_momentum = malloy::charges::total_momentum;
-constexpr auto& charge_total_energy = malloy::charges::total_energy;
-constexpr auto& charge_total_energy3d = malloy::charges::total_energy3d;
-constexpr auto& spring_momentum = malloy::springs::total_momentum;
-constexpr auto& spring_kinetic_energy = malloy::springs::total_kinetic_energy;
-constexpr auto& spring_elastic_energy = malloy::springs::total_elastic_energy;
-constexpr auto& spring_kinetic_energy3d = malloy::springs::total_kinetic_energy3d;
-constexpr auto& spring_elastic_energy3d = malloy::springs::total_elastic_energy3d;
-constexpr auto& particle_total_energy3d = malloy::particles::total_energy3d;
-constexpr auto& particle_momentum3d = malloy::particles::total_momentum3d;
-} // namespace
 using malloy::scenario::ScenarioParseResult;
+using malloy::scenario::ScenarioType;
 using malloy::sim_core::SimulationSettings;
 using malloy::sim_core::StepStatus;
+using malloy::springs::SpringWorld;
+using malloy::springs::SpringWorld3D;
 
 namespace
 {
@@ -132,6 +102,17 @@ void print_view(Viewport& view, const std::vector<Vec2>& points)
               << view.max_y << "]\n";
 }
 
+// Prints one report: the shared report line for the world's current state,
+// then the ASCII view of it.
+template <typename World, typename Points>
+void print_report(std::int64_t step_index, const World& world, Viewport& view,
+                  const Points& points_of)
+{
+    std::cout << malloy::scenario::report_line(step_index, malloy::scenario::readout(world))
+              << '\n';
+    print_view(view, points_of(world));
+}
+
 // Drives one world to completion, reporting every output_every steps. Returns 0
 // on success, 1 on step failure.
 //
@@ -167,165 +148,58 @@ int drive(const char* title, World& world, const Report& report, int steps,
     return 0;
 }
 
-// The |v| column of the charge runners: the first particle's speed, or a dash
-// for a world with no particles. Reading front() of an empty list was undefined
-// behaviour, and crashed the app on an empty charges scenario (issue #24).
-template <typename Particles>
-void print_first_speed(const Particles& particles)
+// Validates the world, then drives it to completion with the shared report line
+// and this app's ASCII view. Returns 1 on an invalid configuration or a failed
+// step.
+template <typename World, typename Points>
+int validate_and_drive(const char* title, World& world, const Points& points_of,
+                       int steps, int output_every)
 {
-    if (particles.empty())
-    {
-        std::cout << std::setw(16) << "-";
-    }
-    else
-    {
-        std::cout << std::setw(16) << malloy::math::length(particles.front().velocity);
-    }
-}
-
-// The wall-pressure column (M38). Before any time has passed no impulse has been
-// measured, so there is no pressure to print, rather than a 0.
-void print_pressure(const std::optional<malloy::math::Real>& pressure)
-{
-    if (pressure)
-    {
-        std::cout << std::setw(16) << *pressure;
-    }
-    else
-    {
-        std::cout << std::setw(16) << "-";
-    }
-}
-
-// One wall's heat column (M39): the heat a THERMAL wall has delivered to the
-// gas, labelled with the wall. A specular wall's heat is 0 by definition and
-// prints nothing, so a box without a thermal wall prints exactly what it did
-// before.
-void print_heat(const char* wall, malloy::math::Real temperature, malloy::math::Real heat)
-{
-    if (temperature > malloy::math::Real{0})
-    {
-        std::cout << "   Q " << wall << std::setw(16) << heat;
-    }
-}
-
-// Runs one particle scenario to completion, reporting the conserved quantities
-// this domain actually has. Deliberately a separate function from
-// run_scenario: ParticleWorld and NBodyWorld share no base class, and ADR 0006
-// says a dispatch switch is the whole mechanism.
-int run_particles(const char* title, const SimulationSettings& sim,
-                  const ParticleSettings& settings, std::vector<Particle2D> particles,
-                  int steps, int output_every)
-{
-    ParticleWorld world{sim, settings, std::move(particles)};
-
-    const auto& walls = settings.wall_temperature;
-    const bool thermal = walls.min_x > 0.0 || walls.max_x > 0.0 || walls.min_y > 0.0 ||
-                         walls.max_y > 0.0;
-    std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
-              << "  dt=" << sim.dt << "  steps=" << steps
-              << "  restitution=" << settings.restitution;
-    if (thermal)
-    {
-        std::cout << "  seed=" << settings.seed; // a thermal run depends on it
-    }
-    std::cout << '\n';
-
     if (world.validate() != StepStatus::Ok)
     {
         std::cerr << title << ": invalid configuration\n";
         return 1;
     }
 
-    Viewport view = fit_viewport(positions_of(world.particles()));
+    // One view for the whole run, seeded from the initial state and grown as
+    // needed, so successive frames share a scale and can be compared.
+    Viewport view = fit_viewport(points_of(world));
 
-    const auto report = [&world, &view, &settings, &walls](std::int64_t step_index) {
-        const auto& now = world.particles();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        std::cout << "   E " << std::setw(16) << total_energy(now, settings.gravity)
-                  << "   p " << std::setw(16) << total_momentum(now).x << std::setw(16)
-                  << total_momentum(now).y << "   T " << std::setw(16)
-                  << malloy::particles::temperature(now) << "   P ";
-        print_pressure(malloy::particles::pressure(world.wall_impulse(), settings.bounds,
-                                                   world.elapsed_time()));
-        const auto& heat = world.wall_heat();
-        print_heat("min_x", walls.min_x, heat.min_x);
-        print_heat("max_x", walls.max_x, heat.max_x);
-        print_heat("min_y", walls.min_y, heat.min_y);
-        print_heat("max_y", walls.max_y, heat.max_y);
-        std::cout << '\n';
-        std::cout << std::fixed;
-        print_view(view, positions_of(now));
+    const auto report = [&world, &view, &points_of](std::int64_t step_index) {
+        print_report(step_index, world, view, points_of);
     };
 
     return drive(title, world, report, steps, output_every);
 }
 
-// The orthographic flattening for 3D particles: plot (x, y), drop z, the same
-// honest limit as the other 3D runners until rendering has its own milestone.
-std::vector<Vec2> projected(const std::vector<malloy::particles::Particle3D>& particles)
+// The orthographic flattening of 3D positions onto the xy plane for the debug
+// view: plot (x, y), drop z.
+//
+// An orthographic projection along z, and nothing cleverer. malloy_ascii plots
+// points that are already in the view plane, and drawing a 3D scene properly is
+// a different problem rather than a wider one (ADR 0009); the 3D viewer
+// (malloy_viewer, M41) draws these worlds properly, and this flattening is only
+// the terminal base's view.
+//
+// The consequence is worth knowing while reading a frame: motion along z is
+// invisible here, so an orbit tilted out of the xy plane looks like an ellipse
+// rather than a circle, two bodies at different depths can overlap, and a body
+// tumbling in place does not move on screen at all (the view plots CENTRES; the
+// rotation is in the diagnostics columns). A helical charge orbit reads as a
+// circle from this angle.
+//
+// One template over "has a 3D position", for the five 3D body types, which
+// share that field name and nothing else.
+template <typename Body>
+std::vector<Vec2> projected(const std::vector<Body>& bodies)
 {
     std::vector<Vec2> points;
-    points.reserve(particles.size());
-    for (const auto& p : particles)
+    points.reserve(bodies.size());
+    for (const Body& body : bodies)
     {
-        points.push_back(Vec2{p.position.x, p.position.y});
+        points.push_back(Vec2{body.position.x, body.position.y});
     }
     return points;
-}
-
-// Runs one 3D colliding-particle scenario. A tenth concrete runner and the
-// tenth branch of the dispatch switch: ADR 0006 once more, still no base class.
-int run_particles3d(const char* title, const SimulationSettings& sim,
-                    const ParticleSettings3D& settings,
-                    std::vector<Particle3D> particles, int steps, int output_every)
-{
-    ParticleWorld3D world{sim, settings, std::move(particles)};
-
-    const auto& walls = settings.wall_temperature;
-    const bool thermal = walls.min_x > 0.0 || walls.max_x > 0.0 || walls.min_y > 0.0 ||
-                         walls.max_y > 0.0 || walls.min_z > 0.0 || walls.max_z > 0.0;
-    std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
-              << "  dt=" << sim.dt << "  steps=" << steps
-              << "  restitution=" << settings.restitution << "  (3D)";
-    if (thermal)
-    {
-        std::cout << "  seed=" << settings.seed; // a thermal run depends on it
-    }
-    std::cout << '\n';
-
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(projected(world.particles()));
-
-    const auto report = [&world, &view, &settings, &walls](std::int64_t step_index) {
-        const auto& now = world.particles();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        std::cout << "   E " << std::setw(16) << particle_total_energy3d(now, settings.gravity)
-                  << "   |p| " << std::setw(16)
-                  << malloy::math::length(particle_momentum3d(now)) << "   T "
-                  << std::setw(16) << malloy::particles::temperature3d(now) << "   P ";
-        print_pressure(malloy::particles::pressure3d(world.wall_impulse(), settings.bounds,
-                                                     world.elapsed_time()));
-        const auto& heat = world.wall_heat();
-        print_heat("min_x", walls.min_x, heat.min_x);
-        print_heat("max_x", walls.max_x, heat.max_x);
-        print_heat("min_y", walls.min_y, heat.min_y);
-        print_heat("max_y", walls.max_y, heat.max_y);
-        print_heat("min_z", walls.min_z, heat.min_z);
-        print_heat("max_z", walls.max_z, heat.max_z);
-        std::cout << '\n';
-        std::cout << std::fixed;
-        print_view(view, projected(now));
-    };
-
-    return drive(title, world, report, steps, output_every);
 }
 
 // The points the ASCII view shows for a rigid body: its centre of mass and its
@@ -344,401 +218,154 @@ std::vector<Vec2> rigid_points(const std::vector<RigidBody2D>& bodies)
     return points;
 }
 
+// Runs one particle scenario to completion. Deliberately a separate function
+// from run_scenario: ParticleWorld and NBodyWorld share no base class, and
+// ADR 0006 says a dispatch switch is the whole mechanism.
+int run_particles(const char* title, ParticleWorld world, int steps, int output_every)
+{
+    const ParticleSettings& settings = world.particle_settings();
+    std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps
+              << "  restitution=" << settings.restitution;
+    if (malloy::scenario::has_thermal_wall(settings))
+    {
+        std::cout << "  seed=" << settings.seed; // a thermal run depends on it
+    }
+    std::cout << '\n';
+
+    const auto points = [](const ParticleWorld& w) { return positions_of(w.particles()); };
+    return validate_and_drive(title, world, points, steps, output_every);
+}
+
+// Runs one 3D colliding-particle scenario. A tenth concrete runner and the
+// tenth branch of the dispatch switch: ADR 0006 once more, still no base class.
+int run_particles3d(const char* title, ParticleWorld3D world, int steps,
+                    int output_every)
+{
+    const ParticleSettings3D& settings = world.particle_settings();
+    std::cout << "\n== " << title << " ==  particles=" << world.particles().size()
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps
+              << "  restitution=" << settings.restitution << "  (3D)";
+    if (malloy::scenario::has_thermal_wall(settings))
+    {
+        std::cout << "  seed=" << settings.seed; // a thermal run depends on it
+    }
+    std::cout << '\n';
+
+    const auto points = [](const ParticleWorld3D& w) { return projected(w.particles()); };
+    return validate_and_drive(title, world, points, steps, output_every);
+}
+
 // Runs one rigid-body scenario. A third concrete runner: RigidWorld shares no
 // base class with the other two, and the dispatch switch is the whole
 // mechanism (ADR 0006).
-int run_rigid(const char* title, const SimulationSettings& sim,
-              std::vector<RigidBody2D> bodies, RigidSettings settings, int steps,
-              int output_every)
+int run_rigid(const char* title, RigidWorld world, int steps, int output_every)
 {
-    RigidWorld world{sim, std::move(bodies), settings};
-
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
-              << "  dt=" << sim.dt << "  steps=" << steps << '\n';
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(rigid_points(world.bodies()));
-
-    const auto report = [&world, &view, &settings](std::int64_t step_index) {
-        const auto& now = world.bodies();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        std::cout << "   E " << std::setw(16) << rigid_total_energy(now, settings.gravity)
-                  << "   L " << std::setw(16) << rigid_angular_momentum(now)
-                  << "   p " << std::setw(16) << rigid_linear_momentum(now).x
-                  << std::setw(16) << rigid_linear_momentum(now).y << '\n';
-        std::cout << std::fixed;
-        print_view(view, rigid_points(now));
-    };
-
-    return drive(title, world, report, steps, output_every);
-}
-
-// Flattens 3D positions onto the xy plane for the debug view.
-//
-// An orthographic projection along z, and nothing cleverer. malloy_ascii plots
-// points that are already in the view plane, and drawing a 3D scene properly is
-// a different problem rather than a wider one (ADR 0009). A camera belongs to
-// the 3D rendering milestone (issue #80, rule 2), which will show these worlds
-// properly; this flattening is only the terminal base's view until then.
-//
-// The consequence is worth knowing while reading a frame: motion along z is
-// invisible here, so an orbit tilted out of the xy plane looks like an ellipse
-// rather than a circle, and two bodies at different depths can overlap.
-std::vector<Vec2> projected(const std::vector<malloy::nbody::Body3D>& bodies)
-{
-    std::vector<Vec2> points;
-    points.reserve(bodies.size());
-    for (const auto& body : bodies)
-    {
-        points.push_back(Vec2{body.position.x, body.position.y});
-    }
-    return points;
+    const auto points = [](const RigidWorld& w) { return rigid_points(w.bodies()); };
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // Runs one 3D N-body scenario. A sixth concrete runner and a sixth branch of
 // the dispatch switch, with no base class: ADR 0006 holds in three dimensions
 // exactly as it does in two.
-int run_nbody3d(const char* title, const SimulationSettings& sim,
-                NBodySettings settings, std::vector<malloy::nbody::Body3D> bodies,
-                int steps, int output_every)
+int run_nbody3d(const char* title, malloy::nbody::NBody3DWorld world, int steps,
+                int output_every)
 {
-    malloy::nbody::NBody3DWorld world{sim, settings, std::move(bodies)};
-
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
-              << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps
+              << "  (3D)" << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(projected(world.bodies()));
-
-    const auto report = [&world, &view, &settings](std::int64_t step_index) {
-        const auto& now = world.bodies();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        // Angular momentum is a vector in three dimensions, and its magnitude
-        // is the single number worth watching: it is exactly conserved, so any
-        // movement in this column is rounding.
-        std::cout << "   E " << std::setw(16)
-                  << malloy::nbody::total_energy(now, settings.g, settings.softening)
-                  << "   |L| " << std::setw(16)
-                  << malloy::math::length(malloy::nbody::total_angular_momentum(now))
-                  << "   |p| " << std::setw(16)
-                  << malloy::math::length(malloy::nbody::total_momentum(now)) << '\n';
-        std::cout << std::fixed;
-        print_view(view, projected(now));
+    const auto points = [](const malloy::nbody::NBody3DWorld& w) {
+        return projected(w.bodies());
     };
-
-    return drive(title, world, report, steps, output_every);
-}
-
-// The same orthographic flattening for rigid bodies. A second overload rather
-// than a template, for the same reason the worlds are separate types: Body3D
-// and RigidBody3D share a field name and nothing else.
-std::vector<Vec2> projected(const std::vector<malloy::rigid::RigidBody3D>& bodies)
-{
-    std::vector<Vec2> points;
-    points.reserve(bodies.size());
-    for (const auto& body : bodies)
-    {
-        points.push_back(Vec2{body.position.x, body.position.y});
-    }
-    return points;
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // Runs one 3D rigid-body scenario. A seventh concrete runner and a seventh
 // branch of the dispatch switch: ADR 0006 again, and still no base class.
-//
-// Worth knowing while reading a frame: the view plots the CENTRES of the
-// bodies, so a body tumbling in place does not move on screen at all. The
-// rotation is in the diagnostics columns, not the picture, which is the honest
-// limit of an ASCII view of a 3D scene until rendering has its own milestone.
-int run_rigid3d(const char* title, const SimulationSettings& sim,
-                std::vector<malloy::rigid::RigidBody3D> bodies,
-                malloy::rigid::Rigid3DSettings settings, int steps,
+int run_rigid3d(const char* title, malloy::rigid::Rigid3DWorld world, int steps,
                 int output_every)
 {
-    malloy::rigid::Rigid3DWorld world{sim, std::move(bodies), settings};
-
     std::cout << "\n\n== " << title << " ==  bodies=" << world.bodies().size()
-              << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps
+              << "  (3D)" << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(projected(world.bodies()));
-
-    const malloy::math::Vec3 gravity = world.settings().gravity;
-    const malloy::math::Vec3 force = world.settings().force;
-    const auto report = [&world, &view, gravity, force](std::int64_t step_index) {
-        const auto& now = world.bodies();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        // E is kinetic plus the potentials of gravity and of the applied force
-        // (M28, issue #47), the quantity conserved in free flight. Semi-implicit
-        // Euler sheds (1/2) m |g + F/m|^2 dt^2 per body per free-flight step,
-        // and a bounce with e<1 removes energy too. |L| is the total angular
-        // momentum, not conserved once gravity, a force or a contact acts.
-        std::cout << "   E " << std::setw(16)
-                  << (malloy::rigid::total_kinetic_energy3d(now) +
-                      malloy::rigid::total_potential_energy3d(now, gravity) +
-                      malloy::rigid::total_force_potential3d(now, force))
-                  << "   |L| " << std::setw(16)
-                  << malloy::math::length(malloy::rigid::total_angular_momentum3d(now))
-                  << "   |p| " << std::setw(16)
-                  << malloy::math::length(malloy::rigid::total_linear_momentum3d(now))
-                  << '\n';
-        std::cout << std::fixed;
-        print_view(view, projected(now));
+    const auto points = [](const malloy::rigid::Rigid3DWorld& w) {
+        return projected(w.bodies());
     };
-
-    return drive(title, world, report, steps, output_every);
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // Runs one charged-particle scenario. A fifth concrete runner, and the fifth
 // branch of the dispatch switch: no base class, exactly as ADR 0006 intends.
-int run_charges(const char* title, const SimulationSettings& sim,
-                ChargeSettings settings, std::vector<ChargedParticle2D> particles,
-                int steps, int output_every)
+int run_charges(const char* title, ChargeWorld world, int steps, int output_every)
 {
-    ChargeWorld world{sim, settings, std::move(particles)};
-
     std::cout << "\n== " << title << " ==  charges=" << world.particles().size()
-              << "  dt=" << sim.dt << "  steps=" << steps << '\n';
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(positions_of(world.particles()));
-
-    const auto report = [&world, &view, &settings](std::int64_t step_index) {
-        const auto& now = world.particles();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        // Speed is reported because it is the quantity a magnetic field must
-        // leave alone: it is the column that shows the rotation is exact.
-        std::cout << "   E " << std::setw(16) << charge_total_energy(now, settings)
-                  << "   |v| ";
-        print_first_speed(now);
-        std::cout << "   p " << std::setw(16) << charge_momentum(now).x << std::setw(16)
-                  << charge_momentum(now).y << '\n';
-        std::cout << std::fixed;
-        print_view(view, positions_of(now));
-    };
-
-    return drive(title, world, report, steps, output_every);
-}
-
-// The same orthographic flattening for 3D charges: plot (x, y) and drop z, the
-// honest limit of an ASCII view of a 3D scene until rendering has its own
-// milestone. A helical orbit reads as a circle from this angle, with the drift
-// along the field carrying it off screen only if the field is not along z.
-std::vector<Vec2> projected(const std::vector<malloy::charges::ChargedParticle3D>& particles)
-{
-    std::vector<Vec2> points;
-    points.reserve(particles.size());
-    for (const auto& particle : particles)
-    {
-        points.push_back(Vec2{particle.position.x, particle.position.y});
-    }
-    return points;
+    const auto points = [](const ChargeWorld& w) { return positions_of(w.particles()); };
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // Runs one 3D charged-particle scenario. An eighth concrete runner and an
 // eighth branch of the dispatch switch: ADR 0006 once more, still no base class.
-int run_charges3d(const char* title, const SimulationSettings& sim,
-                  Charge3DSettings settings,
-                  std::vector<ChargedParticle3D> particles, int steps,
-                  int output_every)
+int run_charges3d(const char* title, Charge3DWorld world, int steps, int output_every)
 {
-    Charge3DWorld world{sim, settings, std::move(particles)};
-
     std::cout << "\n== " << title << " ==  charges=" << world.particles().size()
-              << "  dt=" << sim.dt << "  steps=" << steps << "  (3D)" << '\n';
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps
+              << "  (3D)" << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(projected(world.particles()));
-
-    const auto report = [&world, &view, &settings](std::int64_t step_index) {
-        const auto& now = world.particles();
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        // |v| is the column a magnetic field must leave alone, exactly as in 2D:
-        // the rotation is exact, so speed does not move even as the particle
-        // spirals along the field.
-        std::cout << "   E " << std::setw(16) << charge_total_energy3d(now, settings)
-                  << "   |v| ";
-        print_first_speed(now);
-        std::cout << "   |p| " << std::setw(16)
-                  << malloy::math::length(malloy::charges::total_momentum3d(now)) << '\n';
-        std::cout << std::fixed;
-        print_view(view, projected(now));
-    };
-
-    return drive(title, world, report, steps, output_every);
+    const auto points = [](const Charge3DWorld& w) { return projected(w.particles()); };
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // Runs one spring scenario. A fourth concrete runner: SpringWorld shares no
 // base class with the other three (ADR 0006, ADR 0008).
-int run_springs(const char* title, const SimulationSettings& sim, SpringNetwork network,
-                std::vector<SpringBody2D> bodies, int steps, int output_every)
+int run_springs(const char* title, SpringWorld world, int steps, int output_every)
 {
-    SpringWorld world{sim, std::move(network), std::move(bodies)};
-
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
-              << "  springs=" << world.network().size() << "  dt=" << sim.dt
-              << "  steps=" << steps << '\n';
+              << "  springs=" << world.network().size()
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(positions_of(world.bodies()));
-
-    const auto report = [&world, &view](std::int64_t step_index) {
-        const auto& now = world.bodies();
-        const auto kinetic = spring_kinetic_energy(now);
-        const auto elastic = spring_elastic_energy(world.network(), now);
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        std::cout << "   KE " << std::setw(15) << kinetic << "   PE " << std::setw(15)
-                  << elastic << "   E " << std::setw(15) << kinetic + elastic
-                  << "   p " << std::setw(15) << spring_momentum(now).x << std::setw(15)
-                  << spring_momentum(now).y << '\n';
-        std::cout << std::fixed;
-        print_view(view, positions_of(now));
-    };
-
-    return drive(title, world, report, steps, output_every);
-}
-
-// The orthographic flattening for 3D spring bodies: plot (x, y), drop z, the
-// same honest limit as the other 3D runners until rendering has its milestone.
-std::vector<Vec2> projected(const std::vector<malloy::springs::SpringBody3D>& bodies)
-{
-    std::vector<Vec2> points;
-    points.reserve(bodies.size());
-    for (const auto& body : bodies)
-    {
-        points.push_back(Vec2{body.position.x, body.position.y});
-    }
-    return points;
+    const auto points = [](const SpringWorld& w) { return positions_of(w.bodies()); };
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // Runs one 3D spring scenario. A ninth concrete runner and a ninth branch of
 // the dispatch switch: ADR 0006 once more, still no base class.
-int run_springs3d(const char* title, const SimulationSettings& sim,
-                  SpringNetwork network, std::vector<SpringBody3D> bodies, int steps,
-                  int output_every)
+int run_springs3d(const char* title, SpringWorld3D world, int steps, int output_every)
 {
-    SpringWorld3D world{sim, std::move(network), std::move(bodies)};
-
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
-              << "  springs=" << world.network().size() << "  dt=" << sim.dt
-              << "  steps=" << steps << "  (3D)" << '\n';
+              << "  springs=" << world.network().size()
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps
+              << "  (3D)" << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    Viewport view = fit_viewport(projected(world.bodies()));
-
-    const auto report = [&world, &view](std::int64_t step_index) {
-        const auto& now = world.bodies();
-        const auto kinetic = spring_kinetic_energy3d(now);
-        const auto elastic = spring_elastic_energy3d(world.network(), now);
-        std::cout << "step " << std::setw(6) << step_index;
-        std::cout << std::scientific;
-        std::cout << "   KE " << std::setw(15) << kinetic << "   PE " << std::setw(15)
-                  << elastic << "   E " << std::setw(15) << kinetic + elastic
-                  << "   |p| " << std::setw(15)
-                  << malloy::math::length(malloy::springs::total_momentum3d(now)) << '\n';
-        std::cout << std::fixed;
-        print_view(view, projected(now));
-    };
-
-    return drive(title, world, report, steps, output_every);
+    const auto points = [](const SpringWorld3D& w) { return projected(w.bodies()); };
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
-// Runs one scenario to completion, printing system diagnostics every
+// Runs one N-body scenario to completion, printing system diagnostics every
 // output_every steps. Returns 0 on success, 1 on validation/step failure.
-int run_scenario(const char* title, const SimulationSettings& sim,
-                 const NBodySettings& nbody, std::vector<Body2D> bodies, int steps,
-                 int output_every)
+int run_scenario(const char* title, NBodyWorld world, int steps, int output_every)
 {
-    NBodyWorld world{sim, nbody, std::move(bodies)};
-
     std::cout << "\n== " << title << " ==  bodies=" << world.bodies().size()
-              << "  dt=" << sim.dt << "  steps=" << steps << '\n';
+              << "  dt=" << world.simulation_settings().dt << "  steps=" << steps << '\n';
 
-    if (world.validate() != StepStatus::Ok)
-    {
-        std::cerr << title << ": invalid configuration\n";
-        return 1;
-    }
-
-    // One view for the whole run, seeded from the initial state and grown as
-    // needed, so successive frames share a scale and can be compared.
-    Viewport view = fit_viewport(positions_of(world.bodies()));
-
-    const auto report = [&world, &nbody, &view](std::int64_t step_index) {
-        const auto& bodies_now = world.bodies();
-        std::cout << "step " << std::setw(6) << step_index;
-        if (bodies_now.size() >= 2)
-        {
-            std::cout << "   sep " << std::setw(11)
-                      << distance(bodies_now[0].position, bodies_now[1].position);
-        }
-        // The conserved quantities are the whole point of this output, and for
-        // the normalized two-body demo they are of order 1e-6. Under fixed(8)
-        // every step printed the identical -0.00000050, which would look
-        // perfectly conserved even if it were not. Scientific notation keeps
-        // significant digits at any magnitude; separation stays fixed because
-        // it is order 1 and reads better that way.
-        std::cout << std::scientific;
-        std::cout << "   E_total " << std::setw(16)
-                  << total_energy(bodies_now, nbody.g, nbody.softening)
-                  << "   L_total " << std::setw(16) << total_angular_momentum(bodies_now)
-                  << '\n';
-        std::cout << std::fixed;
-        print_view(view, positions_of(bodies_now));
-    };
-
-    return drive(title, world, report, steps, output_every);
+    const auto points = [](const NBodyWorld& w) { return positions_of(w.bodies()); };
+    return validate_and_drive(title, world, points, steps, output_every);
 }
 
 // The built-in scenarios, run when no scenario file is given.
 int run_builtin_scenarios()
 {
     const int rc = run_scenario(
-        "two-body orbit (normalized units)", SimulationSettings{0.001},
-        NBodySettings{1.0, 0.000001},
-        {Body2D{Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 1.0},
-         Body2D{Vec2{1.0, 0.0}, Vec2{0.0, 1.0}, 0.000001}},
+        "two-body orbit (normalized units)",
+        NBodyWorld{SimulationSettings{0.001}, NBodySettings{1.0, 0.000001},
+                   {Body2D{Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 1.0},
+                    Body2D{Vec2{1.0, 0.0}, Vec2{0.0, 1.0}, 0.000001}}},
         10000, 1000);
     if (rc != 0)
     {
@@ -747,11 +374,13 @@ int run_builtin_scenarios()
 
     const Real omega = 0.75984; // circular angular velocity for the unit triangle
     return run_scenario(
-        "equilateral three-body (Lagrange)", SimulationSettings{0.001},
-        NBodySettings{1.0, 0.001},
-        {Body2D{Vec2{1.0, 0.0}, Vec2{0.0, omega}, 1.0},
-         Body2D{Vec2{-0.5, 0.8660254}, Vec2{-0.8660254 * omega, -0.5 * omega}, 1.0},
-         Body2D{Vec2{-0.5, -0.8660254}, Vec2{0.8660254 * omega, -0.5 * omega}, 1.0}},
+        "equilateral three-body (Lagrange)",
+        NBodyWorld{SimulationSettings{0.001}, NBodySettings{1.0, 0.001},
+                   {Body2D{Vec2{1.0, 0.0}, Vec2{0.0, omega}, 1.0},
+                    Body2D{Vec2{-0.5, 0.8660254},
+                           Vec2{-0.8660254 * omega, -0.5 * omega}, 1.0},
+                    Body2D{Vec2{-0.5, -0.8660254},
+                           Vec2{0.8660254 * omega, -0.5 * omega}, 1.0}}},
         10000, 1000);
 }
 } // namespace
@@ -762,7 +391,8 @@ int main(int argc, char** argv)
     std::cout << std::fixed << std::setprecision(8);
 
     // With a path argument, load and run that scenario file; otherwise run the
-    // built-in scenarios. A single positional path -- no flags, no CLI parser.
+    // built-in scenarios. A single positional path, with no flags and no CLI
+    // parser.
     if (argc >= 2)
     {
         const ScenarioParseResult parsed = parse_scenario_file(argv[1]);
@@ -781,39 +411,40 @@ int main(int argc, char** argv)
         }
         const auto& s = parsed.scenario;
         // The whole multi-domain mechanism: one switch, one concrete runner per
-        // domain, no base class (ADR 0006).
+        // domain, no base class (ADR 0006). Each world is built by the run
+        // layer's function for its type, the one the viewer calls too.
+        namespace run = malloy::scenario;
         switch (s.type)
         {
         case ScenarioType::NBody:
-            return run_scenario(argv[1], s.simulation, s.nbody_settings, s.bodies,
-                                s.steps, s.output_every);
+            return run_scenario(argv[1], run::make_nbody_world(s), s.steps,
+                                s.output_every);
         case ScenarioType::Particles:
-            return run_particles(argv[1], s.simulation, s.particle_settings,
-                                 s.particle_list, s.steps, s.output_every);
+            return run_particles(argv[1], run::make_particle_world(s), s.steps,
+                                 s.output_every);
         case ScenarioType::Rigid:
-            return run_rigid(argv[1], s.simulation, s.rigid_bodies,
-                             s.rigid_settings, s.steps, s.output_every);
+            return run_rigid(argv[1], run::make_rigid_world(s), s.steps, s.output_every);
         case ScenarioType::Springs:
-            return run_springs(argv[1], s.simulation, s.spring_network,
-                               s.spring_bodies, s.steps, s.output_every);
+            return run_springs(argv[1], run::make_spring_world(s), s.steps,
+                               s.output_every);
         case ScenarioType::Charges:
-            return run_charges(argv[1], s.simulation, s.charge_settings,
-                               s.charge_list, s.steps, s.output_every);
+            return run_charges(argv[1], run::make_charge_world(s), s.steps,
+                               s.output_every);
         case ScenarioType::NBody3D:
-            return run_nbody3d(argv[1], s.simulation, s.nbody_settings, s.bodies3d,
-                               s.steps, s.output_every);
+            return run_nbody3d(argv[1], run::make_nbody3d_world(s), s.steps,
+                               s.output_every);
         case ScenarioType::Rigid3D:
-            return run_rigid3d(argv[1], s.simulation, s.rigid_bodies3d,
-                               s.rigid3d_settings, s.steps, s.output_every);
+            return run_rigid3d(argv[1], run::make_rigid3d_world(s), s.steps,
+                               s.output_every);
         case ScenarioType::Charges3D:
-            return run_charges3d(argv[1], s.simulation, s.charge3d_settings,
-                                 s.charge_list3d, s.steps, s.output_every);
+            return run_charges3d(argv[1], run::make_charge3d_world(s), s.steps,
+                                 s.output_every);
         case ScenarioType::Springs3D:
-            return run_springs3d(argv[1], s.simulation, s.spring_network3d,
-                                 s.spring_bodies3d, s.steps, s.output_every);
+            return run_springs3d(argv[1], run::make_spring3d_world(s), s.steps,
+                                 s.output_every);
         case ScenarioType::Particles3D:
-            return run_particles3d(argv[1], s.simulation, s.particle3d_settings,
-                                   s.particle_list3d, s.steps, s.output_every);
+            return run_particles3d(argv[1], run::make_particle3d_world(s), s.steps,
+                                   s.output_every);
         }
         return 1;
     }

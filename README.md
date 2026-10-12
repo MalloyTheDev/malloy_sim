@@ -7,8 +7,9 @@ ready-to-run templates so you can pick a scenario and get correct physics
 immediately. It is meant to be seen: the destination is a simulator rendered
 in 3D, with a GUI, UI and UX on top. It is built simulation-first, because the
 system has to exist and be proven correct before an interface is built over
-it. The terminal app is only the base it is built and verified on: it will not
-be the final product.
+it. Since M41 a real-time 3D viewer draws the 3D scenario types; the terminal
+app remains the base the physics is built and verified on, and the GUI is the
+next step.
 
 It is built as many concrete domain simulations behind a thin shared shell
 rather than as one generic engine
@@ -54,7 +55,7 @@ triangle meshes); and the start of thermodynamics: the kinetic theory of a
 hard-disk gas (its temperature, wall pressure and relaxation to
 Maxwell-Boltzmann) and thermal walls that conduct heat through it, drawing from
 a seeded generator; and a per-point iterative contact solver, so a box comes to
-rest and short stacks stand (milestones M1-M40).
+rest and short stacks stand; and real-time 3D rendering (milestones M1-M41).
 
 ## Locked baseline
 
@@ -64,7 +65,7 @@ rest and short stacks stand (milestones M1-M40).
 - Compiler first: MSVC on Windows
 - Tests: CTest + tiny custom check macros
 - Package manager: none until a milestone needs one
-- Graphics: none until the rendering milestone
+- Graphics: raylib 6.0, fetched pinned by SHA-256, used only by the viewer (M41)
 - Simulation timestep: fixed timestep only
 - Numeric type: `double`, and no fast-math
 - Determinism: the same binary, platform, initial state, fixed timestep, update
@@ -73,7 +74,7 @@ rest and short stacks stand (milestones M1-M40).
 
 ## Status
 
-All milestones M1-M40 are complete. After the locked M1-M5 roadmap came N-body
+All milestones M1-M41 are complete. After the locked M1-M5 roadmap came N-body
 diagnostics, scenario loading and the ASCII view (M6-M8); the classical
 mechanics track (M9-M37), which took in charged particles (M18), a 3D form for
 every domain and collisions between any two 3D primitives (M19-M34), particle
@@ -83,9 +84,9 @@ thermodynamics (M38-M39); and the per-point contact solver for rigid bodies
 
 The project builds clean under MSVC (`/W4 /WX /permissive-`, with Control Flow
 Guard and CET shadow-stack compatibility on every target), and all
-14 test executables pass via CTest, along with sixteen checks that run the
-terminal app itself and require both its exit code and its output (30 CTest
-tests in all). CI runs the Debug and Release builds with every test, and a
+15 test executables pass via CTest, along with sixteen checks that run the
+terminal app and fifteen that run the viewer, each requiring both an exit code
+and its output (46 CTest tests in all). CI runs the Debug and Release builds with every test, and a
 short fuzz run, on every push and pull request to `main`. The terminal app runs any of the ten scenario
 types from a text file, or two built-in N-body scenarios when given no argument,
 and reports each domain's diagnostics alongside an ASCII view of the bodies.
@@ -103,6 +104,8 @@ and reports each domain's diagnostics alongside an ASCII view of the bodies.
 | `malloy_rigid` | STATIC | `RigidBody2D`/`RigidWorld`: mass properties, pose integration, impulses, disc-disc and box-box contacts, disc and box contacts with ground halfplanes, uniform gravity, friction; `RigidBody3D`/`Rigid3DWorld`: rotation free or under a constant torque, a constant applied force, sphere and box contacts with ground planes and with each other, and 3D mass properties from geometry (spheres, boxes, meshes, `combine`); since M40 both worlds solve every contact point with a warm-started, iterative solver (ADR 0011) |
 | `malloy_springs` | STATIC | `Spring`, `SpringNetwork`, deterministic force accumulation, `SpringWorld` and `SpringWorld3D` |
 | `malloy_charges` | STATIC | `ChargedParticle2D`/`ChargeWorld` and `ChargedParticle3D`/`Charge3DWorld`: signed Coulomb pairs, uniform E and B fields (B a scalar out of the plane in 2D, a vector in 3D) |
+| `malloy_view3d` | STATIC | the 3D render model: a world's state as final world-space primitives and triangle meshes, camera fitting and frame pacing; no graphics library |
+| `malloy_viewer` | EXECUTABLE | the real-time 3D viewer (M41): draws the five 3D types with raylib; `--headless` prints the terminal's report lines |
 | `malloy_nbody_terminal` | EXECUTABLE | the terminal app, the development base (not the final product): runs any scenario file, or the built-in N-body demo |
 
 Post-M5 work is intentionally gated -- see `docs/07_POST_M5_ROADMAP.md`.
@@ -279,6 +282,20 @@ run is drawn as its orthographic projection onto the xy plane, so motion along z
 does not show and bodies at different depths can overlap; drawing a 3D scene
 properly waits for the rendering milestone.
 
+### See it in 3D
+
+The presets also build the viewer (the configure step downloads raylib 6.0
+once per build directory and checks its SHA-256). It draws the five 3D types:
+
+```powershell
+.\out\build\windows-msvc-release\Release\malloy_viewer.exe scenarios\box_stack.scn
+```
+
+Space pauses, N steps once, R restarts, `]` and `[` change the speed, the mouse
+orbits, pans and zooms, F refits the view and A toggles auto-fit. A run stops at
+the scenario's `steps` and holds its last frame. 2D scenarios are refused with
+a pointer to the terminal app.
+
 ### Load a scenario from a file
 
 Pass a scenario file as the single argument (the app has no flags):
@@ -376,6 +393,7 @@ being refused, are on the
 | M38 | a hard-disk gas: temperature, wall pressure, relaxation | ✅ Done |
 | M39 | thermal walls: heat flow through a gas, seeded randomness | ✅ Done |
 | M40 | a per-point iterative contact solver: resting boxes and short stacks | ✅ Done |
+| M41 | real-time 3D rendering: the viewer, the run layer and the render model | ✅ Done |
 
 ## What is planned, and what is not
 
@@ -388,15 +406,8 @@ waits for a need, and the third is a set of decisions.
 Intended, not yet built, and never added speculatively
 (`docs/07_POST_M5_ROADMAP.md`):
 
-- **rendering in 3D, then a GUI, UI and UX**: what the simulation is built to
-  be shown through, each its own milestone
-  ([#80](https://github.com/MalloyTheDev/malloy_sim/issues/80), [#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)). Rendering is the remaining piece of
-  the 3D arc; M19 to M34 built the rest:
-  `Vec3`, `Quat` and `Mat3`, a 3D form of every domain, mass properties from
-  geometry, a constant torque and force, and collisions between any two 3D
-  primitives (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
-  Until then the terminal app is the working base, and the M8 debug view
-  stays ASCII text
+- **a GUI, UI and UX** over the M41 viewer and its shared layers
+  ([#81](https://github.com/MalloyTheDev/malloy_sim/issues/81))
 - **quantum**, further out still, and meant to start as a separate repository
   or an isolated prototype
 - box against disc in 2D, immovable 3D bodies, and a broadphase with a

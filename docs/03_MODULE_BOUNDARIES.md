@@ -64,6 +64,16 @@ It also bounds what a file may ask for, because the scenario file is the one unt
 
 Not responsible for semantic validation (that stays in each domain's own `World::validate()`), physics, printing, rendering, or CLI argument handling. Lines beginning `# check` are comments to the parser; only the scenario tests evaluate them (`docs/05`).
 
+Since M41 it also holds the RUN LAYER (`include/malloy/scenario/run.hpp`): a `make_<type>_world(const Scenario&)` per scenario type, a plain readout struct and `readout()` per world, and `report_line()`, the exact line the terminal app prints. Both front ends call it, each with its own switch over the type (ADR 0006, ADR 0012); there is no base class, variant or registry.
+
+## `malloy_view3d`
+
+The 3D render model (M41), the sibling of `malloy_ascii`. Responsible for turning a 3D world's state into final world-space primitives (spheres, oriented boxes with their corners, plane patches, segments, points, arrows) and triangle meshes, fitting a camera to a frame (grow-only, with context such as walls and ground never enlarging the fit), projecting points for tests, and pacing fixed steps against a wall clock. Not responsible for any graphics library, window, input or drawing, and it never changes a world (a lock-step test pins that).
+
+## `malloy_viewer`
+
+The real-time 3D viewer (M41, ADR 0012), an executable and the only target that uses a graphics library (raylib, in `apps/viewer/window.cpp` alone). Draws the five 3D types, refuses 2D ones, stops at the scenario's `steps`, and restarts by rebuilding the world from the parsed scenario. Not responsible for physics, geometry (that is `malloy_view3d`) or world building (the run layer).
+
 ## `malloy_ascii`
 
 Responsible for turning 2D points into a character grid: viewport fitting (`fit_viewport`) and framed grid rendering (`render`).

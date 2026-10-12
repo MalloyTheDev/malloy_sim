@@ -23,6 +23,9 @@ the physics and every physical claim is checkable without a window. The
 terminal app is the base the project is built on; it will not be the final
 product. The decision above stands until the rendering milestone.
 
+Note, 2026-10-12: superseded in part by ADR 0012. Rendering exists since M41,
+in `malloy_viewer` only; terminal-first remains the build order.
+
 ## Rationale
 
 Rendering introduces windowing, input, timing, camera, dependency, and platform questions. MalloySim is simulation-first.

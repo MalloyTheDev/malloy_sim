@@ -2,7 +2,10 @@
 // (issue #30). The parser fuzzer stops at parse_scenario; everything the app
 // does after it, building the declared world, validate(), stepping, and the
 // diagnostics and ASCII view it prints, was exercised by nothing, and the
-// empty-charges crash (issue #24) lived exactly there. This target runs the real
+// empty-charges crash (issue #24) lived exactly there. Since M41 the world, the
+// diagnostics and the report line come from the run layer
+// (malloy/scenario/run.hpp, part of malloy_scenario), which the 3D viewer
+// shares, so this target fuzzes that too. This target runs the real
 // app on every input. Build and run it with the recipe in
 // fuzz/parse_scenario_fuzzer.cpp; it is `malloy_app_fuzzer` there.
 //
@@ -54,6 +57,7 @@
 #include <utility>
 #include <vector>
 
+#include <malloy/scenario/run.hpp>
 #include <malloy/scenario/scenario.hpp>
 
 // The stand-in for parse_scenario_file, declared before main.cpp is read so

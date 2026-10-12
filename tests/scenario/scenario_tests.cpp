@@ -1,3 +1,4 @@
+#include <malloy/scenario/run.hpp>
 #include <malloy/scenario/scenario.hpp>
 
 #include <malloy/charges/charges.hpp>
@@ -3141,6 +3142,314 @@ int main()
             }
         }
 #endif
+    }
+
+    // --- M41: the run layer (malloy/scenario/run.hpp), which the terminal app
+    //     and the 3D viewer share: building each type's world, reading back
+    //     what a front end reports, and the report line itself. ---
+    {
+        namespace run = malloy::scenario;
+        using malloy::math::Vec2;
+        using malloy::math::Vec3;
+
+        // Every make_<type>_world reads its OWN type's fields. Each list has a
+        // different length, so a function that read another type's field, or
+        // the 2D spring network for the 3D world (the one swap the compiler
+        // cannot catch, since both are a SpringNetwork), shows up as a count.
+        {
+            malloy::scenario::Scenario s;
+            s.simulation.dt = 0.0025;
+            s.nbody_settings.g = 2.5;
+            s.bodies.resize(2);
+            s.bodies3d.resize(3);
+            s.particle_settings.restitution = 0.25;
+            s.particle_list.resize(4);
+            s.particle3d_settings.restitution = 0.75;
+            s.particle_list3d.resize(5);
+            s.rigid_settings.friction = 0.3;
+            s.rigid_bodies.resize(6);
+            s.rigid3d_settings.friction = 0.6;
+            s.rigid_bodies3d.resize(7);
+            s.charge_settings.k = 3.5;
+            s.charge_list.resize(8);
+            s.charge3d_settings.k = 4.5;
+            s.charge_list3d.resize(9);
+            s.spring_bodies.resize(10);
+            s.spring_network.add(malloy::springs::Spring{0, 1, 1.0, 1.0, 0.0});
+            s.spring_bodies3d.resize(11);
+            s.spring_network3d.add(malloy::springs::Spring{0, 1, 1.0, 1.0, 0.0});
+            s.spring_network3d.add(malloy::springs::Spring{1, 2, 1.0, 1.0, 0.0});
+
+            const auto nbody = run::make_nbody_world(s);
+            MALLOY_CHECK_EQ(nbody.bodies().size(), std::size_t{2});
+            MALLOY_CHECK_NEAR(nbody.nbody_settings().g, 2.5, 0.0);
+            MALLOY_CHECK_NEAR(nbody.simulation_settings().dt, 0.0025, 0.0);
+            const auto nbody3d = run::make_nbody3d_world(s);
+            MALLOY_CHECK_EQ(nbody3d.bodies().size(), std::size_t{3});
+            MALLOY_CHECK_NEAR(nbody3d.nbody_settings().g, 2.5, 0.0);
+            const auto particles = run::make_particle_world(s);
+            MALLOY_CHECK_EQ(particles.particles().size(), std::size_t{4});
+            MALLOY_CHECK_NEAR(particles.particle_settings().restitution, 0.25, 0.0);
+            const auto particles3d = run::make_particle3d_world(s);
+            MALLOY_CHECK_EQ(particles3d.particles().size(), std::size_t{5});
+            MALLOY_CHECK_NEAR(particles3d.particle_settings().restitution, 0.75, 0.0);
+            const auto rigid = run::make_rigid_world(s);
+            MALLOY_CHECK_EQ(rigid.bodies().size(), std::size_t{6});
+            MALLOY_CHECK_NEAR(rigid.settings().friction, 0.3, 0.0);
+            const auto rigid3d = run::make_rigid3d_world(s);
+            MALLOY_CHECK_EQ(rigid3d.bodies().size(), std::size_t{7});
+            MALLOY_CHECK_NEAR(rigid3d.settings().friction, 0.6, 0.0);
+            const auto charges = run::make_charge_world(s);
+            MALLOY_CHECK_EQ(charges.particles().size(), std::size_t{8});
+            MALLOY_CHECK_NEAR(charges.charge_settings().k, 3.5, 0.0);
+            const auto charges3d = run::make_charge3d_world(s);
+            MALLOY_CHECK_EQ(charges3d.particles().size(), std::size_t{9});
+            MALLOY_CHECK_NEAR(charges3d.charge_settings().k, 4.5, 0.0);
+            const auto springs = run::make_spring_world(s);
+            MALLOY_CHECK_EQ(springs.bodies().size(), std::size_t{10});
+            MALLOY_CHECK_EQ(springs.network().size(), std::size_t{1});
+            const auto springs3d = run::make_spring3d_world(s);
+            MALLOY_CHECK_EQ(springs3d.bodies().size(), std::size_t{11});
+            MALLOY_CHECK_EQ(springs3d.network().size(), std::size_t{2});
+            MALLOY_CHECK_NEAR(springs3d.simulation_settings().dt, 0.0025, 0.0);
+        }
+
+        // A thermal wall is any wall above 0, each one on its own.
+        {
+            malloy::particles::ParticleSettings flat{};
+            MALLOY_CHECK_FALSE(run::has_thermal_wall(flat));
+            for (int wall = 0; wall < 4; ++wall)
+            {
+                malloy::particles::ParticleSettings one{};
+                Real* const t[] = {&one.wall_temperature.min_x, &one.wall_temperature.max_x,
+                                   &one.wall_temperature.min_y, &one.wall_temperature.max_y};
+                *t[wall] = 0.5;
+                MALLOY_CHECK_TRUE(run::has_thermal_wall(one));
+            }
+            malloy::particles::ParticleSettings3D box{};
+            MALLOY_CHECK_FALSE(run::has_thermal_wall(box));
+            for (int wall = 0; wall < 6; ++wall)
+            {
+                malloy::particles::ParticleSettings3D one{};
+                Real* const t[] = {&one.wall_temperature.min_x, &one.wall_temperature.max_x,
+                                   &one.wall_temperature.min_y, &one.wall_temperature.max_y,
+                                   &one.wall_temperature.min_z, &one.wall_temperature.max_z};
+                *t[wall] = 0.5;
+                MALLOY_CHECK_TRUE(run::has_thermal_wall(one));
+            }
+        }
+
+        // A quantity that does not exist is EMPTY, not 0: the separation of a
+        // world with one body, the first speed of a world with no particle.
+        {
+            malloy::scenario::Scenario s;
+            s.bodies = {malloy::nbody::Body2D{Vec2{1.0, 2.0}, Vec2{}, 1.0}};
+            MALLOY_CHECK_FALSE(run::readout(run::make_nbody_world(s)).separation.has_value());
+            s.bodies.push_back(malloy::nbody::Body2D{Vec2{4.0, 6.0}, Vec2{}, 1.0});
+            const auto two = run::readout(run::make_nbody_world(s));
+            MALLOY_CHECK_TRUE(two.separation.has_value());
+            MALLOY_CHECK_NEAR(*two.separation, 5.0, 1e-15);
+
+            MALLOY_CHECK_FALSE(run::readout(run::make_charge_world(s)).first_speed.has_value());
+            MALLOY_CHECK_FALSE(
+                run::readout(run::make_charge3d_world(s)).first_speed.has_value());
+            s.charge_list = {malloy::charges::ChargedParticle2D{Vec2{}, Vec2{3.0, 4.0}, 1.0, 1.0},
+                             malloy::charges::ChargedParticle2D{Vec2{5.0, 0.0}, Vec2{}, 1.0, 1.0}};
+            s.charge_list3d = {
+                malloy::charges::ChargedParticle3D{Vec3{}, Vec3{1.0, 2.0, 2.0}, 1.0, 1.0}};
+            const auto first = run::readout(run::make_charge_world(s)).first_speed;
+            MALLOY_CHECK_TRUE(first.has_value());
+            MALLOY_CHECK_NEAR(*first, 5.0, 1e-15);
+            const auto first3d = run::readout(run::make_charge3d_world(s)).first_speed;
+            MALLOY_CHECK_TRUE(first3d.has_value());
+            MALLOY_CHECK_NEAR(*first3d, 3.0, 1e-15);
+        }
+
+        // The pressure is empty before any time has passed and present after a
+        // step; a wall's heat is present only when that wall is thermal.
+        {
+            std::istringstream in("type particles\nwall_temperature max_x 2\n"
+                                  "particle 1 0.1 0 0 1 0\nparticle 1 0.1 0.5 0.5 0 0\n");
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_TRUE(r.ok);
+            auto world = run::make_particle_world(r.scenario);
+            const auto before = run::readout(world);
+            MALLOY_CHECK_FALSE(before.pressure.has_value());
+            MALLOY_CHECK_TRUE(before.heat.max_x.has_value());
+            MALLOY_CHECK_FALSE(before.heat.min_x.has_value());
+            MALLOY_CHECK_FALSE(before.heat.min_y.has_value());
+            MALLOY_CHECK_FALSE(before.heat.max_y.has_value());
+            MALLOY_CHECK_TRUE(world.step().ok());
+            MALLOY_CHECK_TRUE(run::readout(world).pressure.has_value());
+        }
+        {
+            std::istringstream in("type particles3d\nwall_temperature min_z 2\n"
+                                  "particle3 1 0.1 0 0 0 1 0 0\n"
+                                  "particle3 1 0.1 0.5 0.5 0.5 0 0 0\n");
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_TRUE(r.ok);
+            auto world = run::make_particle3d_world(r.scenario);
+            const auto before = run::readout(world);
+            MALLOY_CHECK_FALSE(before.pressure.has_value());
+            MALLOY_CHECK_TRUE(before.heat.min_z.has_value());
+            MALLOY_CHECK_FALSE(before.heat.max_z.has_value());
+            MALLOY_CHECK_FALSE(before.heat.min_x.has_value());
+            MALLOY_CHECK_TRUE(world.step().ok());
+            MALLOY_CHECK_TRUE(run::readout(world).pressure.has_value());
+        }
+
+        // The rigid3d energy is kinetic plus BOTH potentials (issue #47), with
+        // every term nonzero: kinetic (1/2)(2)(1^2) = 1, gravity -m g.r =
+        // -2 (-9.8)(1) = 19.6, force -F.r = -(1)(2) = -2, so 18.6. Dropping
+        // either potential gives 20.6 or -1, and kinetic alone (the #63 check
+        // quantity) gives 1.
+        {
+            malloy::scenario::Scenario s;
+            s.rigid3d_settings.gravity = Vec3{0.0, 0.0, -9.8};
+            s.rigid3d_settings.force = Vec3{1.0, 0.0, 0.0};
+            malloy::rigid::RigidBody3D body{};
+            body.mass = 2.0;
+            body.position = Vec3{2.0, 0.0, 1.0};
+            body.velocity = Vec3{1.0, 0.0, 0.0};
+            s.rigid_bodies3d = {body};
+            const auto r = run::readout(run::make_rigid3d_world(s));
+            MALLOY_CHECK_NEAR(r.energy, 18.6, 1e-12);
+            MALLOY_CHECK_NEAR(malloy::math::length(r.momentum), 2.0, 1e-15);
+        }
+
+        // The report line of every type, from readouts with exact values, so
+        // the expected text can be written out by hand: each column, its
+        // width, its notation, and the dash or the missing column for an empty
+        // quantity.
+        {
+            run::NBodyReadout nbody{1.0, -0.5, 2.0};
+            MALLOY_CHECK_EQ(run::report_line(0, nbody),
+                            std::string("step      0   sep  1.00000000   E_total  "
+                                        "-5.00000000e-01   L_total   2.00000000e+00"));
+            nbody.separation.reset();
+            MALLOY_CHECK_EQ(run::report_line(1000, nbody),
+                            std::string("step   1000   E_total  -5.00000000e-01   L_total   "
+                                        "2.00000000e+00"));
+            // The step column is a minimum width, never a truncation: the
+            // parser's largest step count still prints whole.
+            MALLOY_CHECK_EQ(run::report_line(100000000, nbody),
+                            std::string("step 100000000   E_total  -5.00000000e-01   "
+                                        "L_total   2.00000000e+00"));
+
+            const run::NBody3DReadout nbody3d{1.0, Vec3{3.0, 4.0, 0.0}, Vec3{0.0, 0.0, -2.0}};
+            MALLOY_CHECK_EQ(run::report_line(5, nbody3d),
+                            std::string("step      5   E   1.00000000e+00   |L|   "
+                                        "5.00000000e+00   |p|   2.00000000e+00"));
+
+            run::ParticleReadout particles{2.0, Vec2{1.0, -1.0}, 0.5, std::nullopt, {}};
+            MALLOY_CHECK_EQ(run::report_line(0, particles),
+                            std::string("step      0   E   2.00000000e+00   p   "
+                                        "1.00000000e+00 -1.00000000e+00   T   "
+                                        "5.00000000e-01   P                -"));
+            particles.pressure = 0.25;
+            particles.heat.max_x = 3.0;
+            particles.heat.min_y = -1.0;
+            MALLOY_CHECK_EQ(run::report_line(400, particles),
+                            std::string("step    400   E   2.00000000e+00   p   "
+                                        "1.00000000e+00 -1.00000000e+00   T   "
+                                        "5.00000000e-01   P   2.50000000e-01   Q max_x  "
+                                        "3.00000000e+00   Q min_y -1.00000000e+00"));
+            particles.heat.min_x = 0.5;
+            particles.heat.max_y = 1.5;
+            const std::string four = run::report_line(400, particles);
+            MALLOY_CHECK_TRUE(four.find("Q min_x  5.00000000e-01   Q max_x  3.00000000e+00   "
+                                        "Q min_y -1.00000000e+00   Q max_y  1.50000000e+00") !=
+                              std::string::npos);
+
+            run::Particle3DReadout particles3d{2.0, Vec3{0.0, 3.0, 4.0}, 1.0, 0.5, {}};
+            particles3d.heat.min_z = 0.125;
+            particles3d.heat.max_z = -0.5;
+            MALLOY_CHECK_EQ(run::report_line(20, particles3d),
+                            std::string("step     20   E   2.00000000e+00   |p|   "
+                                        "5.00000000e+00   T   1.00000000e+00   P   "
+                                        "5.00000000e-01   Q min_z  1.25000000e-01   Q max_z "
+                                        "-5.00000000e-01"));
+            particles3d.pressure.reset();
+            particles3d.heat = {0.25, 0.5, 0.75, 1.0, std::nullopt, std::nullopt};
+            MALLOY_CHECK_EQ(run::report_line(0, particles3d),
+                            std::string("step      0   E   2.00000000e+00   |p|   "
+                                        "5.00000000e+00   T   1.00000000e+00   P"
+                                        "                -   Q min_x  2.50000000e-01   Q "
+                                        "max_x  5.00000000e-01   Q min_y  7.50000000e-01   "
+                                        "Q max_y  1.00000000e+00"));
+
+            const run::RigidReadout rigid{-1.0, 0.5, Vec2{2.0, 0.0}};
+            MALLOY_CHECK_EQ(run::report_line(7, rigid),
+                            std::string("step      7   E  -1.00000000e+00   L   "
+                                        "5.00000000e-01   p   2.00000000e+00  "
+                                        "0.00000000e+00"));
+
+            const run::Rigid3DReadout rigid3d{1.5, Vec3{0.0, 0.0, 2.0}, Vec3{6.0, 8.0, 0.0}};
+            MALLOY_CHECK_EQ(run::report_line(2000, rigid3d),
+                            std::string("step   2000   E   1.50000000e+00   |L|   "
+                                        "2.00000000e+00   |p|   1.00000000e+01"));
+
+            // The springs columns are one narrower, 15.
+            const run::SpringReadout springs{1.0, 2.0, 3.0, Vec2{-1.0, 0.5}};
+            MALLOY_CHECK_EQ(run::report_line(3, springs),
+                            std::string("step      3   KE  1.00000000e+00   PE  "
+                                        "2.00000000e+00   E  3.00000000e+00   p "
+                                        "-1.00000000e+00 5.00000000e-01"));
+            const run::Spring3DReadout springs3d{1.0, 2.0, 3.0, Vec3{0.0, 0.0, -4.0}};
+            MALLOY_CHECK_EQ(run::report_line(0, springs3d),
+                            std::string("step      0   KE  1.00000000e+00   PE  "
+                                        "2.00000000e+00   E  3.00000000e+00   |p|  "
+                                        "4.00000000e+00"));
+
+            run::ChargeReadout charges{0.5, std::nullopt, Vec2{0.0, 0.0}};
+            MALLOY_CHECK_EQ(run::report_line(0, charges),
+                            std::string("step      0   E   5.00000000e-01   |v|"
+                                        "                -   p   0.00000000e+00  "
+                                        "0.00000000e+00"));
+            charges.first_speed = 2.0;
+            MALLOY_CHECK_EQ(run::report_line(0, charges),
+                            std::string("step      0   E   5.00000000e-01   |v|   "
+                                        "2.00000000e+00   p   0.00000000e+00  "
+                                        "0.00000000e+00"));
+            run::Charge3DReadout charges3d{1.0, 1.0, Vec3{1.0, 2.0, 2.0}};
+            MALLOY_CHECK_EQ(run::report_line(9, charges3d),
+                            std::string("step      9   E   1.00000000e+00   |v|   "
+                                        "1.00000000e+00   |p|   3.00000000e+00"));
+            charges3d.first_speed.reset();
+            MALLOY_CHECK_EQ(run::report_line(9, charges3d),
+                            std::string("step      9   E   1.00000000e+00   |v|"
+                                        "                -   |p|   3.00000000e+00"));
+
+            // The line does not depend on the global locale: a locale with a
+            // decimal comma and grouped thousands, installed globally, changes
+            // nothing, because every line is written in the classic locale.
+            struct DecimalComma : std::numpunct<char>
+            {
+                char do_decimal_point() const override { return ','; }
+                char do_thousands_sep() const override { return '.'; }
+                std::string do_grouping() const override { return "\3"; }
+            };
+            const std::string classic = run::report_line(1000, rigid3d);
+            const std::locale previous =
+                std::locale::global(std::locale(std::locale::classic(), new DecimalComma));
+            const std::string under_comma = run::report_line(1000, rigid3d);
+            std::locale::global(previous);
+            MALLOY_CHECK_EQ(under_comma, classic);
+            MALLOY_CHECK_EQ(classic, std::string("step   1000   E   1.50000000e+00   |L|   "
+                                                 "2.00000000e+00   |p|   1.00000000e+01"));
+        }
+
+        // And from a real world: the first line the terminal app prints for
+        // scenarios/two_body.scn, the built-in demo's orbit.
+        {
+            std::istringstream in("g 1.0\nsoftening 0.000001\ndt 0.001\n"
+                                  "body 1.0 0.0 0.0 0.0 0.0\nbody 0.000001 1.0 0.0 0.0 1.0\n");
+            const ScenarioParseResult r = parse_scenario(in);
+            MALLOY_CHECK_TRUE(r.ok);
+            MALLOY_CHECK_EQ(run::report_line(0, run::readout(run::make_nbody_world(r.scenario))),
+                            std::string("step      0   sep  1.00000000   E_total  "
+                                        "-5.00000000e-07   L_total   1.00000000e-06"));
+        }
     }
 
     std::cout << "malloy_scenario_tests passed\n";

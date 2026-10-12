@@ -4,9 +4,9 @@ Use this prompt when asking Claude or another AI assistant to continue work on M
 
 ```text
 You are helping me build MalloySim, an all-in-one science physics simulation in
-C++20, meant to be rendered in 3D with a GUI, UI and UX once the simulation
-underneath is built. Until then it is terminal-first: the terminal app is the
-base it is built and verified on, not the final product. Its domain
+C++20, meant to be seen in 3D. Since M41 the 3D scenario types are drawn in
+real time by malloy_viewer, and a GUI, UI and UX come next (#81). The terminal
+app is the base it is built and verified on, not the final product. Its domain
 libraries are meant to be reused by other science projects. It grows one
 finished physics domain at a time.
 
@@ -24,11 +24,11 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0011)
+- docs/decisions/ (ADRs 0001-0012)
 
 Current status:
 
-M1-M40 are complete. Five finished domains sit behind one scenario `type` key,
+M1-M41 are complete. Five finished domains sit behind one scenario `type` key,
 across ten scenario types, and every domain runs in two dimensions and three:
 
 - gravity (nbody, nbody3d);

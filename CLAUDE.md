@@ -21,11 +21,12 @@ not as one generic engine. That is the central architectural commitment
 (`docs/decisions/0006-multi-domain-dispatch.md`), and it is what makes the
 all-in-one goal compatible with rules 11 to 13 below.
 
-Simulation-first, and terminal-first for now. MalloySim is meant to be SEEN:
-the destination is a simulator rendered in 3D, with a GUI, UI and UX on top.
-The simulation comes first only because the system has to exist, and be proven
-correct, before an interface is built over it. The terminal app is the base
-the project is built and verified on, and it will NOT be the final product.
+Simulation-first. MalloySim is meant to be SEEN: the destination is a
+simulator rendered in 3D, with a GUI, UI and UX on top. The simulation comes
+first only because the system has to exist, and be proven correct, before an
+interface is built over it. Since M41 the 3D scenario types are drawn in real
+time by `malloy_viewer`; the terminal app remains the base the project is built
+and verified on, and neither is the final product (the GUI is #81).
 Depth over breadth: a domain is not finished
 because it runs, it is finished when it validates its input, conserves what it
 should, holds determinism, and ships tested templates.
@@ -62,12 +63,13 @@ milestone.
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
 
-**It is meant to be rendered.** Showing the simulation in 3D is the point of
-the 3D arc, not an optional extra: rendering (issue #80), and then a GUI, UI and
-UX (issue #81), are planned, each its own milestone, built over the finished
-simulation. Until
-then the terminal app and the ASCII view are the working base, not the
-product (ADR 0002).
+**It is rendered.** Showing the simulation in 3D is the point of the 3D arc.
+M41 (issue #80, ADR 0012) added real-time rendering as a separate front end:
+`malloy_viewer` draws the five 3D types with raylib 6.0 (pinned by SHA-256),
+over two pure layers it shares with the terminal app, the run layer
+(`include/malloy/scenario/run.hpp`) and the render model (`malloy_view3d`). The
+GUI, UI and UX (issue #81) are the next front-end milestone, built over the same
+layers.
 
 **Its libraries are foundations.** The domain libraries are meant to be reused
 as the base of other science projects, linked on their own. That is one more
@@ -82,7 +84,7 @@ own milestone, and the 2D types stay supported rather than being replaced.
 ## Current phase
 
 ```text
-M1-M40 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
+M1-M41 complete: math, time, sim_core, N-body, terminal demo, diagnostics,
 scenario loading, ASCII debug view, collision primitives, colliding particles
 with multi-domain scenario dispatch, 2D rigid bodies, ballistics, spring
 networks with deterministic force accumulation, rigid-body contact
@@ -101,7 +103,8 @@ box-against-box collision in two dimensions, a 2D box on a ground plane, the
 kinetic theory of a hard-disk gas (temperature, pressure, relaxation), thermal
 walls with seeded randomness (heat flow through a gas), and a per-point
 iterative contact solver for rigid bodies (boxes come to rest, short stacks
-stand).
+stand), and real-time 3D rendering (a viewer over a shared run layer and a
+pure render model).
 ```
 
 Active track: **classical mechanics depth**, now complete. M9 (collision
@@ -157,7 +160,7 @@ restitution, a rest phase, and a nonlinear Gauss-Seidel position projection. A
 tilted box comes to rest, short stacks stand, static friction holds, and a
 nudged box at restitution 1 no longer gains energy (issues #41, #44, #83).
 
-Do not start any further milestone (M41 or later) unless explicitly asked, and
+Do not start any further milestone (M42 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not
 license building ahead: it is reached one finished domain at a time.
 
@@ -174,11 +177,11 @@ M5: terminal N-body demo               [done]
 ## Rules
 
 1. Do not jump ahead; work one milestone at a time.
-2. Do not add rendering until its dedicated milestone. Terminal-first still holds until then: it is the build order, not the destination (see "Where it is going").
+2. Rendering exists since M41 and lives ONLY in `malloy_viewer` (`apps/viewer`): no library links a graphics library or includes its headers, which `malloy_layering_tests` enforces. The viewer reads world state between fixed steps and never changes it; geometry comes from `malloy_view3d` and world building from the run layer (ADR 0012). The GUI, UI and UX are their own milestone (#81). Terminal-first remains the build ORDER: physics is proven through the terminal app and the tests, without a window, before it is shown.
 3. Do not add ECS (wait for real access-pattern pressure).
 4. Collision geometry landed in M9, non-rotational contact response in M10, rotational (rigid-body) contact response in M14, halfplanes in M16, and Coulomb friction in M17. M22 added the first 3D collision, `collide::Sphere` against `collide::Plane3`, with a normal-impulse response, M23 added Coulomb friction to it (a sphere rolls without slipping at 5/7 of its sliding speed), and M24 added sphere-against-sphere collisions. M30 added `collide::Box3` against a plane (an oriented box's penetrating corners, resolved as one centroid contact), so a box can rest and tumble on the ground, and M33 added box-against-box in 3D by the separating-axis test (`collide::overlaps`/`contact(Box3, Box3)`), and its clipped contact manifold (`collide::contacts(Box3, Box3)`) is resolved as one contact at the manifold's centroid (a bounce, not a stack; a single face-corner contact until the review pass after M37, which invented torque on head-on hits). M34 added box-against-sphere in 3D (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), so every 3D movable pair now collides. M36 added box-against-box in 2D (`collide::Obb2` and its SAT), so 2D body against body is disc-disc or box-box, and M37 added a 2D box against a `Halfplane` ground (the 2D sibling of M30, penetrating corners reduced to one centroid contact), so boxes rest on the floor in both dimensions; box against disc in 2D is still deferred, and since issue #48 a 2D file that mixes a box with a disc that collides is refused at load. M40 replaced every single-contact reduction described above: each rigid world now solves EVERY manifold point with its own per-point iterative solver (ADR 0011), in 2D and 3D, so a box comes to rest and short stacks stand. The collide layer gained margin-aware (speculative) queries for it, and the 3D box-box SAT prefers a face axis over an edge axis within 5 per cent, adopted only with a randomized proof that no contact point leaves either box (the defect that removed an earlier version in issue #22). M35 gave particle contacts Coulomb friction (a tangential impulse clamped to the normal one, in 2D and 3D, for particle/particle and particle/wall), so they are no longer normal-only; a particle has no orientation, so it imparts no spin.
 5. Rigid bodies landed in M11, gained contact response in M14, a uniform gravity field in M15, and Coulomb friction in M17. Friction is a contact impulse clamped to the normal impulse, not a persistent force; since M40 it is accumulated PER POINT and clamped to friction times that point's accumulated normal impulse (in 3D a disc projected in the tangent effective-mass metric). The M40 solver is a per-step list of plain structs local to each world, warm-started from the last step's impulses, which are world state rolled back with the bodies; there is no Constraint type and no solver interface (ADR 0011). Gravity is a setting applied as an acceleration, not a force. M21 added a constant applied TORQUE and M28 a constant applied FORCE, each a single constant SETTING applied as forcing (F/m for the force, Euler forcing for the torque), NOT a force/torque ACCUMULATOR: do not add an accumulator that sums many force producers, or persistent per-body forces, to `malloy_rigid` until their dedicated milestone.
-6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core), M25 (`math::Mat3` and 3D mass properties: a compound body's inertia TENSOR, computed from geometry by the parallel-axis theorem and diagonalized to principal moments), M26 (`SolidBox` mass properties and `combine`, so a compound body is assembled from primitives of any kind, plus `math::to_mat3`), M27 (`SolidMesh` mass properties: the inertia of any closed triangle mesh by signed-tetrahedron volume integrals, plus `math::trace`), M28 (a constant applied FORCE, the translational half of a wrench, as the acceleration F/m, plus `total_force_potential3d`), M29 (charged particles in three dimensions: the full vector Lorentz force and helical motion) and M30 (`collide::Box3` against a plane, so an oriented box rests and tumbles on the ground; the box collider is `RigidBody3D::half_extents`). M31 promoted springs to 3D (`SpringWorld3D` beside `SpringWorld`, reusing the dimension-agnostic `Spring`/`SpringNetwork`), M32 promoted colliding particles to 3D (`ParticleWorld3D`, confined to a `collide::Aabb3`), the last domain to gain a 3D form, and M33 added box-against-box collision by the separating-axis test (its clipped manifold, `collide::contacts(Box3, Box3)`, resolved through the shared impulse core as one contact at the manifold's centroid: a bounce, not a stack), and M34 added box-against-sphere collision (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), the last movable pair in 3D. Mass properties now cover an arbitrary shape, a body can be both pushed (M28 force) and turned (M21 torque), and every 3D movable pair now collides; M40 added the per-point iterative contact solver for resting and stacking (ADR 0011); box against disc (2D), immovable 3D bodies, and rendering are NOT started and each needs its own milestone. (M36 added box-against-box in the 2D rigid domain, `collide::Obb2` and its SAT, mirroring M33; M37 added a 2D box on a `Halfplane` ground, mirroring M30.) The 3D contacts are impulses, gravity is an acceleration, and the force and torque are constant settings applied as forcing (the M10/M15/M17/M21 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` still stores three principal moments rather than a 3x3 matrix, deliberately: M25 to M27 diagonalize the tensor at construction, so the body never has to carry one. Do not add any of it speculatively; the 2D types stay supported.
+6. 3D began in M19 (`math::Vec3`, `nbody::NBody3DWorld`), grew in M20 (`math::Quat`, `rigid::Rigid3DWorld`), M21 (a constant applied TORQUE), M22 (`collide::Sphere`/`Plane3`, gravity and restitution contacts against ground planes), and M23 (Coulomb FRICTION for those contacts, the first 3D contact that imparts spin), M24 (sphere-against-sphere collisions, two movable bodies through one shared impulse core), M25 (`math::Mat3` and 3D mass properties: a compound body's inertia TENSOR, computed from geometry by the parallel-axis theorem and diagonalized to principal moments), M26 (`SolidBox` mass properties and `combine`, so a compound body is assembled from primitives of any kind, plus `math::to_mat3`), M27 (`SolidMesh` mass properties: the inertia of any closed triangle mesh by signed-tetrahedron volume integrals, plus `math::trace`), M28 (a constant applied FORCE, the translational half of a wrench, as the acceleration F/m, plus `total_force_potential3d`), M29 (charged particles in three dimensions: the full vector Lorentz force and helical motion) and M30 (`collide::Box3` against a plane, so an oriented box rests and tumbles on the ground; the box collider is `RigidBody3D::half_extents`). M31 promoted springs to 3D (`SpringWorld3D` beside `SpringWorld`, reusing the dimension-agnostic `Spring`/`SpringNetwork`), M32 promoted colliding particles to 3D (`ParticleWorld3D`, confined to a `collide::Aabb3`), the last domain to gain a 3D form, and M33 added box-against-box collision by the separating-axis test (its clipped manifold, `collide::contacts(Box3, Box3)`, resolved through the shared impulse core as one contact at the manifold's centroid: a bounce, not a stack), and M34 added box-against-sphere collision (`collide::contact(Box3, Sphere)`, the box's nearest point to the sphere centre), the last movable pair in 3D. Mass properties now cover an arbitrary shape, a body can be both pushed (M28 force) and turned (M21 torque), and every 3D movable pair now collides; M40 added the per-point iterative contact solver for resting and stacking (ADR 0011); box against disc (2D), immovable 3D bodies, are NOT started and each needs its own milestone (rendering landed in M41, ADR 0012). (M36 added box-against-box in the 2D rigid domain, `collide::Obb2` and its SAT, mirroring M33; M37 added a 2D box on a `Halfplane` ground, mirroring M30.) The 3D contacts are impulses, gravity is an acceleration, and the force and torque are constant settings applied as forcing (the M10/M15/M17/M21 pattern), NOT force/torque accumulators (rule 5). `RigidBody3D` still stores three principal moments rather than a 3x3 matrix, deliberately: M25 to M27 diagonalize the tensor at construction, so the body never has to carry one. Do not add any of it speculatively; the 2D types stay supported.
 7. Do not add quantum until its dedicated milestone.
 8. Do not add a package manager unless a milestone explicitly needs one.
 9. Do not add Catch2/GoogleTest unless explicitly asked.
@@ -186,7 +189,7 @@ M5: terminal N-body demo               [done]
 11. Do not create speculative abstractions.
 12. Do not create `ISimulation`, `WorldBase`, `Engine`, `Scheduler`, `EventBus`, `ServiceLocator`, or plugin systems. All-in-one is reached with concrete worlds and a dispatch key, never with a base class.
 13. Keep `malloy_sim_core` tiny. Adding a domain must not grow it.
-14. Keep the terminal app dumb. It is the development base, not the final product, so nothing a later GUI would need may live only in it.
+14. Keep both front ends dumb (the terminal app and, since M41, the viewer). World building, readouts and the report line live in the run layer (`malloy_scenario`, `run.hpp`) and every piece of geometry in `malloy_view3d`, so nothing a later GUI would need lives only in an app.
 15. Put reusable physics logic in libraries, not in `main.cpp`.
 16. A domain is not done until it has validation, an invariant checked by tests, malformed-input tests, and at least one scenario template.
 17. `SpringWorld` is a local composition boundary, not the engine-wide force architecture (`docs/decisions/0008-spring-world-is-a-local-composition-boundary.md`). Do not generalise it into a shared force-provider API until several genuinely different force producers exist. If a third domain independently needs the same translational integration path, reassess extracting a shared integrator.
@@ -296,6 +299,10 @@ and one ASCII view frame per report.
 ```text
 MalloySim nbody_terminal
 ```
+
+The viewer (`malloy_viewer <scenario>`, 3D types only) opens a window titled
+with the template's name; `--headless` prints the terminal app's report lines
+instead, which its app checks compare with the terminal app's byte for byte.
 
 ## When helping
 

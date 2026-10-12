@@ -34,8 +34,15 @@ What the build uses, all in force at M39:
 - on MSVC, `/W4 /WX /permissive- /fp:precise` on `malloy_project_warnings`;
 - on GCC and Clang, `-Wall -Wextra -Wpedantic -Werror -ffp-contract=off`
   (warnings are errors there too since issue #66);
-- three options: `MALLOY_BUILD_APPS` and `MALLOY_BUILD_TESTS` (both ON) and
-  `MALLOY_BUILD_FUZZERS` (OFF; see Fuzzing below).
+- four options: `MALLOY_BUILD_APPS` and `MALLOY_BUILD_TESTS` (both ON),
+  `MALLOY_BUILD_FUZZERS` (OFF; see Fuzzing below), and `MALLOY_BUILD_VIEWER`
+  (OFF in `CMakeLists.txt`, ON in both presets; M41). The viewer's configure
+  step fetches raylib 6.0 with `FetchContent`, from its release archive and
+  checked against a pinned SHA-256; it is declared SYSTEM and EXCLUDE_FROM_ALL,
+  so its warnings never reach `/W4 /WX`, and built static, without audio and
+  with Control Flow Guard. `FETCHCONTENT_SOURCE_DIR_RAYLIB` pointed at a
+  verified copy builds offline. The viewer and the fuzzers cannot be on in the
+  same build directory.
 
 Avoid package managers, install/export rules, complex CMake functions, source
 globbing, and dependency fetching until a milestone needs them. Two planned
@@ -52,7 +59,9 @@ ctest --preset windows-msvc-debug
 ```
 
 The same three commands with `windows-msvc-release` give the optimized build.
-CTest runs 30 tests: the 14 test executables, plus sixteen checks that run the
+CTest runs 46 tests: the 15 test executables, fifteen checks that run the
+viewer (refusals, flags, and the headless report lines against the terminal
+app's at three frame rates), plus sixteen checks that run the
 terminal app itself and require both its exit code and its output (four inputs
 it must refuse, one scenario path outside the ANSI code page that it must open,
 one shipped template of every scenario type, and the force template's energy

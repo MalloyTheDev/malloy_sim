@@ -1239,6 +1239,123 @@ All notable changes to MalloySim are recorded here. The format follows
   stated in the header and pinned by the test, which previously asserted only
   that the viewport was finite.
 
+## [M41] - 2026-10-12  (real-time 3D rendering)
+
+### Added
+
+- **`malloy_viewer`, a real-time 3D viewer** (issue #80, ADR 0012). It draws
+  the five 3D scenario types in a window and refuses 2D ones, pointing to the
+  terminal app.
+  - **The run:** it stops at the scenario's `steps` and holds the last frame;
+    R restarts by rebuilding the world from the parsed scenario.
+  - **Controls:** pause, single step, speed, orbit, pan, zoom, refit and
+    auto-fit, plus a one-line HUD.
+  - **Flags:**
+    - `--headless` runs the same loop on a synthetic clock and prints the
+      terminal app's report lines;
+    - `--self-test` draws and checks pixels;
+    - `--frame-time`, `--stop-at`, `--frames` and `--paused`.
+  - **Threading:** one thread. The world is touched only through `step()`,
+    between frames.
+- **raylib 6.0, the project's first third-party dependency.** It is used by the
+  viewer only.
+  - **Source:** fetched with `FetchContent` from its release archive and
+    checked against the SHA-256
+    `2b3ee1e2120c7a0796b33062c7e9a694dd8a8caa56a96319ac8c8ecf54a90d0b`.
+  - **Verification:** that value was checked by hand against the independently
+    published Conan and vcpkg values, and the archive holds the tag's commit
+    `dbc56a87`.
+  - **Isolation:** SYSTEM and EXCLUDE_FROM_ALL, so its warnings never reach
+    `/W4 /WX`.
+  - **Build settings:** static, no audio, Control Flow Guard added.
+  - **The option:** `MALLOY_BUILD_VIEWER` is OFF in `CMakeLists.txt` and ON in
+    the presets. A plain configure, the fuzz build and library consumers fetch
+    nothing.
+- **The run layer** in `malloy_scenario` (`include/malloy/scenario/run.hpp`).
+  It holds, per scenario type:
+  - `make_<type>_world(const Scenario&)`;
+  - a plain readout struct and `readout()`;
+  - `report_line()`, the exact line the terminal app prints.
+
+  Both front ends use it, each with its own switch (ADR 0006): no base class,
+  no variant, no registry. The terminal app now calls it, and its output is
+  byte-identical for every template and edge case.
+- **`malloy_view3d`, the pure 3D render model.** It turns a 3D world's state
+  into final world-space primitives and triangle meshes, fits a camera
+  (grow-only), and paces fixed steps against a wall clock. It has no graphics
+  dependency and is tested by a new `malloy_view3d_tests`, which brings the
+  test executables to 15.
+- **CI:** a Linux job (ubuntu-26.04, clang 21) builds everything, tests
+  included, with `-Werror`. It runs every CTest test, then the viewer's pixel
+  self-test for one template of each 3D type under Xvfb and Mesa. The Windows
+  jobs build the viewer and run its headless checks.
+
+### Changed
+
+- **The layering test.**
+  - Libraries are read from `add_library`. A library may link only `malloy::`
+    targets, and may include only `<malloy/...>` and standard headers.
+  - No library includes a graphics header.
+  - No domain links or includes the run layer or the render model.
+  - Every library sits on a layer and links only lower ones.
+- **The rigid tests** lost two unused lambdas, so clang `-Werror` builds them.
+  The pushed baseline failed that build; CI never compiled the tests with
+  clang.
+
+### Invariants and checks
+
+- **CTest runs 46 tests:** 15 executables, sixteen terminal-app checks, and
+  fifteen viewer checks.
+- **The viewer checks, all without a window:** refusals, flags, pacing, a path
+  outside the ANSI code page, and the headless report lines for one template
+  of each 3D type. Those lines equal the terminal app's byte for byte at 1/20,
+  1/60 and 1/144 s frames.
+- **Wider identity:** all 15 3D templates are identical to the terminal app at
+  five frame times.
+- **`malloy_view3d_tests`:**
+  - exact box corners for a dyadic rotation;
+  - rotation against an independent matrix;
+  - outward counter-clockwise winding and closed meshes;
+  - camera fit tightness to 1e-12 with every subject inside a derived NDC
+    bound;
+  - pacing over arbitrary frame partitions;
+  - every 3D template framed at every step;
+  - a lock-step twin that never builds frames staying bit-identical, which
+    proves building frames never changes a world.
+- **The pixel self-test passes on all 15 3D templates** on a real GPU, with
+  the restart picture identical.
+
+### Mutation testing
+
+- **The render model:** 47 mutations, all caught.
+- **The run layer:** 16 of 16 caught. One equivalent mutant (an addition
+  reordered) is invisible at the printed precision.
+- **The layering test:** 18 of 18 violations refused, against 1 for the old
+  test.
+- **The viewer's app checks:** 11 of 12 caught. The survivor, extra steps
+  absorbed by the absolute-clock pacer, is equivalent.
+- **The pixel self-test:** it catches radians passed for degrees, y up, rows
+  read bottom-up, a mirrored x, an eye not relative to the target, and an
+  inverted aspect. It cannot see a reversed sphere winding (the silhouette is
+  unchanged), which the mesh tests catch.
+
+### Not verified at release
+
+- **The Linux CI job** (raylib with GLFW-X11 under clang 21, the apt list, an
+  OpenGL 3.3 context under Xvfb and Mesa, and the self-test there) runs for
+  the first time on push.
+- **Interactive keyboard and mouse controls** were checked only through their
+  headless equivalents and window snapshots.
+
+### Docs
+
+- **ADR 0012:** the 3D viewer is a separate front end over shared, pure
+  layers. ADR 0002 is superseded in part, with terminal-first kept as the
+  build order.
+- **CLAUDE.md:** rules 2, 6 and 14 and the identity and direction text now
+  describe the viewer.
+- **README, docs/00, 03, 05, 06, 07, 08 and 09:** updated to M41.
+
 ## [M40] - 2026-10-12  (a per-point iterative contact solver)
 
 ### Added
