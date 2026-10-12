@@ -902,6 +902,17 @@ int test_pacer()
         const std::uint64_t n = pacer.due(10.1, tick);
         MALLOY_CHECK_TRUE(n >= 99 && n <= 101);
     }
+    // And resuming restarts the clock by itself, even when nothing asked what
+    // was due while paused: a pause of 9.5 s is not owed afterwards.
+    {
+        Pacer pacer{dt, 100000};
+        pacer.rebase(0.0, 0);
+        const std::uint64_t tick = pacer.due(0.5, 0);
+        pacer.set_paused(true, 0.5, tick);
+        pacer.set_paused(false, 10.0, tick);
+        const std::uint64_t n = pacer.due(10.1, tick);
+        MALLOY_CHECK_TRUE(n >= 99 && n <= 101);
+    }
     // Speed: doubling halves the wall time per step from the moment it
     // changes; nonsense speeds are ignored and extremes clamped.
     {
@@ -1070,6 +1081,11 @@ int test_sphere_mesh()
         const Real enclosed = volume(mesh, c);
         MALLOY_CHECK_TRUE(enclosed < ball);
         MALLOY_CHECK_TRUE(enclosed >= 4.0 / 3.0 * pi * inner * inner * inner);
+
+        // Closed about the origin too, where no centre coordinate absorbs a
+        // last-bit difference: the seam at phi = 2 pi must reuse phi = 0's
+        // vertices exactly (sin(2 pi) is -2.4e-16, not 0).
+        MALLOY_CHECK_TRUE(closed(sphere_triangles(Vec3{}, r, d)));
     }
 
     // Level of detail by count.
