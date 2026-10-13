@@ -221,6 +221,83 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #88: a 3D rigid body's rotation gained angular momentum and energy every
+  step, without bound. The angular velocity advanced by forward Euler on
+  Euler's equations, which grows |L|^2 by exactly dt^2 |L x omega|^2 a step: a
+  tumbling body sped up, and a long enough run overflowed.
+  - **The new step.** The applied torque is one kick before the contact solve.
+    After the solve, each body rotates freely by a symmetric splitting of its
+    energy about the median principal moment, A_j(dt/2) A_k(dt) C(dt) A_j(dt/2),
+    every piece an exact rotation.
+  - **What it keeps.** The world angular momentum and |L|, exactly, for any
+    inertia; under a torque the world momentum is L(0) + torque t at every
+    step. The rotation is exact for every sphere and axisymmetric body and
+    second order otherwise. The energy of three distinct moments carries a
+    second-order error that stayed bounded in every measured case, which is
+    not a general guarantee. Under a torque the orientation is first order
+    from the synchronous state.
+  - **Unchanged runs.** Turns of angle zero are skipped, a turn never touches
+    the component along its own axis, and only changed components become
+    angular velocity again, so a sphere, a principal-axis spin, an eigenspace
+    spin and a body at rest keep their angular velocity bit for bit. Seven of
+    the ten rigid3d templates give byte-identical output.
+  - **Contacts.** The impact phase's prediction is now the forcing and the
+    kick, body b's change minus body a's, with no gyroscopic term (ADR 0011,
+    dated note). Every M40 acceptance criterion still holds. AC-4 now compares
+    exact pre-solve and solved states, and two AC-6 regressions are new: the
+    prediction for a fast anisotropic box under a torque, and that box's
+    bounces at e 0.5.
+  - **Not every impact meets the impact tolerance.** An impact at several
+    points can stop at the solver's 100-sweep cap (ADR 0011) short of it.
+    - **The bounce test.** It holds every impact to the mid-step law except one
+      it infers was capped: a point left approaching faster than its target
+      breaks the solver's stopping rule, so that solve can only have ended at
+      the cap. That is an inference from the residual rule; the one impact
+      excused here was also observed stopping at the cap in an instrumented
+      build. Only a frictional multi-point impact may be excused that way.
+      Coverage is pinned to the measured counts (MSVC Debug and Release,
+      clang 21):
+      - at most 1 impact inferred capped and 26 unchecked steps;
+      - at least 146 impacts meeting the law, 4 of them frictional
+        multi-point.
+    - **Not the new step's doing.** In instrumented builds over 2000 seeded
+      random drops at friction 0.5, the cap was observed to stop 28.4% of the
+      multi-point impacts before the change and 28.1% after (8.8% and 9.2% at
+      friction 0.3), with the same spread of errors. Without friction it capped
+      once in 2000 drops after the change, 4.9e-11 m/s off, and never before.
+    - **Effects.** No capped impact raised the kinetic energy. What the cap
+      leaves unconverged was small in every measurement, before and after the
+      change: normal complementarity violations at most 6.0e-3 m/s (about
+      0.2% of the target) and friction residuals at most 1.3e-2 m/s. The cap
+      itself is tracked in issue #92.
+  - **Changed numbers.**
+    - `gyroscope.scn`: the energy at 12 s is 49.6081314, from 49.6086482, which
+      carried forward Euler's spurious gain; the new value is within 3e-9 of
+      its dt -> 0 limit. The world momentum is now 4.8 and 15 to rounding, so
+      those checks tighten from 1e-4 to 3e-9.
+    - `intermediate_axis.scn`: E and |L| no longer jump at the flip (E stayed
+      at 10.0005010, where it went to 10.0098; |L| at 7.21110283, where it went
+      to 7.2146). The first body's checked spins move to their second-order
+      values, for example wy at step 20000 from -2.00058898 to -1.99825216, and
+      new checks hold the world momentum and the energy through the flip.
+    - `box_stack.scn`: only the |L| and |p| columns move, at the 1e-11 to
+      2e-10 level of a resting stack's rounding. Every check is unchanged.
+  - **Cost.** About 8 sine and cosine calls per tumbling body per step. A free
+    asymmetric body's step went from 0.058 to 0.147 us in Release, so the
+    parse-time work budget now charges a 3D body 25 units a step, not 15.
+    Release, same machine, runs interleaved with the old step (median ns a
+    step): `intermediate_axis.scn` 134 to 311 (two tumbling bodies and nothing
+    else), `gyroscope.scn` 88 to 134; with contacts `box_stack.scn` 9322 to
+    9659, `box_drop.scn` 2390 to 2405 and `bouncing_sphere.scn` 837 to 875
+    (+1% to +5%).
+  - **Tests.** The forward-Euler formulas are replaced by references written
+    from the physics: closed forms for spheres, oblate and prolate tops and
+    principal-axis spins, the Jacobi elliptic solution of the asymmetric top
+    (order 2.0, an energy envelope and a no-drift statistic over 48 periods),
+    the sphere-under-torque law that tells the kick-then-rotate order from its
+    alternatives, and the step's own discrete linearization about each axis.
+    All 17 deliberate defects tried against them were caught.
+  - This is a deliberate integrator change.
 - Issue #42: in crossed electric and magnetic fields, a charge's guiding centre
   crept against the electric force and its energy grew without bound, in 2D
   and 3D.

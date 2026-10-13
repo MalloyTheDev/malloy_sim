@@ -121,7 +121,7 @@ Not responsible for shape geometry (that is `malloy_collide`), persistent forces
 Since M20 the module also owns `RigidBody3D` and `Rigid3DWorld`: rotation in three dimensions, with a quaternion orientation and three principal moments of inertia. It lives here rather than in a library of its own because rigid-body dynamics is one domain and the dimension is not a domain, the same reasoning M19 used for 3D gravity. `malloy_rigid` links `malloy_collide` for the sphere, plane and box primitives, the same as the 2D path. Milestone by milestone:
 
 - **M20**: torque-free rotation (Euler's equations, so a body with three distinct moments tumbles).
-- **M21**: a constant world-frame TORQUE as a setting (the M15 pattern, applied as Euler forcing rather than through a force/torque accumulator), which makes a gyroscope precess.
+- **M21**: a constant world-frame TORQUE as a setting (the M15 pattern, applied as one kick per step rather than through a force/torque accumulator; issue #88 split the kick from the free rotation that follows the contact solve), which makes a gyroscope precess.
 - **M22**: gravity (an acceleration) and restitution contacts against immovable ground planes, resolved with a normal impulse.
 - **M23**: Coulomb friction, a tangential impulse clamped to the normal one, which DOES have a lever arm and so spins a sliding sphere up until it rolls without slipping (at 5/7 of its sliding speed).
 - **M24**: sphere-against-sphere collisions, two movable bodies exchanging momentum through the SAME impulse core the ground uses, with the plane expressed as a zero-inverse-mass participant so the formula is written once (ADR 0008).

@@ -103,17 +103,19 @@ struct RigidBody3D
 // around: under torque-free rotation the body-frame vector I omega changes as
 // the body tumbles, while the world-frame one does not.
 //
-// This is also the quantity the discrete drift law is about, and the law is
-// PER BODY. The continuum equations conserve it; the discrete ones gain
-// dt^2 |L x omega|^2 in |L|^2 per step, exactly. See
-// `total_angular_momentum3d` for the derivation and for when it is zero, and
-// note there why the magnitude of a SUM of these does not inherit the law.
+// This is also the quantity the discrete momentum law is about, and the law is
+// PER BODY. The continuum equations conserve it, and so does the step's free
+// rotation, exactly, for any inertia (issue #88; before, forward Euler gained
+// dt^2 |L x omega|^2 in |L|^2 per step). Under a torque it grows by exactly
+// torque dt per step. See `total_angular_momentum3d` for the law, and note
+// there why the magnitude of a SUM of these does not inherit it.
 math::Vec3 spin_angular_momentum(const RigidBody3D& body);
 
 // Rotational kinetic energy, (1/2) omega . (I omega), computed in the body
-// frame where the inertia is diagonal. A scalar, so the frame does not matter,
-// and conserved under torque-free rotation on the same terms as the angular
-// momentum above: exactly in the continuum, with an exact second-order gain per
-// discrete step.
+// frame where the inertia is diagonal. A scalar, so the frame does not matter.
+// Conserved under torque-free rotation in the continuum; the step keeps it
+// exactly for a sphere or an axisymmetric body, and for three distinct moments
+// within the free rotation's second-order error, which stays bounded in the
+// measured cases rather than growing (rigid3d_world.hpp).
 math::Real rotational_energy(const RigidBody3D& body);
 } // namespace malloy::rigid

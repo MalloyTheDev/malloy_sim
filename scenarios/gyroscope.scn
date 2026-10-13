@@ -44,24 +44,31 @@ torque 0.4 0.0 0.0
 # Expected, from a real run of the shipped binary:
 #
 #   step      0   E   4.50000000e+01   |L|   1.50000000e+01   |p|   0.00000000e+00
-#   step   3000   E   4.52883005e+01   |L|   1.50479316e+01   |p|   0.00000000e+00
-#   step   6000   E   4.61530725e+01   |L|   1.51908048e+01   |p|   0.00000000e+00
-#   step   9000   E   4.75930772e+01   |L|   1.54259830e+01   |p|   0.00000000e+00
-#   step  12000   E   4.96086482e+01   |L|   1.57493323e+01   |p|   0.00000000e+00
+#   step   3000   E   4.52882194e+01   |L|   1.50479234e+01   |p|   0.00000000e+00
+#   step   6000   E   4.61527372e+01   |L|   1.51907867e+01   |p|   0.00000000e+00
+#   step   9000   E   4.75925684e+01   |L|   1.54259522e+01   |p|   0.00000000e+00
+#   step  12000   E   4.96081314e+01   |L|   1.57492857e+01   |p|   0.00000000e+00
 #
 # 1. |p| is zero throughout. Nothing acts on the translation: the torque turns
 #    the body, it does not push it. The body stays at the origin.
 #
 # 2. The world-frame angular momentum grows along a straight line. Its x
-#    component is torque_x * t exactly (to the integration's first-order
-#    tracking): 0.4 * 3, 6, 9, 12 = 1.2, 2.4, 3.6, 4.8. Its z stays at 15, the
+#    component is torque_x * t exactly, to rounding: each step kicks the world
+#    momentum by torque * dt, and the body's rotation keeps it (issue #88).
+#    That is 0.4 * 3, 6, 9, 12 = 1.2, 2.4, 3.6, 4.8. Its z stays at 15, the
 #    starting spin angular momentum Iz * wz = 2.5 * 6. So |L| = sqrt(15^2 +
 #    (0.4 t)^2) grows from 15 as the axis tilts: 15.048, 15.191, 15.426,
-#    15.749. That is the gyroscope precessing, read off a single column.
+#    15.749, the column above to every printed digit. That is the gyroscope
+#    precessing, read off a single column.
 #
-# 3. E rises. A torque does work at rate omega . torque, so unlike the
-#    torque-free M20 case (where energy only drifted at second order) the
-#    kinetic energy climbs steadily as the torque feeds the rotation.
+# 3. E rises. A torque does work at rate omega . torque, so the kinetic energy
+#    climbs steadily as the torque feeds the rotation. The body is symmetric,
+#    so its rotation between kicks is exact and keeps the energy; the kick adds
+#    exactly the work. E(12 s) converges as dt halves, at second order:
+#    49.608131381, 49.608131380, 49.608131379 at dt 1e-3, 5e-4, 2.5e-4, its
+#    limit 49.60813138 to nine figures. (Before issue #88 the angular step was
+#    forward Euler, which added a spurious second-order gain every step:
+#    49.6086482, 5e-4 too high.)
 #
 # The body-frame spin tells the same story from the body's point of view. wz
 # stays near 6 (the torque barely touches the fast spin), while wx and wy
@@ -71,14 +78,16 @@ torque 0.4 0.0 0.0
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests. `step 0` is the state before any step. `angular_*` is the world-frame
 # total angular momentum; `spin_*` is the body-frame angular velocity of the
-# first body. Tolerances are absolute: 1e-15 where the value is exact,
-# looser where it is the first-order tracking of the continuum line.
+# first body. Tolerances are absolute: 1e-15 where the value is exact; 3e-9 on
+# the straight line, which the step meets to rounding, (64 N + 16) eps of |L|
+# after N = 12000 steps; and 1e-8 on the energy, which is within 3e-9 of its
+# dt -> 0 limit.
 # check step 0     angular_x     0.00000000e+00   tol 1e-15
 # check step 0     angular_z     1.50000000e+01   tol 1e-15
 # check step 0     spin_z        6.00000000e+00   tol 1e-15
 # check step 0     energy        4.50000000e+01   tol 1e-13
 # check step 0     momentum_x    0.00000000e+00   tol 1e-15
-# check step 12000 angular_x     4.79994216e+00   tol 1e-4
-# check step 12000 angular_z     1.50000648e+01   tol 1e-4
+# check step 12000 angular_x     4.80000000e+00   tol 3e-9
+# check step 12000 angular_z     1.50000000e+01   tol 3e-9
 # check step 12000 momentum_x    0.00000000e+00   tol 1e-15
-# check step 12000 energy        4.96086482e+01   tol 1e-5
+# check step 12000 energy        4.960813138e+01  tol 1e-8

@@ -70,9 +70,18 @@ then positions from the updated velocities. The specializations:
   the drift is exactly perpendicular to E, and the energy error is a bounded
   oscillation with no secular growth. A particle the field does not turn gets
   one whole kick, as plain semi-implicit Euler.
-- **3D rigid bodies**: the angular velocity advances by FORWARD Euler on Euler's
-  equations in the body frame, the orientation from the updated angular
-  velocity, and the quaternion is renormalized every step.
+- **3D rigid bodies**: the applied torque is one KICK to the angular velocity
+  before the contact solve, and after it each body rotates freely by a
+  symmetric splitting of its energy about the median principal moment, every
+  piece an exact rotation (issue #88). The world angular momentum and |L| are
+  kept exactly, so under a torque the world momentum follows L(0) + torque t at
+  every step. The rotation is exact for every sphere and axisymmetric body and
+  second order otherwise; the energy of three distinct moments carries a
+  second-order error that stayed bounded in every measured case, which is not a
+  general guarantee. Under a torque the orientation is first order from the
+  synchronous state (the stored spin is the start-of-step value; there is no
+  half kick). The quaternion is renormalized every step. The forward-Euler step
+  this replaced grew |L| and the energy every step, without bound.
 - **2D rigid bodies**: the angle accumulates by addition and is not wrapped;
   its drift is bounded and pinned (ADR 0007).
 

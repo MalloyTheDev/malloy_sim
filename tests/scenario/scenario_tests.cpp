@@ -2641,33 +2641,33 @@ int main()
             // The rigid domains (M40), restitution 1 by default, so two phases:
             // a 3D point with a box costs 75 + 200 x 28 = 5675 and one between
             // spheres 50 + 200 x 13 = 2650, a 2D point 75 + 200 x 6.5 = 1375.
-            // rigid3d, 100 boxes: 4950 x (460 + 8 x 5675) + 15 x 100
-            // = 4950 x 45860 + 1500 = 227008500.
+            // rigid3d, 100 boxes: 4950 x (460 + 8 x 5675) + 25 x 100
+            // = 4950 x 45860 + 2500 = 227009500.
             const std::string boxes = repeat(100, box3_line);
-            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", boxes, 227008500));
-            // rigid3d, 100 spheres: 4950 x (45 + 2650) + 1500 = 13341750.
+            MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\n", boxes, 227009500));
+            // rigid3d, 100 spheres: 4950 x (45 + 2650) + 2500 = 13342750.
             MALLOY_CHECK_TRUE(
-                at_budget_edge("type rigid3d\n", repeat(100, sphere3_line), 13341750));
+                at_budget_edge("type rigid3d\n", repeat(100, sphere3_line), 13342750));
             // rigid3d, 10 boxes, 10 spheres and a plane: 45 box pairs x 45860,
             // 100 box-sphere pairs x (80 + 5675), 45 sphere pairs x 2695, and
-            // the plane 10 x (200 + 8 x 5675) + 10 x 2695, 20 bodies x 15:
-            // 2063700 + 575500 + 121275 + 482950 + 300 = 3243725.
+            // the plane 10 x (200 + 8 x 5675) + 10 x 2695, 20 bodies x 25:
+            // 2063700 + 575500 + 121275 + 482950 + 500 = 3243925.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid3d\nplane3 0 0 1 -100\n",
-                repeat(10, box3_line) + repeat(10, sphere3_line), 3243725));
+                repeat(10, box3_line) + repeat(10, sphere3_line), 3243925));
             // rigid3d, a box and a sphere under 1000 planes, where the plane
-            // tests dominate: 5755 + 1000 x (45600 + 2695) + 30 = 48300785.
+            // tests dominate: 5755 + 1000 x (45600 + 2695) + 50 = 48300805.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid3d\n" + repeat(1000, [](int) { return "plane3 0 0 1 -100\n"; }),
-                repeat(1, box3_line) + repeat(1, sphere3_line), 48300785));
+                repeat(1, box3_line) + repeat(1, sphere3_line), 48300805));
             // rigid3d, a box and a body without a collider under 1000 planes:
             // the pair and each plane test of the bare body cost 1, so
-            // 1 + 1000 x (45600 + 1) + 30 = 45601031.
+            // 1 + 1000 x (45600 + 1) + 50 = 45601051.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid3d\n" + repeat(1000, [](int) { return "plane3 0 0 1 -100\n"; }),
                 repeat(1, box3_line) +
                     "rigid_body3d 1 1 1 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0\n",
-                45601031));
+                45601051));
             // rigid, 100 boxes: 4950 x (85 + 2 x 1375) + 10 x 100 = 14034250.
             MALLOY_CHECK_TRUE(at_budget_edge("type rigid\n", repeat(100, box2_line), 14034250));
             // rigid, 100 discs and 10 grounds: 4950 x (35 + 1375)
@@ -2690,16 +2690,16 @@ int main()
 
             // Restitution 0 has one phase: a 3D point with a box 75 + 100 x 28
             // = 2875, between spheres 50 + 100 x 13 = 1350, a 2D point 75 +
-            // 100 x 6.5 = 725. rigid3d, 100 spheres: 4950 x 1395 + 1500
-            // = 6906750.
+            // 100 x 6.5 = 725. rigid3d, 100 spheres: 4950 x 1395 + 2500
+            // = 6907750.
             MALLOY_CHECK_TRUE(at_budget_edge("type rigid3d\nrestitution 0\n",
-                                             repeat(100, sphere3_line), 6906750));
+                                             repeat(100, sphere3_line), 6907750));
             // rigid3d, 10 boxes, 10 spheres and a plane: 45 x (460 + 8 x 2875)
             // + 100 x (80 + 2875) + 45 x 1395 + 10 x (200 + 8 x 2875) + 10 x
-            // 1395 + 300 = 1055700 + 295500 + 62775 + 245950 + 300 = 1660225.
+            // 1395 + 500 = 1055700 + 295500 + 62775 + 245950 + 500 = 1660425.
             MALLOY_CHECK_TRUE(at_budget_edge(
                 "type rigid3d\nrestitution 0\nplane3 0 0 1 -100\n",
-                repeat(10, box3_line) + repeat(10, sphere3_line), 1660225));
+                repeat(10, box3_line) + repeat(10, sphere3_line), 1660425));
             // rigid, 100 boxes and a ground: 4950 x (85 + 2 x 725) + 100 x (75 +
             // 4 x 725) + 1000 = 7598250 + 297500 + 1000 = 7896750.
             MALLOY_CHECK_TRUE(at_budget_edge("type rigid\nrestitution 0\nground 0 1 -100\n",
@@ -2718,7 +2718,7 @@ int main()
 
             // Issue #46's file: 100 separated boxes for 19799000 steps, 4828
             // bytes, inside the old budget at 5050 pair tests a step and about
-            // 2.35 hours in Release. Now 227008500 units a step, far over.
+            // 2.35 hours in Release. Now 227009500 units a step, far over.
             {
                 std::istringstream issue("type rigid3d\nsteps 19799000\noutput_every 100000\n" +
                                          boxes);
