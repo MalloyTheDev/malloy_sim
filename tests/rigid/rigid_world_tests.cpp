@@ -8004,15 +8004,20 @@ int main()
         //         point below the threshold is counted, not checked: the rest
         //         phase then acts on the same body after the impact, so the law
         //         is not observable after the step.
-        //       - ONE exception, accepted for issue #88: an impact the solver
-        //         stopped at its 100-sweep cap (kMaxSweeps, ADR 0011) short of
-        //         the tolerance. It is recognised, not assumed: the solver
-        //         stops early only at the cap, and a point left approaching
-        //         faster than its target (out below the target by more than the
-        //         tolerance) violates its stopping rule whatever the point's
-        //         impulse, so such a solve was capped. Only a frictional impact
+        //       - ONE exception: an impact whose solve the test INFERS stopped at
+        //         the solver's 100-sweep cap (kMaxSweeps, ADR 0011) short of the
+        //         tolerance. The inference is from the solver's residual rule:
+        //         the solver stops early only at the cap, and a point left
+        //         approaching faster than its target (out below the target by
+        //         more than the tolerance) violates that rule whatever the
+        //         point's impulse, so such a solve can only have ended at the
+        //         cap. It is an inference, not an observation: the one impact
+        //         excused here (dt 0.002, step 688) was also OBSERVED stopping
+        //         at 100 sweeps in an instrumented build, but a looser solver
+        //         tolerance would make ordinary non-convergence look the same,
+        //         which the coverage pins below catch. Only a frictional impact
         //         at several points may be excused this way, as only those were
-        //         measured to cap here. Any other miss fails, including a point
+        //         observed to cap here. Any other miss fails, including a point
         //         leaving FASTER than its target, which a converged solve allows
         //         only for a point carrying no impulse and which this scenario
         //         never shows. The cap is the solver's behaviour, not this
@@ -8024,9 +8029,10 @@ int main()
         //         28.4% of the multi-point impacts before and 28.1% after, none
         //         of them raising the kinetic energy).
         //       - COVERAGE, so the exception cannot grow unseen: at most
-        //         kCappedMax capped impacts, at most kMixedMax unchecked mixed
-        //         steps, and at least kHeldMin impacts and kFrictionalMin
-        //         frictional multi-point impacts that meet the law. These are
+        //         kCappedMax impacts inferred capped, at most kMixedMax
+        //         unchecked mixed steps, and at least kHeldMin impacts and
+        //         kFrictionalMin frictional multi-point impacts that meet the
+        //         law. These are
         //         the counts measured with MSVC (Debug and Release) and clang
         //         21; they are regression pins, not physical tolerances, and a
         //         change that moves them must be reviewed, not re-pinned;
@@ -8196,7 +8202,7 @@ int main()
             }
             m40_check("AC-6e every impact but the capped: mid-step law, |error| / tolerance", worst_law, 1.0);
             m40_check("AC-6e misses the cap does not explain", static_cast<Real>(unexplained), 0.0);
-            m40_check("AC-6e coverage: capped impacts (at most kCappedMax)", static_cast<Real>(capped),
+            m40_check("AC-6e coverage: impacts inferred capped (at most kCappedMax)", static_cast<Real>(capped),
                       static_cast<Real>(kCappedMax));
             m40_check("AC-6e coverage: unchecked mixed steps (at most kMixedMax)", static_cast<Real>(mixed),
                       static_cast<Real>(kMixedMax));
@@ -8206,7 +8212,7 @@ int main()
                       static_cast<Real>(kFrictionalMin - held_frictional), 0.0);
             std::cout << "  M40 info  AC-6e impact steps " << impacts << ": " << held << " meet the law ("
                       << held_frictional << " frictional at several points), " << capped
-                      << " capped (worst " << worst_capped << " m/s), " << mixed << " mixed, " << unexplained
+                      << " inferred capped (worst " << worst_capped << " m/s), " << mixed << " mixed, " << unexplained
                       << " unexplained\n";
             m40_check("AC-6e energy rise above the start / the rotational envelope", worst_rise, 1.0);
             m40_check("AC-6e energy rise across an impact step / the single-step envelope", worst_jump, 1.0);
