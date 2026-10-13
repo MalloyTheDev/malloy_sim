@@ -26,10 +26,11 @@ destination: the simulator is meant to be rendered in 3D with a GUI, UI and UX
 foundation of other science projects.
 
 It started as a terminal 2D N-body gravity simulation. It grows one finished
-physics domain at a time. By M39 that has meant collision, colliding particles,
+physics domain at a time. By M41 that has meant collision, colliding particles,
 2D rigid bodies, ballistics, springs and oscillators, charged particles, three
-dimensions for all five domains, and the first thermodynamics (a gas with
-thermal walls); fluids, rendering and quantum are still ahead. Each domain is a
+dimensions for all five domains, the first thermodynamics (a gas with thermal
+walls), a per-point contact solver, and real-time 3D rendering of the five 3D
+types (M41); fluids and quantum are still ahead. Each domain is a
 concrete library with its own world type, settings type, and tests, selected by
 a scenario `type` key rather than through a generic engine interface
 (`docs/decisions/0006-multi-domain-dispatch.md`).
@@ -53,7 +54,7 @@ validates its input, holds its invariants, and ships tested templates.
 | CMake layout | Single root `CMakeLists.txt` |
 | Numeric type | `malloy::math::Real = double` |
 | Timestep | Fixed timestep only |
-| Graphics | Excluded until the rendering milestone |
+| Graphics | Excluded until the rendering milestone; since M41, raylib 6.0 in `malloy_viewer` only (ADR 0012) |
 | ECS | Excluded until real access-pattern pressure |
 | First app | `malloy_nbody_terminal` |
 | First simulation | Normalized two-body orbit |

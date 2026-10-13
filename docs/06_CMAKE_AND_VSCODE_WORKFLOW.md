@@ -18,12 +18,13 @@ sanitizers) and Ninja.
 
 ## CMake strategy
 
-Use CMake 3.21+ for the project itself. The shipped presets additionally
+Use CMake 3.21+ for the project itself, and 3.28+ when the viewer is built
+(`MALLOY_BUILD_VIEWER`; configure refuses an older CMake). The shipped presets additionally
 require CMake 4.2+, because the `Visual Studio 18 2026` generator was added in
 4.2; on an older CMake, configure without a preset or add a
 `CMakeUserPresets.json` naming a generator your version has.
 
-What the build uses, all in force at M39:
+What the build uses, all in force at M41:
 
 - one root `CMakeLists.txt` (still the only one; no nested CMake files);
 - `CMakePresets.json`, with `windows-msvc-debug` and `windows-msvc-release`
@@ -45,10 +46,11 @@ What the build uses, all in force at M39:
   same build directory.
 
 Avoid package managers, install/export rules, complex CMake functions, source
-globbing, and dependency fetching until a milestone needs them. Two planned
-milestones will: 3D rendering brings the first graphics dependency
-([#80](https://github.com/MalloyTheDev/malloy_sim/issues/80)), and packaging the libraries for other projects brings
-install and export rules ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)).
+globbing, and dependency fetching until a milestone needs them. Rendering
+(M41, ADR 0012) brought the first graphics dependency, raylib 6.0, fetched and
+pinned by SHA-256 for the viewer only. Packaging the libraries for other
+projects would bring install and export rules; it is a planned milestone, not
+yet started ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)).
 
 ## Build commands
 
@@ -70,8 +72,10 @@ test-executable count is taken, so they do not change it (`docs/05`).
 
 CI (`.github/workflows/ci.yml`, issue #66) runs these commands on every push
 and pull request to `main`: the Debug and Release presets with every CTest test
-on the `windows-2025-vs2026` runner, and a 30-second libFuzzer run of each fuzz
-target under ASan and UBSan on `ubuntu-26.04`. It has read-only permissions,
+on the `windows-2025-vs2026` runner; a Linux clang 21 build of everything,
+the viewer included, with every CTest test and the viewer's pixel self-test
+under Xvfb and Mesa on `ubuntu-26.04`; and a 30-second libFuzzer run of each
+fuzz target under ASan and UBSan on `ubuntu-26.04`. It has read-only permissions,
 needs no secrets, and pins every action to a commit SHA. Branch protection on
 `main` is not set.
 
@@ -200,9 +204,9 @@ out/fuzz/malloy_app_fuzzer out/fuzz/app_corpus scenarios -max_total_time=60 -tim
 CI runs both fuzzers briefly on every push. A fuzzer binary left in
 `out/fuzz` from an earlier build does not cover parsing added since, so rebuild
 from the current tree before a local run. The parser fuzzer asserts every
-documented resource cap on a successful parse (issue #66), though its copy of
-the work formula predates the weighted budget of issue #46
-([#84](https://github.com/MalloyTheDev/malloy_sim/issues/84)).
+documented resource cap on a successful parse (issue #66), computing the work
+budget through the parser's own `step_work`, as the app fuzzer does (issue
+[#84](https://github.com/MalloyTheDev/malloy_sim/issues/84), fixed in M40).
 
 ## VS Code workflow
 

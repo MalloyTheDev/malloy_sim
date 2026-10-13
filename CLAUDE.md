@@ -57,8 +57,9 @@ M34), and pushed by a constant applied force to go with the torque (M28), and
 their mass and inertia can be computed from geometry (M25), for spheres, boxes
 and arbitrary triangle meshes (M27) assembled into compound bodies (M26). All
 five domains now have a 3D form as well as a 2D one, and any two 3D primitives
-collide; what remains of the 3D arc is rendering, and then quantum, each its own
-milestone.
+collide. Rendering landed in M41 (below); what remains of the 3D arc is
+immovable 3D bodies (#74) and the GUI (#81), each its own milestone, and quantum
+stays separate.
 
 Quantum remains a further destination and has not started
 (`docs/decisions/0009-three-dimensions-are-the-destination.md`).
@@ -68,8 +69,8 @@ M41 (issue #80, ADR 0012) added real-time rendering as a separate front end:
 `malloy_viewer` draws the five 3D types with raylib 6.0 (pinned by SHA-256),
 over two pure layers it shares with the terminal app, the run layer
 (`include/malloy/scenario/run.hpp`) and the render model (`malloy_view3d`). The
-GUI, UI and UX (issue #81) are the next front-end milestone, built over the same
-layers.
+GUI, UI and UX (issue #81) are a planned front-end milestone, not yet
+authorized, to be built over the same layers.
 
 **Its libraries are foundations.** The domain libraries are meant to be reused
 as the base of other science projects, linked on their own. That is one more
@@ -149,8 +150,8 @@ world (`include/malloy/particles/splitmix64.hpp`, ADR 0010), so heat flows
 through the gas; a per-wall heat tally (`wall_heat()`) records it, and the
 `wall_temperature` and `seed` scenario keys set it up. Randomness is seeded,
 fully specified, consumed in a fixed order and rolled back with a failed step,
-and a box without a thermal wall never draws (ADR 0010). A moving piston (work)
-is the natural next step, its own milestone.
+and a box without a thermal wall never draws (ADR 0010). A moving piston (work,
+#75) is a milestone candidate, its own milestone if asked for.
 
 M40 returned to the rigid domain with the PER-POINT ITERATIVE CONTACT SOLVER
 (issue #73, ADR 0011): every manifold point is solved by sequential impulses,
@@ -159,6 +160,14 @@ with contacts detected at the start of the step, an impact phase for
 restitution, a rest phase, and a nonlinear Gauss-Seidel position projection. A
 tilted box comes to rest, short stacks stand, static friction holds, and a
 nudged box at restitution 1 no longer gains energy (issues #41, #44, #83).
+
+M41 added real-time 3D rendering (issue #80, ADR 0012), described above. What
+follows M41 is PROPOSED, not accepted, in
+`docs/decisions/0013-the-roadmap-after-m41-is-gated.md`: publication, numerical
+correctness and library gates, in that order, and a classification of every
+capability (foundation, scientific domain, application) before it is scheduled.
+A proposed order is not authorization: each milestone or numerical fix still
+needs its own scope report and the owner's explicit go.
 
 Do not start any further milestone (M42 or later) unless explicitly asked, and
 then work only on that one milestone at a time. The all-in-one goal does not

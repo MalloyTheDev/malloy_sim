@@ -8,7 +8,7 @@ MalloySim uses:
 CTest + tiny custom CHECK macros
 ```
 
-Decided for M1-M5 and still in force at M39: Catch2 and GoogleTest are not
+Decided for M1-M5 and still in force at M41: Catch2 and GoogleTest are not
 added unless explicitly asked for (`CLAUDE.md` rule 9, ADR 0003).
 
 ## Why
@@ -26,16 +26,23 @@ header without linking it) still compiles. Since issue #13,
 `malloy_layering_tests` closes that gap for the libraries: it reads
 `CMakeLists.txt` and every library's sources, and fails if a library includes
 a module it does not link, if any physics domain links or includes another
-(ADR 0006), or if `malloy_sim_core` depends on anything but `malloy_math`. It
-does not check the test executables themselves.
+(ADR 0006), or if `malloy_sim_core` depends on anything but `malloy_math`.
+Since M41 it also places every library on a layer (math 0; time, sim_core,
+collide and ascii 1; the five domains 2; scenario and view3d 3) and fails if one
+links a library on its own layer or above, links anything but `malloy::`
+targets, includes a graphics or other third-party header, or if a domain links
+or includes the run layer or the render model. It does not check the test
+executables themselves.
 
 ## Test executable layout
 
-All fourteen exist and pass (one per module, plus `malloy_quat_tests` for the
-quaternion half of `malloy_math` and `malloy_layering_tests`, which checks the
-build graph against the module boundaries):
+All fifteen exist and pass (one per module, the render model's
+`malloy_view3d_tests` among them, plus `malloy_quat_tests` for the quaternion
+half of `malloy_math` and `malloy_layering_tests`, which checks the build graph
+against the module boundaries):
 
 ```text
+malloy_view3d_tests
 malloy_smoke_tests
 malloy_math_tests
 malloy_quat_tests
@@ -81,7 +88,9 @@ lines, which must equal the terminal app's byte for byte at 1/20, 1/60 and
 (`--self-test`: not blank, every subject drawn where the render model projects
 it, clear pixels background, the restart picture identical) needs OpenGL, so it
 runs on the Linux CI job under Xvfb and Mesa; the render model itself is unit
-tested in `malloy_view3d_tests` without any graphics library.
+tested in `malloy_view3d_tests` without any graphics library. Input, window
+resizing and display scaling are checked by hand, not by CTest; the M41 record
+of those checks is in `CHANGELOG.md` ([M41], Verified after merge).
 
 ## Test helpers
 

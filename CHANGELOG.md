@@ -202,6 +202,22 @@ All notable changes to MalloySim are recorded here. The format follows
     the interface), not the destination.
   - The domain libraries are meant to be the foundation of other science
     projects.
+- Post-M41 documentation reconciliation (after the merge of pull request #87):
+  - **Rendering presented as future work removed:** the README, `CLAUDE.md`,
+    docs/00, 03, 05, 06, 07, 08 and 09 no longer present 3D rendering as
+    future work or a candidate; the GUI (#81) and packaging (#82) are
+    described as planned, not next.
+  - **docs/03:** its module graph is at M41, with `malloy_view3d` and
+    `malloy_viewer`.
+  - **docs/05:** it lists fifteen test executables and the layering test's
+    M41 rules.
+  - **docs/06:** it gives the CMake 3.28 minimum for the viewer, describes
+    the Linux CI job, and drops a stale note on issue #84.
+  - **ADR 0013,** the roadmap after M41, is added as Proposed (not accepted).
+    It covers publication, correctness and library gates, the foundation,
+    scientific domain and application classification, and #82's acceptance
+    criteria. docs/07 carries its order, marked proposed.
+  - **The M41 entry** gains "Verified after merge" (CI and manual checks).
 
 ### Fixed
 
@@ -1346,6 +1362,44 @@ All notable changes to MalloySim are recorded here. The format follows
   the first time on push.
 - **Interactive keyboard and mouse controls** were checked only through their
   headless equivalents and window snapshots.
+
+### Verified after merge (2026-10-12)
+
+- **CI.** The Linux job ran for the first time on pull request #87 and passed,
+  and all four jobs passed again on `main` after the merge (`2910de8`):
+  - Windows MSVC Debug and Release, 46/46 tests each;
+  - Linux clang 21, building everything, raylib included, under `-Werror`
+    with no warnings, 46/46 tests, and the pixel self-test passing for five
+    templates under Xvfb and Mesa;
+  - the fuzz smoke run, clean.
+- **Hardware for the manual and pixel checks:** an NVIDIA GeForce RTX 5070,
+  driver 617.14 (32.0.16.1714), on Windows 11 Home 10.0.26300, with two
+  1920x1080 displays: one at 100% (240 Hz) and one at 150% (60 Hz).
+- **Manual checks**, on box_stack, magnetic_helix, inclined_orbits and
+  rolling_sphere:
+  - at 100%: every key and mouse control, Alt-Tab pacing, stopping at
+    `steps`, and exit by Esc or the close button with code 0;
+  - at 150%: sharp rendering and correct proportions narrow, wide and
+    maximized; moves between the two displays kept the state and framing;
+    orbit and zoom behave as at 100%;
+  - the owner confirmed pan, at 100% and at 150%, and held-key repeat on a
+    physical mouse and keyboard.
+- **Cosmetic limitations found:**
+  - The viewer opens at 1280x720 actual pixels at any scale (raylib's HiDPI
+    mode is off), so it looks small at 150%; it can be resized and maximized.
+  - The HUD is drawn at a fixed 20 pixels and is cut off below about 820
+    pixels of window width.
+  - Seen from below, the ground's underside is very dark, and a resting box's
+    bottom face shows through it with z-fighting stripes.
+  - rolling_sphere ends small under grow-only auto-fit; F refits it.
+- **Unexplained, not reproduced:** once, after the window moved to the 150%
+  display, auto-fit was off and the camera had zoomed out with no camera input
+  from the tester. Four later controlled moves did not repeat it. A wheel
+  event reaching the window from outside is the likely cause, unconfirmed.
+- **Binary distribution:** distributing a viewer binary requires a review of
+  the licence notices for raylib and the components it bundles (no notices
+  file exists yet). Building from source needs none, so this does not affect
+  the source tree.
 
 ### Docs
 

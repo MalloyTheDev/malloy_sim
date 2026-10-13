@@ -24,24 +24,30 @@
 Do not add any of the following until a dedicated post-M5 milestone explicitly
 calls for it:
 
-Raylib, SDL, GLFW, SFML, rendering, input, camera, quantum, ECS, serialization,
-CLI parser, logging framework, plugins, scripting, editor, asset manager,
-threading, package manager, or install/export rules.
+a graphics library (Raylib, SDL, GLFW, SFML) or window, input or drawing code
+anywhere but `malloy_viewer`, quantum, ECS, serialization, CLI parser, logging
+framework, plugins, scripting, editor, asset manager, threading, package
+manager, or install/export rules. (The pure render model and camera
+mathematics in `malloy_view3d` belong there: it has no graphics dependency,
+ADR 0012.)
 
 Being on this list means "not before its milestone", not "unwanted". Rendering
 in 3D, with the windowing, input and camera that come with it, had its
-milestone in M41 (raylib, the viewer only, ADR 0012), followed next by a GUI, UI and UX
-([#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)); install and export rules arrive when the libraries
-are packaged for other projects ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)). The mistake is adding
-any of them early, not adding them.
+milestone in M41 (raylib, the viewer only, ADR 0012). A GUI, UI and UX are
+planned, behind their own milestone
+([#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)); install and
+export rules would arrive if and when packaging the libraries for other projects
+is started ([#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)). The
+mistake is adding any of them early, not adding them.
 
 Several items that were on this list have since had their milestone and are no
 longer scope creep: config files (the scenario format, M7), collision geometry
 (M9), rigid bodies (M11), and 3D, which began with `Vec3` and 3D gravity (M19)
 and has since given every domain a 3D form, quaternions, the inertia tensor as a
 construction step, and 3D contact geometry (M20 to M34), and M40 added the
-per-point contact solver. What remains of 3D, rendering and immovable 3D bodies
-among it, is still gated, and each piece needs its own milestone (`CLAUDE.md` rule 6,
+per-point contact solver, and M41 the real-time viewer. What remains of 3D,
+immovable 3D bodies and further viewer and GUI features among it, is still
+gated, and each piece needs its own milestone (`CLAUDE.md` rule 6,
 `docs/07_POST_M5_ROADMAP.md`).
 
 The rule is the "until" clause, not the list. A list of names goes stale as

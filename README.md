@@ -8,8 +8,8 @@ immediately. It is meant to be seen: the destination is a simulator rendered
 in 3D, with a GUI, UI and UX on top. It is built simulation-first, because the
 system has to exist and be proven correct before an interface is built over
 it. Since M41 a real-time 3D viewer draws the 3D scenario types; the terminal
-app remains the base the physics is built and verified on, and the GUI is the
-next step.
+app remains the base the physics is built and verified on. A GUI, UI and UX are
+planned, behind their own milestone (#81).
 
 It is built as many concrete domain simulations behind a thin shared shell
 rather than as one generic engine
@@ -39,9 +39,9 @@ space; M32 takes colliding particles into three dimensions, the last of the five
 domains to gain a 3D form; M33 collides two oriented boxes by the
 separating-axis test; and M34 collides a box with a sphere, the last movable
 pair. All five domains now run in space as well as the plane, and any two 3D
-primitives collide; what is left of the 3D arc is rendering. 3D is the
-destination rather than a possibility left open, and each remaining piece is its
-own milestone: see `docs/decisions/0009-three-dimensions-are-the-destination.md`.
+primitives collide, and since M41 a real-time viewer draws them (ADR 0012). 3D
+is the destination rather than a possibility left open, and each remaining piece
+(immovable 3D bodies, #74, and the GUI, #81) is its own milestone: see `docs/decisions/0009-three-dimensions-are-the-destination.md`.
 
 Five physics domains are complete and shipping, each in two dimensions and in
 three: gravity (N-body), colliding particles, rigid bodies, spring networks, and
@@ -86,8 +86,9 @@ The project builds clean under MSVC (`/W4 /WX /permissive-`, with Control Flow
 Guard and CET shadow-stack compatibility on every target), and all
 15 test executables pass via CTest, along with sixteen checks that run the
 terminal app and fifteen that run the viewer, each requiring both an exit code
-and its output (46 CTest tests in all). CI runs the Debug and Release builds with every test, and a
-short fuzz run, on every push and pull request to `main`. The terminal app runs any of the ten scenario
+and its output (46 CTest tests in all). CI runs the Debug and Release builds
+with every test, a Linux clang build with every test and the viewer's pixel
+self-test, and a short fuzz run, on every push and pull request to `main`. The terminal app runs any of the ten scenario
 types from a text file, or two built-in N-body scenarios when given no argument,
 and reports each domain's diagnostics alongside an ASCII view of the bodies.
 
@@ -97,7 +98,7 @@ and reports each domain's diagnostics alongside an ASCII view of the bodies.
 | `malloy_time` | INTERFACE | `FixedStep` (fixed timestep, tick count, elapsed time) |
 | `malloy_sim_core` | STATIC | `SimulationSettings`, `StepStatus`, `StepResult` |
 | `malloy_nbody` | STATIC | `Body2D`, `NBodySettings`, `NBodyWorld`, softened gravity, diagnostics; `Body3D` and `NBody3DWorld` |
-| `malloy_scenario` | STATIC | parse a scenario text file of any of the ten `type`s into settings and initial state, within caps on steps, entities, ground planes, total work and reports |
+| `malloy_scenario` | STATIC | parse a scenario text file of any of the ten `type`s into settings and initial state, within caps on steps, entities, ground planes, total work and reports; the run layer (`run.hpp`) builds each world, reads it back and formats the report line for both front ends |
 | `malloy_ascii` | STATIC | fit a viewport to 2D points, render them as a framed character grid |
 | `malloy_collide` | STATIC | 2D `Circle`, `Aabb`, `Obb2`, `Halfplane`; 3D `Sphere`, `Plane3`, `Aabb3`, `Box3`; overlap tests and contacts (normal, depth, point), separating-axis tests for box pairs, and clipped contact manifolds for a box on a plane or on another box |
 | `malloy_particles` | STATIC | `Particle2D`/`ParticleWorld` and `Particle3D`/`ParticleWorld3D`: contacts with restitution and Coulomb friction, box walls, gravity, per-wall impulse and heat tallies, thermal walls drawing from a seeded `SplitMix64`; gas statistics (`temperature`, `pressure`, `speed_ratio`, `slow_fraction`) and the `lattice_gas` start in `thermo.hpp` |
@@ -279,8 +280,8 @@ The view is fitted to the bodies at the start of a run and afterwards only
 grows, so frames share a scale, a near-stationary body keeps its cell, and no
 body is ever silently clipped. The printed extents show when it has grown. A 3D
 run is drawn as its orthographic projection onto the xy plane, so motion along z
-does not show and bodies at different depths can overlap; drawing a 3D scene
-properly waits for the rendering milestone.
+does not show and bodies at different depths can overlap; the viewer below
+draws the same run in 3D.
 
 ### See it in 3D
 
@@ -291,14 +292,16 @@ once per build directory and checks its SHA-256). It draws the five 3D types:
 .\out\build\windows-msvc-release\Release\malloy_viewer.exe scenarios\box_stack.scn
 ```
 
-Space pauses, N steps once, R restarts, `]` and `[` change the speed, the mouse
-orbits, pans and zooms, F refits the view and A toggles auto-fit. A run stops at
+Space pauses, N or the Right arrow steps once, R restarts, `]` and `[` change
+the speed, the mouse orbits (left drag), pans (right drag, or Shift and left
+drag) and zooms (wheel), F refits the view, A toggles auto-fit and T toggles
+trails. A run stops at
 the scenario's `steps` and holds its last frame. 2D scenarios are refused with
 a pointer to the terminal app.
 
 ### Load a scenario from a file
 
-Pass a scenario file as the single argument (the app has no flags):
+Pass a scenario file as the single argument (the terminal app has no flags):
 
 ```powershell
 .\out\build\windows-msvc-debug\Debug\malloy_nbody_terminal.exe scenarios\two_body.scn
@@ -322,7 +325,7 @@ Every template runs the same way. The keys each `type` accepts, and the limits
 the parser enforces (a scenario file is the one untrusted input), are documented
 in `include/malloy/scenario/scenario.hpp`. A file that does not parse, defines
 nothing to simulate, or fails validation is refused with a message on stderr and
-exit code 1. With no argument, the app runs the built-in scenarios shown above.
+exit code 1. With no argument, the terminal app runs the built-in scenarios shown above.
 
 ## Known limitations
 

@@ -1,6 +1,6 @@
 # 03 - Module Boundaries
 
-> All modules below are implemented (M2-M39). These boundaries are in force
+> All modules below are implemented (M2-M41). These boundaries are in force
 > in the shipped code; keep them when extending the project.
 
 > New physics domains follow the same shape: one library, one concrete world
@@ -11,13 +11,17 @@
 > (`docs/decisions/0006-multi-domain-dispatch.md`). `malloy_layering_tests`
 > enforces this from the build files and the sources (`docs/05`).
 
-The module graph at M39 (an arrow means "links"):
+The module graph at M41 (an arrow means "links"):
 
 ```text
 malloy_nbody_terminal (app)
   -> malloy_scenario, malloy_ascii, malloy_nbody, malloy_charges
+malloy_viewer (app, built only with MALLOY_BUILD_VIEWER)
+  -> malloy_scenario, malloy_view3d, raylib
 malloy_scenario
   -> every domain, malloy_collide, malloy_sim_core, malloy_math
+malloy_view3d
+  -> every domain, malloy_collide, malloy_math
 malloy_particles, malloy_rigid
   -> malloy_collide, malloy_sim_core, malloy_time, malloy_math
 malloy_nbody, malloy_springs, malloy_charges
@@ -147,11 +151,11 @@ Not responsible for collisions, induced or time-varying fields, radiation, or sc
 
 ## `malloy_nbody_terminal`
 
-The development base: the app the simulation is built and verified through
-until the rendering milestone. It is not the final product, so nothing a later
-GUI would need may live only here.
+The development base: the app the simulation is built and verified through.
+Since M41 the viewer (`malloy_viewer`) is a second front end; neither is the
+final product, so nothing a later GUI would need may live only here.
 
-Responsible for hardcoded demo setup (the built-in scenarios it runs with no argument), reading a single positional scenario path from argv, refusing a file that fails to parse or defines nothing to simulate, dispatching to one concrete runner per scenario type with a plain switch, calling library APIs, fixed number of steps, formatted terminal output (one diagnostics line per report, with the seed in the run header when a wall is thermal), view framing policy (which viewport each frame shows, and the orthographic flattening of 3D positions onto the xy plane), and returning nonzero on a parse, validation or step failure.
+Responsible for hardcoded demo setup (the built-in scenarios it runs with no argument), reading a single positional scenario path from argv, refusing a file that fails to parse or defines nothing to simulate, dispatching with its own plain switch over the scenario type to the run layer, which builds each world and formats the report line, calling library APIs, fixed number of steps, terminal output (one diagnostics line per report, with the seed in the run header when a wall is thermal), view framing policy (which viewport each frame shows, and the orthographic flattening of 3D positions onto the xy plane), and returning nonzero on a parse, validation or step failure.
 
 Not responsible for reusable physics logic, flags or a CLI parser, or evaluating `# check` lines ([#64](https://github.com/MalloyTheDev/malloy_sim/issues/64)).
 

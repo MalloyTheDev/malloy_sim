@@ -5,8 +5,8 @@ Use this prompt when asking Claude or another AI assistant to continue work on M
 ```text
 You are helping me build MalloySim, an all-in-one science physics simulation in
 C++20, meant to be seen in 3D. Since M41 the 3D scenario types are drawn in
-real time by malloy_viewer, and a GUI, UI and UX come next (#81). The terminal
-app is the base it is built and verified on, not the final product. Its domain
+real time by malloy_viewer, and a GUI, UI and UX are planned, behind their own
+milestone (#81). The terminal app is the base it is built and verified on, not the final product. Its domain
 libraries are meant to be reused by other science projects. It grows one
 finished physics domain at a time.
 
@@ -24,7 +24,7 @@ Before doing anything, read:
 - docs/06_CMAKE_AND_VSCODE_WORKFLOW.md
 - docs/07_POST_M5_ROADMAP.md
 - docs/09_MISTAKES_TO_AVOID.md
-- docs/decisions/ (ADRs 0001-0012)
+- docs/decisions/ (ADRs 0001-0013; 0013 is proposed, not accepted)
 
 Current status:
 
@@ -48,9 +48,18 @@ across ten scenario types, and every domain runs in two dimensions and three:
 - spring networks (springs, springs3d);
 - charged particles in electric and magnetic fields (charges, charges3d).
 
+Since M41 (ADR 0012) the five 3D types are drawn in real time by malloy_viewer,
+a second front end over a shared run layer (malloy_scenario, run.hpp) and a
+pure render model (malloy_view3d); the terminal app remains the base. The
+raylib drawing, the window and the input live in malloy_viewer; the
+graphics-independent render model and the camera calculations (fit, orbit, pan,
+zoom) live in malloy_view3d.
+
 The classical mechanics track is complete, M38 opened thermodynamics, and
 nothing further is scheduled: the next milestones are chosen from open GitHub
-issues labelled "milestone candidate" (docs/07_POST_M5_ROADMAP.md). Known open
+issues labelled "milestone candidate" (docs/07_POST_M5_ROADMAP.md). A proposed
+order after M41 is in docs/decisions/0013-the-roadmap-after-m41-is-gated.md; it
+is proposed, not accepted, and its order is not authorization. Known open
 defects are issues too; read the relevant ones before claiming a behaviour.
 
 Do not start any further milestone unless I explicitly ask, and then work only
@@ -64,10 +73,14 @@ step(), no registry, and no engine kernel. Adding a domain must leave
 malloy_sim_core unchanged (ADR 0006); malloy_layering_tests enforces the module
 graph.
 
-Do not add rendering, ECS, quantum, package
-managers, Catch2, plugins, scripting, or editor systems unless the milestone I
-asked for explicitly requires it. Rendering and the GUI are planned (issues #80
-and #81), not unwanted: they wait for their milestone like everything else.
+Do not add further rendering or viewer features, a GUI, library packaging,
+ECS, quantum, package managers, Catch2, plugins, scripting, or editor systems
+unless the milestone I asked for explicitly requires it. Rendering landed in
+M41 (ADR 0012): raylib, the window and the input live only in malloy_viewer,
+and the pure render model and camera calculations in malloy_view3d, which has
+no graphics dependency. The GUI (#81) and packaging
+(#82) are planned, not unwanted: they wait for their milestone like everything
+else.
 
 A domain is not finished until it has validation, an invariant checked by tests,
 malformed-input tests, and at least one scenario template in scenarios/, with a

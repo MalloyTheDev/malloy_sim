@@ -1,7 +1,7 @@
 # 04 - Numeric and Physics Conventions
 
 > These conventions are in force in every domain of the shipped code, through
-> M39. Where a rule belongs to one domain (the softening formula to
+> M41. Where a rule belongs to one domain (the softening formula to
 > `malloy_nbody` and `malloy_charges`, the gas definitions to
 > `malloy_particles`), its section says so.
 

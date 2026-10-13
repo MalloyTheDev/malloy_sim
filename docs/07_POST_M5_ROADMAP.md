@@ -7,6 +7,14 @@ build one milestone at a time. The all-in-one goal (`CLAUDE.md`,
 `docs/decisions/0006-multi-domain-dispatch.md`) does not license building ahead.
 Breadth is earned by finishing domains, not by scaffolding for them.
 
+A proposed roadmap, `docs/decisions/0013-the-roadmap-after-m41-is-gated.md`
+(proposed, not accepted), would order what comes next by three gates
+(publication, correctness, library) and classify every candidate as a
+foundation, a scientific domain, or an application before it is scheduled.
+Nothing is scheduled by it: the order records priority, not authorization, and
+every item still needs its own scope report and the owner's explicit go before
+it starts.
+
 ## The bar for "done"
 
 A domain is finished when it has all four (`CLAUDE.md` rule 16):
@@ -75,12 +83,72 @@ started until it is explicitly asked for, and it gets a number only then.
 | [#78](https://github.com/MalloyTheDev/malloy_sim/issues/78) | uniform gravity for spring networks | 1 |
 | [#64](https://github.com/MalloyTheDev/malloy_sim/issues/64) | one shared `# check` evaluator for the tests and the app | 2 |
 | [#81](https://github.com/MalloyTheDev/malloy_sim/issues/81) | a GUI, UI and UX over the rendering | 4 |
-| [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82) | package the libraries for reuse by other projects | 2 |
+| [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82) | package the libraries for reuse by other projects (ADR 0013, proposed: after its correctness gate) | 2 |
 | [#85](https://github.com/MalloyTheDev/malloy_sim/issues/85) | a rigid broadphase and a runtime contact-work budget, so large rigid scenes run | 4 |
 
 Open bugs are issues too; the ones that qualify a claim are noted where the
 claim is made. Fixing a bug is not a milestone, but a fix that changes an integrator or a template's numbers
 is a deliberate change recorded in `CHANGELOG.md`.
+
+## The order after M41 (ADR 0013, proposed)
+
+Three gates, in order:
+
+1. **Publication.** M41 is reviewed, its Linux CI job runs green on a branch
+   and pull request, and the owner approves the merge. **Passed for M41 on
+   2026-10-12:** CI was green on pull request #87, the owner merged it
+   (`2910de8`), CI was green again on `main`, and the manual input and HiDPI
+   checks were done (`CHANGELOG.md`, [M41], Verified after merge).
+2. **Correctness.** The measured numerical defects are fixed, each as its own
+   reviewed change with regression tests:
+   - the 3D rigid rotation update (forward Euler lets free rotation gain
+     energy without bound);
+   - the spring network timestep check (the per-spring check accepts networks
+     that diverge silently);
+   - [#86](https://github.com/MalloyTheDev/malloy_sim/issues/86),
+     [#67](https://github.com/MalloyTheDev/malloy_sim/issues/67),
+     [#63](https://github.com/MalloyTheDev/malloy_sim/issues/63) and
+     [#57](https://github.com/MalloyTheDev/malloy_sim/issues/57);
+   - a scoped decision on fast pairs passing through each other between
+     steps.
+3. **Library.** [#82](https://github.com/MalloyTheDev/malloy_sim/issues/82)
+   meets the acceptance criteria in ADR 0013, including a minimal external
+   consumer: a separate project that installs the packages, links only
+   `malloy::nbody`, and reproduces a verified N-body test case directly through
+   the installed public API, without the scenario dispatcher.
+
+After the gates, work is scheduled by dependency, not in a fixed sequence:
+
+- **A real application integration.** One of the owner's own projects
+  consumes the installed packages. This is distinct from the library gate's
+  minimal consumer test.
+- **The shared spatial index,** a design candidate for
+  [#79](https://github.com/MalloyTheDev/malloy_sim/issues/79) and
+  [#85](https://github.com/MalloyTheDev/malloy_sim/issues/85). It is
+  justified once both show compatible requirements.
+- **Small extensions of existing domains,** each when a demonstrated
+  dependency or consumer requires it.
+- **Continuum heat,** the preferred first new-domain candidate, subject to
+  separate approval.
+
+**The GUI** ([#81](https://github.com/MalloyTheDev/malloy_sim/issues/81)) is
+not scheduled by ADR 0013. It is an application milestone that needs its own
+authorization.
+
+**Every candidate is classified first:**
+
+- **Foundation:** reusable support with no physics of its own, extracted only
+  when a second real consumer demonstrates the need.
+  - The spatial index is the only candidate so far, and its trigger has not
+    been met.
+  - [#64](https://github.com/MalloyTheDev/malloy_sim/issues/64), the shared
+    check evaluator, is testing and validation infrastructure.
+- **Scientific domain:** a new library, or an extension or measurement of an
+  existing one.
+- **Application or integration:** a consumer of the libraries. Population and
+  agent models (ecology, epidemiology, planetary generators) are potential
+  sibling projects on the packaged libraries. They are not domains here, and
+  none is implicitly approved.
 
 ## Track 1: classical mechanics depth (complete)
 
@@ -200,7 +268,12 @@ None of these is scheduled.
 ```text
 thermodynamics, beyond M39: a piston (#75), accommodation coefficients (#76),
     a temperature and density profile (#77), a particle broadphase (#79)
-fluids (SPH, 2D)
+continuum heat (the preferred first new-domain candidate, subject to
+    separate approval)
+waves (a later candidate)
+fluids (SPH, 2D), deferred until neighbour-search needs are established
+solids (FEM), deferred; rotational objectivity to be validated for
+    finite-rotation use
 vehicles, as an application of rigid bodies
 ```
 
@@ -221,6 +294,22 @@ per bounce, so they are an ADR-level change to the draw-order contract.
 Fluids (SPH) would be a genuinely new domain, with a neighbour search that the
 O(N^2) pair loop cannot afford; the particle broadphase (#79) is the first step
 in that direction.
+
+ADR 0013 (proposed) records a preference among the new sciences, not a
+schedule:
+
+- **Continuum heat is the preferred first candidate,** because its scheme has
+  an exact discrete reference. Under forward-time centred-space differencing,
+  a sine mode of wavenumber k is multiplied every step by
+  1 - 4 r sin^2(k dx / 2), with r = alpha dt / dx^2. That is exact for the
+  recurrence, not for continuous diffusion, which needs its own convergence
+  study.
+- **Waves have a matching test** only for the standard centred one-dimensional
+  scheme at Courant number 1, with a consistently initialized one-way wave on a
+  periodic grid.
+- **SPH waits** for the neighbour search.
+- **A FEM proposal** must show it gives no stress under a rigid rotation
+  within its stated validity regime.
 
 Unnumbered on purpose. These were once written as M15 to M18, and M15 then
 shipped as gravity for rigid bodies, so the labels pointed at the wrong
@@ -277,13 +366,15 @@ scalar inertia in `malloy_rigid` are the 2D cases of a quaternion and an
 inertia tensor, and the integrator, the fixed timestep, the validation and
 status model, the scenario dispatch and the impulse formulas carried over
 almost unchanged, as the amendments to ADR 0009 record. `malloy_ascii`
-and the 2D area properties do not carry over; the app draws a 3D world as an
-orthographic flattening onto the xy plane until rendering has its milestone.
+and the 2D area properties do not carry over; the terminal app draws a 3D
+world as an orthographic flattening onto the xy plane, and since M41 the viewer
+draws it in 3D.
 
-It is still gated. Nothing 3D is added before its milestone, and the 2D types
-stay supported (`CLAUDE.md` rule 6). Raylib remains the likely first
-visualization choice because it gets pixels on screen quickly; the GUI, UI and
-UX are then built over the rendering, each its own milestone. The simulation
+M41 provides the existing 3D viewer; further 3D, viewer and GUI capabilities
+remain milestone-gated. Nothing more is added before its own milestone, and the
+2D types stay supported (`CLAUDE.md` rule 6). M41 chose raylib 6.0 and confined it to
+the viewer (ADR 0012); the GUI, UI and UX would be built over the same run
+layer and render model, each its own milestone. The simulation
 libraries stay free of any graphics dependency, so the rendering consumes them
 the way another project would.
 
@@ -291,6 +382,9 @@ the way another project would.
 
 ```text
 quantum (unnumbered)
+potential sibling projects on the packaged libraries (ecology, epidemiology,
+    planetary generators and other population or agent models; not
+    implicitly approved; ADR 0013, proposed)
 ```
 
 Quantum should start as a separate repo or isolated prototype. Only merge it as

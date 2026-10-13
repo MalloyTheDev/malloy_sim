@@ -3,13 +3,13 @@
 **MalloySim C++** is an all-in-one science physics simulation in C++20, meant
 to be seen: its destination is a simulator rendered in 3D, with a GUI, UI and
 UX. It is built simulation-first: the terminal app is the base it is built
-and verified on until the rendering milestone, not the final product, and its
-domain libraries are meant to be the foundation of other science projects. It grows one finished physics domain at a time, each shipping tested scenario templates, with no engine kernel and no
+and verified on, and since M41 a real-time viewer draws the 3D scenario types
+(ADR 0012); neither is the final product, and its domain libraries are meant to be the foundation of other science projects. It grows one finished physics domain at a time, each shipping tested scenario templates, with no engine kernel and no
 simulation base class (`docs/decisions/0006-multi-domain-dispatch.md`).
 
-M1-M41 are complete: the math, time, sim-core, N-body, scenario, ASCII, collide,
-particles, rigid, springs and charges libraries are built, and the terminal app
-runs all ten scenario types. Gravity, colliding particles, rigid bodies,
+M1-M41 are complete: the math, time, sim-core, N-body, scenario, ASCII, view3d,
+collide, particles, rigid, springs and charges libraries are built, the terminal
+app runs all ten scenario types, and the viewer draws the five 3D ones. Gravity, colliding particles, rigid bodies,
 spring networks and charged particles are the finished domains, and all five of
 them run in three dimensions as well as two. Thirty-three templates in `scenarios/`
 cover all ten types. See `README.md` and `CHANGELOG.md`.
@@ -31,9 +31,11 @@ collide. M36 and M37 brought the box back to the plane: 2D box against box, and
 a 2D box on the ground.
 
 M40 gave both rigid worlds a per-point iterative contact solver, so a box that
-lands tilted comes to rest and short stacks stand (ADR 0011). What remains of
-the 3D arc is listed in `docs/07_POST_M5_ROADMAP.md`: immovable 3D bodies and
-rendering, each its own milestone.
+lands tilted comes to rest and short stacks stand (ADR 0011). M41 added
+real-time 3D rendering: `malloy_viewer` over a shared run layer and a pure render
+model (ADR 0012). What remains of the 3D arc is listed in
+`docs/07_POST_M5_ROADMAP.md`: immovable 3D bodies (#74) and the GUI (#81), each
+its own milestone.
 
 That destination is why some of the current code looks the way it does: the
 scalar angle and scalar inertia in `RigidBody2D` are 2D specializations of the
@@ -55,7 +57,7 @@ alternative to them. See
 10. `docs/08_AI_HANDOFF_PROMPT.md`
 11. `docs/09_MISTAKES_TO_AVOID.md`
 12. `docs/10_CHANGELOG_TEMPLATE.md`
-13. `docs/decisions/` (ADRs 0001-0012)
+13. `docs/decisions/` (ADRs 0001-0013; 0013 is proposed, not accepted)
 
 `CHANGELOG.md` is the record of what each milestone actually shipped, and the
 open GitHub issues are the record of known defects and milestone candidates.
@@ -71,9 +73,10 @@ ctest --preset windows-msvc-debug
 All 15 test executables should pass, and
 `out/build/windows-msvc-debug/Debug/malloy_nbody_terminal.exe` should run to
 completion. CTest runs 46 tests in all: the executables, sixteen checks that
-run the terminal app and fifteen that run the viewer. CI runs the Debug and Release builds with every test,
-and a short fuzz run, on every push and pull request to `main`
-(`.github/workflows/ci.yml`).
+run the terminal app and fifteen that run the viewer. CI runs the Debug and
+Release builds with every test, a Linux clang build with every test and the
+viewer's pixel self-test, and a short fuzz run, on every push and pull request
+to `main` (`.github/workflows/ci.yml`).
 
 To run one template:
 
@@ -90,16 +93,20 @@ box of colliding particles as a gas: its temperature, the pressure on its walls,
 and its relaxation to Maxwell-Boltzmann. M39 gave its walls a temperature, so
 heat flows through the gas, using the project's first random numbers: seeded,
 fully specified and owned by the particle domain (ADR 0010). M40 returned to
-the rigid domain with a per-point iterative contact solver (ADR 0011). Five
-finished domains sit behind multi-domain dispatch, across ten scenario types.
+the rigid domain with a per-point iterative contact solver (ADR 0011), and M41
+drew the 3D scenario types in real time (ADR 0012). Five finished domains sit
+behind multi-domain dispatch, across ten scenario types.
 
 Nothing further is scheduled. The candidates for the next milestone are open
 issues labelled `milestone candidate`, listed in
-`docs/07_POST_M5_ROADMAP.md`: 3D rendering and then a GUI, UI and UX (the
-destination), packaging the libraries for other projects, immovable 3D bodies, box against disc in 2D, a piston, accommodation
-coefficients, a temperature profile, a particle broadphase, gravity for
-springs, and a shared `# check` evaluator. Work stays gated one milestone at a
-time, started only when asked.
+`docs/07_POST_M5_ROADMAP.md`: a GUI, UI and UX over the viewer (#81, the
+destination), packaging the libraries for other projects (#82), immovable 3D
+bodies (#74), box against disc in 2D (#48), a piston (#75), accommodation
+coefficients (#76), a temperature profile (#77), a particle broadphase (#79),
+gravity for springs (#78), a rigid broadphase and contact-work budget (#85), and
+a shared `# check` evaluator (#64). A proposed order for them is in
+`docs/decisions/0013-the-roadmap-after-m41-is-gated.md` (proposed, not
+accepted). Work stays gated one milestone at a time, started only when asked.
 
 The all-in-one goal is not a license to build ahead. Breadth is earned by
 finishing domains, not by scaffolding for them
