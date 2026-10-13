@@ -7998,24 +7998,38 @@ int main()
         //     is 132 dt, above the threshold's 8 |g| dt. The box (0.6, 0.35,
         //     0.15), spin (2, 6, 4), tilted 0.3 rad about (1, 1, 0), dropped from
         //     2 m at e 0.5, mu 0 and 0.5, dt 0.002, 0.001 and 0.0005, 4 s:
-        //       - every impact step whose manifold is all impact points obeys
-        //         the mid-step law at each of them, from the exact solved
-        //         state, to the impact tolerance (a step that mixes in a point
-        //         below the threshold is counted, not checked: the rest phase
-        //         then acts on the same body after the impact). With friction,
-        //         only a ONE-point impact is held to it: a frictional impact
-        //         at several points can stop at the 100-sweep cap
-        //         (kMaxSweeps, ADR 0011), short of the tolerance, so those
-        //         are counted and their worst printed. That is the solver's
-        //         behaviour, not this step's (measured with instrumented
-        //         builds of both: in this scenario the impact phase stopped
-        //         at the cap once on the forward-Euler step and 3 times here,
-        //         law errors up to 2.7e-6 m/s, and each of those 4 states
-        //         caps identically on either step's solver; over 2000 seeded
-        //         random drops at friction 0.5 the cap stopped 28.4% of the
-        //         multi-point impacts before and 28.1% after, none of them
-        //         raising the kinetic energy). So the law is asserted for the
-        //         impacts held to it, not for every impact;
+        //       - every impact step whose manifold is all impact points is
+        //         held to the mid-step law at each of them, from the exact
+        //         solved state, to the impact tolerance. A step that mixes in a
+        //         point below the threshold is counted, not checked: the rest
+        //         phase then acts on the same body after the impact, so the law
+        //         is not observable after the step.
+        //       - ONE exception, accepted for issue #88: an impact the solver
+        //         stopped at its 100-sweep cap (kMaxSweeps, ADR 0011) short of
+        //         the tolerance. It is recognised, not assumed: the solver
+        //         stops early only at the cap, and a point left approaching
+        //         faster than its target (out below the target by more than the
+        //         tolerance) violates its stopping rule whatever the point's
+        //         impulse, so such a solve was capped. Only a frictional impact
+        //         at several points may be excused this way, as only those were
+        //         measured to cap here. Any other miss fails, including a point
+        //         leaving FASTER than its target, which a converged solve allows
+        //         only for a point carrying no impulse and which this scenario
+        //         never shows. The cap is the solver's behaviour, not this
+        //         step's (instrumented builds of both: in this scenario the
+        //         impact phase stopped at the cap once on the forward-Euler
+        //         step and 3 times here, law errors up to 2.7e-6 m/s, and each
+        //         of those 4 states caps identically on either step's solver;
+        //         over 2000 seeded random drops at friction 0.5 the cap stopped
+        //         28.4% of the multi-point impacts before and 28.1% after, none
+        //         of them raising the kinetic energy).
+        //       - COVERAGE, so the exception cannot grow unseen: at most
+        //         kCappedMax capped impacts, at most kMixedMax unchecked mixed
+        //         steps, and at least kHeldMin impacts and kFrictionalMin
+        //         frictional multi-point impacts that meet the law. These are
+        //         the counts measured with MSVC (Debug and Release) and clang
+        //         21; they are regression pins, not physical tolerances, and a
+        //         change that moves them must be reviewed, not re-pinned;
         //       - the energy never rises above the start by more than this
         //         body's own rotational envelope, the largest change of its
         //         rotational energy rotating freely from the same start for the
@@ -8030,13 +8044,19 @@ int main()
             const Real g = 9.81;
             const Real e = 0.5;
             const Real margin = 1e-4 * 0.6;
+            const int kCappedMax = 1;
+            const int kMixedMax = 26;
+            const int kHeldMin = 146;
+            const int kFrictionalMin = 4;
             Real worst_law = 0.0;
             Real worst_rise = 0.0;
             Real worst_jump = 0.0;
             int impacts = 0;
             int mixed = 0;
-            int checked = 0;
-            int frictional = 0;
+            int held = 0;
+            int held_frictional = 0;
+            int capped = 0;
+            int unexplained = 0;
             Real worst_capped = 0.0;
             Real apex[2][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
             for (int f = 0; f < 2; ++f)
@@ -8129,30 +8149,36 @@ int main()
                             {
                                 const RigidBody3D solved = m40_solved3(before, w)[0];
                                 const Real vs = std::fmax(m40_scale3({b}), m40_scale3({solved}));
-                                const bool held = mu == 0.0 || active == 1;
+                                const Real tol = 4.0 * m40_impact_tol * vs + 64.0 * m40_eps * vs;
+                                // Signed: out - target, per active point.
+                                Real low = 0.0;
+                                Real high = 0.0;
                                 for (int a = 0; a < active; ++a)
                                 {
                                     const Real out =
                                         solved.velocity.z +
                                         cross(rotate(solved.orientation, solved.angular_velocity), arms[a]).z;
-                                    const Real error = std::fabs(out - (-e * middles[a] + deltas[a] / 2.0));
-                                    if (held)
-                                    {
-                                        worst_law = std::fmax(
-                                            worst_law, error / (4.0 * m40_impact_tol * vs + 64.0 * m40_eps * vs));
-                                    }
-                                    else
-                                    {
-                                        worst_capped = std::fmax(worst_capped, error);
-                                    }
+                                    const Real error = out - (-e * middles[a] + deltas[a] / 2.0);
+                                    low = std::fmin(low, error);
+                                    high = std::fmax(high, error);
                                 }
-                                if (held)
+                                const Real miss = std::fmax(-low, high);
+                                const bool frictional_multi = mu > 0.0 && active > 1;
+                                if (miss <= tol)
                                 {
-                                    ++checked;
+                                    ++held;
+                                    held_frictional += frictional_multi ? 1 : 0;
+                                    worst_law = std::fmax(worst_law, miss / tol);
+                                }
+                                else if (frictional_multi && -low > tol)
+                                {
+                                    ++capped;
+                                    worst_capped = std::fmax(worst_capped, miss);
                                 }
                                 else
                                 {
-                                    ++frictional;
+                                    ++unexplained;
+                                    worst_law = std::fmax(worst_law, miss / tol);
                                 }
                             }
                         }
@@ -8168,11 +8194,20 @@ int main()
                     }
                 }
             }
-            m40_check("AC-6e every held impact: mid-step law, |error| / tolerance", worst_law, 1.0);
-            m40_check("AC-6e impacts held to the law (1 / count)", 1.0 / static_cast<Real>(checked), 1.0);
-            std::cout << "  M40 info  AC-6e impact steps " << impacts << ": " << checked << " held, " << mixed
-                      << " mixed with a resting point, " << frictional
-                      << " frictional at several points (worst " << worst_capped << " m/s)\n";
+            m40_check("AC-6e every impact but the capped: mid-step law, |error| / tolerance", worst_law, 1.0);
+            m40_check("AC-6e misses the cap does not explain", static_cast<Real>(unexplained), 0.0);
+            m40_check("AC-6e coverage: capped impacts (at most kCappedMax)", static_cast<Real>(capped),
+                      static_cast<Real>(kCappedMax));
+            m40_check("AC-6e coverage: unchecked mixed steps (at most kMixedMax)", static_cast<Real>(mixed),
+                      static_cast<Real>(kMixedMax));
+            m40_check("AC-6e coverage: impacts that meet the law (kHeldMin - count)",
+                      static_cast<Real>(kHeldMin - held), 0.0);
+            m40_check("AC-6e coverage: frictional multi-point impacts that meet it (kFrictionalMin - count)",
+                      static_cast<Real>(kFrictionalMin - held_frictional), 0.0);
+            std::cout << "  M40 info  AC-6e impact steps " << impacts << ": " << held << " meet the law ("
+                      << held_frictional << " frictional at several points), " << capped
+                      << " capped (worst " << worst_capped << " m/s), " << mixed << " mixed, " << unexplained
+                      << " unexplained\n";
             m40_check("AC-6e energy rise above the start / the rotational envelope", worst_rise, 1.0);
             m40_check("AC-6e energy rise across an impact step / the single-step envelope", worst_jump, 1.0);
             for (int f = 0; f < 2; ++f)

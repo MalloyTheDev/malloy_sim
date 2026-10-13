@@ -247,15 +247,23 @@ All notable changes to MalloySim are recorded here. The format follows
     exact pre-solve and solved states, and two AC-6 regressions are new: the
     prediction for a fast anisotropic box under a torque, and that box's
     bounces at e 0.5.
-  - **Not every impact meets the impact tolerance.** A frictional impact at
-    several points can stop at the solver's 100-sweep cap (ADR 0011) short of
-    it, so the bounce test holds frictionless and one-point impacts to the
-    mid-step law and only counts the rest. This is the solver's behaviour, not
-    the new step's: over 2000 seeded random drops at friction 0.5 the cap
-    stopped 28.4% of the multi-point impacts before the change and 28.1% after
-    (8.8% and 9.2% at friction 0.3), with the same spread of errors, and no
-    capped impact raised the kinetic energy. A few capped impacts leave the
-    restitution law far from met (worst 1.9 m/s before, 0.5 m/s after).
+  - **Not every impact meets the impact tolerance.** An impact at several
+    points can stop at the solver's 100-sweep cap (ADR 0011) short of it.
+    - **The bounce test.** It holds every impact to the mid-step law except one
+      it recognises as capped: a point left approaching faster than its target
+      breaks the solver's stopping rule, so that solve stopped at the cap.
+      Only a frictional multi-point impact may be excused that way. Coverage
+      is pinned to the measured counts (MSVC Debug and Release, clang 21):
+      - at most 1 capped impact and 26 unchecked steps;
+      - at least 146 impacts meeting the law, 4 of them frictional
+        multi-point.
+    - **Not the new step's doing.** Over 2000 seeded random drops at friction
+      0.5, the cap stopped 28.4% of the multi-point impacts before the change
+      and 28.1% after (8.8% and 9.2% at friction 0.3), with the same spread of
+      errors. Without friction it capped once in 2000 drops after the change,
+      4.9e-11 m/s off, and never before.
+    - **Effects.** No capped impact raised the kinetic energy. A few leave the
+      restitution law far from met (worst 1.9 m/s before, 0.5 m/s after).
   - **Changed numbers.**
     - `gyroscope.scn`: the energy at 12 s is 49.6081314, from 49.6086482, which
       carried forward Euler's spurious gain; the new value is within 3e-9 of
