@@ -1,6 +1,7 @@
 #include <malloy/rigid/rigid.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -84,7 +85,13 @@ constexpr int kMaxSweeps = 100;
 // corners, its strikes resolved a step late and so never slow enough to rest:
 // 6 of 48 nudges with friction 0.5 and 32 of 48 frictionless (up to 1.5e-2 J
 // after 15 s). At four, all 48 rest with friction and the frictionless ones are
-// below 2e-10 J.
+// below 2e-10 J. Issue #88 changed the rotation this was tuned on, so it was
+// re-measured on a reconstruction (that setup is not recorded here: a cube and
+// a 0.5 x 0.3 x 0.2 box, 48 spin nudges each, e 1, dt 0.002, 15 s). Above
+// 2e-10 J at the end: cube 12 and 24 of 48 (friction 0.5 and 0), box 0 and 16
+// on the old rotation; cube 12 and 24, box 0 and 8 on the new. The
+// reconstruction does not reproduce the counts above even on the old rotation,
+// so it differs from the original setup; old against new is like for like.
 constexpr math::Real kThresholdFactor = 4.0;
 
 // Warm-start match radius for two boxes, as a fraction of body a's size: the
@@ -933,17 +940,19 @@ void impact_phase(std::vector<RigidBody3D>& bodies, const Rigid3DSettings& setti
     for (ContactPoint& c : contacts.points)
     {
         // delta: what this step's forcing (steps 0 and 1) will add to the
-        // point's normal velocity, from the same start state the forcing reads.
+        // point's normal velocity before the rest phase, from the same start
+        // state the forcing reads. Since issue #88 step (1) is the torque kick
+        // alone: the gyroscopic change of the world spin happens in the free
+        // rotation of step (2), after the contact phases, and reaches the next
+        // step's start velocity instead. Body b's change minus body a's, as in
+        // relative_velocity; the ground (b) receives no forcing.
         const auto forcing_change = [&](std::size_t i, const math::Vec3& arm)
         {
             const RigidBody3D& body = bodies[i];
-            const math::Vec3& w = body.angular_velocity;
             const math::Vec3& I = body.inertia;
             const math::Vec3 torque_body =
                 math::rotate(math::conjugate(body.orientation), settings.torque);
-            const math::Vec3 rate{((I.y - I.z) * w.y * w.z + torque_body.x) / I.x,
-                                  ((I.z - I.x) * w.z * w.x + torque_body.y) / I.y,
-                                  ((I.x - I.y) * w.x * w.y + torque_body.z) / I.z};
+            const math::Vec3 rate{torque_body.x / I.x, torque_body.y / I.y, torque_body.z / I.z};
             const math::Vec3 spin_change = math::rotate(body.orientation, rate * dt);
             return settings.gravity * dt + (settings.force / body.mass) * dt +
                    math::cross(spin_change, arm);
@@ -1254,6 +1263,124 @@ void remember(const Contacts& contacts, std::vector<Rigid3DWorld::WarmContact>& 
                                                   c.normal_impulse, c.tangent_impulse});
     }
 }
+
+// Step (2): one body's torque-free rotation over dt (issue #88).
+//
+// The free Hamiltonian H = sum L_a^2 / (2 I_a), with the axes ordered by
+// moment (j the smallest, i the median, k the largest, ties by index), is
+// regrouped as
+//
+//     H = |L|^2 / (2 I_i) + c_j L_j^2 / 2 + c_k L_k^2 / 2,
+//     c_j = 1/I_j - 1/I_i,  c_k = 1/I_k - 1/I_i,
+//
+// and stepped by the symmetric composition A_j(dt/2), A_k(dt), C(dt),
+// A_j(dt/2) of the three terms' EXACT flows:
+//
+//   - A_a(s), the flow of c_a L_a^2 / 2: L_a is constant along it, so the
+//     body turns by phi = s c_a L_a about its axis e_a (q <- q r, with
+//     r = (cos phi/2, sin phi/2 e_a)) while L_b turns by -phi about e_a;
+//   - C(s), the flow of |L|^2 / (2 I_i): L_b is unchanged, and the body turns
+//     by s |L| / I_i about L_b.
+//
+// Every piece depends on the body-frame momentum alone, so every piece keeps
+// the WORLD angular momentum R L_b, and |L| is unchanged; the composition is
+// time-reversible and second order. The median base makes it exact for every
+// sphere and every axisymmetric body, since then c_j or c_k is 0 and the two
+// remaining flows commute. Energy is not conserved for three distinct
+// moments; its error stays bounded in the measured cases, which is not a
+// general guarantee (rigid3d_world.hpp).
+//
+// Three rules keep the stored angular velocity bit for bit where it was exact
+// before (spheres, eigenspace states, principal-axis spins, a body at rest):
+//
+//   R1. a turn whose angle is exactly 0 is skipped, which is bit-identical to
+//       applying it;
+//   R2. A_a is applied as a plane rotation of the two components across e_a,
+//       so L_a is never touched;
+//   R3. only the components of L_b the flow changed are converted back to
+//       angular velocity.
+//
+// The orientation is not bit-identical to the forward-Euler update it
+// replaces: it is turned by exact rotations rather than by q + q (0, w) dt / 2.
+void free_rotation(RigidBody3D& body, math::Real dt)
+{
+    const std::array<math::Real, 3> moment{body.inertia.x, body.inertia.y, body.inertia.z};
+    const math::Vec3& w = body.angular_velocity;
+    const std::array<math::Real, 3> start{moment[0] * w.x, moment[1] * w.y, moment[2] * w.z};
+    std::array<math::Real, 3> momentum = start;
+
+    std::array<std::size_t, 3> order{0, 1, 2};
+    std::stable_sort(order.begin(), order.end(),
+                     [&](std::size_t a, std::size_t b) { return moment[a] < moment[b]; });
+    const std::size_t j = order[0];
+    const std::size_t i = order[1];
+    const std::size_t k = order[2];
+    const math::Real base = math::Real{1} / moment[i];
+    const math::Real c_j = math::Real{1} / moment[j] - base;
+    const math::Real c_k = math::Real{1} / moment[k] - base;
+
+    math::Quat q = body.orientation;
+    const auto axis_turn = [&](std::size_t a, math::Real c, math::Real s)
+    {
+        const math::Real phi = s * c * momentum[a];
+        if (phi == math::Real{0})
+        {
+            return; // R1
+        }
+        const math::Real cos_half = std::cos(phi * math::Real{0.5});
+        const math::Real sin_half = std::sin(phi * math::Real{0.5});
+        std::array<math::Real, 3> axis{};
+        axis[a] = sin_half;
+        q = q * math::Quat{cos_half, math::Vec3{axis[0], axis[1], axis[2]}};
+        // R2: L_b turns by -phi about e_a, in the plane of the other two axes,
+        // by the matrix of the same quaternion (cos phi = c^2 - s^2 and
+        // sin phi = 2 s c), so the momentum and the body turn together and the
+        // turn costs two trigonometric calls rather than four.
+        const std::size_t b = (a + 1) % 3;
+        const std::size_t c2 = (a + 2) % 3;
+        const math::Real cos_phi = cos_half * cos_half - sin_half * sin_half;
+        const math::Real sin_phi = math::Real{2} * sin_half * cos_half;
+        const math::Real lb = momentum[b];
+        const math::Real lc = momentum[c2];
+        momentum[b] = lb * cos_phi + lc * sin_phi;
+        momentum[c2] = lc * cos_phi - lb * sin_phi;
+    };
+    const auto casimir_turn = [&](math::Real s)
+    {
+        const math::Vec3 axis{momentum[0], momentum[1], momentum[2]};
+        const math::Real size = math::length(axis);
+        const math::Real angle = s * size * base;
+        if (angle == math::Real{0})
+        {
+            return; // R1
+        }
+        // from_axis_angle(axis, angle), with the length already in hand.
+        const math::Real half_angle = angle * math::Real{0.5};
+        q = q * math::Quat{std::cos(half_angle), axis * (std::sin(half_angle) / size)};
+    };
+
+    const math::Real half = dt * math::Real{0.5};
+    axis_turn(j, c_j, half);
+    axis_turn(k, c_k, dt);
+    casimir_turn(dt);
+    axis_turn(j, c_j, half);
+    body.orientation = q;
+
+    // R3: a component the flow left exactly as it was keeps its bits.
+    math::Vec3& omega = body.angular_velocity;
+    if (momentum[0] != start[0])
+    {
+        omega.x = momentum[0] / moment[0];
+    }
+    if (momentum[1] != start[1])
+    {
+        omega.y = momentum[1] / moment[1];
+    }
+    if (momentum[2] != start[2])
+    {
+        omega.z = momentum[2] / moment[2];
+    }
+}
 } // namespace
 
 bool RigidBody3D::is_valid() const
@@ -1407,29 +1534,21 @@ sim_core::StepResult Rigid3DWorld::step()
         //     pre-M28 world is unchanged bit for bit.
         body.velocity += (settings_.force / body.mass) * dt;
 
-        // (1) Euler's equations, in the body frame, stepped with FORWARD
-        //     Euler: the rate is evaluated wholly at the old angular velocity
-        //     and orientation, so there is no older state to evaluate it at.
-        //     That is where the exact second-order drift in |L|^2 and in the
-        //     energy comes from (see rigid3d_world.hpp); the semi-implicit part
-        //     of this world is the COUPLING in step (2), not this line.
+        // (1) the applied torque (M21) as ONE kick: the world angular momentum
+        //     gains T dt exactly, at the start-of-step pose (issue #88). The
+        //     torque is a WORLD-frame setting and the body stores its angular
+        //     velocity in the body frame, so it is rotated in by the CURRENT
+        //     orientation, T_body = R^-1 T_world, `rotate` by the conjugate.
         //
-        //     The applied torque is a WORLD-frame setting, and Euler's
-        //     equations are diagonal only in the body frame, so it is rotated
-        //     in by the body's CURRENT orientation, before step (2) changes it.
-        //     T_body = R^-1 T_world is `rotate` by the conjugate quaternion.
-        //
-        //     The gyroscopic term is a DIFFERENCE of principal moments, so a
-        //     sphere cannot precess and a body with three distinct moments can
-        //     tumble; it is identically zero in two dimensions, which is why
-        //     none of that physics exists there. The torque is what M21 adds.
-        const math::Vec3& w = body.angular_velocity;
+        //     There is no gyroscopic term here any more: the rotation itself,
+        //     the term that makes a body with three distinct moments tumble,
+        //     is the exact free flow of step (2), after the contact phase.
+        //     A zero torque adds a zero vector, so a torque-free world is
+        //     unchanged by this line.
         const math::Vec3& I = body.inertia;
         const math::Vec3 torque_body =
             math::rotate(math::conjugate(body.orientation), settings_.torque);
-        const math::Vec3 rate{((I.y - I.z) * w.y * w.z + torque_body.x) / I.x,
-                              ((I.z - I.x) * w.z * w.x + torque_body.y) / I.y,
-                              ((I.x - I.y) * w.x * w.y + torque_body.z) / I.z};
+        const math::Vec3 rate{torque_body.x / I.x, torque_body.y / I.y, torque_body.z / I.z};
         body.angular_velocity += rate * dt;
     }
 
@@ -1441,17 +1560,14 @@ sim_core::StepResult Rigid3DWorld::step()
 
     for (RigidBody3D& body : bodies_)
     {
-        // (2) the orientation, from the UPDATED angular velocity, which keeps
-        //     this semi-implicit Euler. Body-frame omega puts the quaternion on
-        //     the LEFT of the product.
-        const math::Quat spin{math::Real{0}, body.angular_velocity};
-        body.orientation =
-            body.orientation + (body.orientation * spin) * (dt * math::Real{0.5});
+        // (2) the torque-free rotation over dt, from the angular velocity the
+        //     kick and the contact phases left: the exact sub-flows of
+        //     `free_rotation`, which turn the orientation and carry the
+        //     body-frame momentum with it, keeping the world angular momentum.
+        free_rotation(body, dt);
 
-        // (3) renormalize. The step above moves tangentially off the unit
-        //     sphere, so the norm grows by exactly
-        //     sqrt(1 + |omega|^2 dt^2 / 4) per step: the quaternion norm is
-        //     multiplicative and this is a right multiplication.
+        // (3) renormalize. Each turn is a unit quaternion, so the product
+        //     stays on the unit sphere up to rounding, which this removes.
         //
         //     This is NOT the positional correction's kind of projection and
         //     costs nothing physically. A nonzero quaternion and any scaling of

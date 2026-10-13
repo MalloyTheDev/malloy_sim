@@ -59,6 +59,84 @@ RigidBody2D awkward_body()
     b.local_center_of_mass = Vec2{0.6, -0.4};
     return b;
 }
+
+// --- References for the 3D free rotation (issue #88), written from the
+//     physics and the documented step, never from the world's own code. ---
+
+// The angle, in radians, of the rotation taking orientation b to a: the
+// distance between two orientations. Blind to the sign of a quaternion, since
+// q and -q are the same rotation.
+Real rotation_between(const malloy::math::Quat& a, const malloy::math::Quat& b)
+{
+    const malloy::math::Quat d = a * malloy::math::conjugate(b);
+    return 2.0 * std::atan2(malloy::math::length(d.v), std::abs(d.w));
+}
+
+// Jacobi's elliptic functions of (u | m), 0 <= m < 1, by the arithmetic-
+// geometric mean and its descending recurrence (Abramowitz and Stegun 16.4):
+// a_0 = 1, b_0 = sqrt(1 - m), c_0 = sqrt(m), each step the means and the half
+// difference, until c vanishes; then phi_N = 2^N a_N u and
+// phi_(n-1) = (phi_n + asin(c_n sin(phi_n) / a_n)) / 2 give sn = sin(phi_0) and
+// cn = cos(phi_0). `quarter` is K(m) = pi / (2 a_N), the quarter period.
+struct Jacobi
+{
+    Real sn;
+    Real cn;
+    Real dn;
+    Real quarter;
+};
+
+Jacobi jacobi(Real u, Real m)
+{
+    Real a[16];
+    Real c[16];
+    a[0] = 1.0;
+    c[0] = std::sqrt(m);
+    Real b = std::sqrt(1.0 - m);
+    int n = 0;
+    while (n < 15 && c[n] > 1e-17 * a[n]) // quadratic: five or six rounds
+    {
+        a[n + 1] = 0.5 * (a[n] + b);
+        c[n + 1] = 0.5 * (a[n] - b);
+        b = std::sqrt(a[n] * b);
+        ++n;
+    }
+    Real phi = std::ldexp(a[n] * u, n);
+    for (int k = n; k > 0; --k)
+    {
+        phi = 0.5 * (phi + std::asin(c[k] * std::sin(phi) / a[k]));
+    }
+    const Real sn = std::sin(phi);
+    return Jacobi{sn, std::cos(phi), std::sqrt(1.0 - m * sn * sn),
+                  1.5707963267948966 / a[n]};
+}
+
+// The closed-form torque-free motion of an asymmetric top (Landau and
+// Lifshitz, Mechanics, section 37): moments I1 < I2 < I3 along x, y, z, a
+// start (w1, 0, w3) with w1, w3 > 0 and |L|^2 > 2 T I2, so the body tumbles
+// about its z axis. Then, with lambda and m below,
+//
+//     w(t) = (w1 cn(lambda t), B sn(lambda t), w3 dn(lambda t)),
+//     B = w1 sqrt(I1 (I3 - I1) / (I2 (I3 - I2))),
+//     lambda = w3 sqrt((I3 - I1) (I3 - I2) / (I1 I2)),
+//     m = (I2 - I1) I1 w1^2 / ((I3 - I2) I3 w3^2),
+//
+// the book's amplitudes with |L|^2 and 2T substituted from the start, so no
+// difference of nearly equal numbers is formed. The body frame, which the
+// world stores angular velocity in. The reduced period is 4 K(m) / lambda.
+malloy::math::Vec3 free_top(const malloy::math::Vec3& I, const malloy::math::Vec3& w0, Real t,
+                            Real* period = nullptr)
+{
+    const Real lambda = w0.z * std::sqrt((I.z - I.x) * (I.z - I.y) / (I.x * I.y));
+    const Real m = (I.y - I.x) * I.x * w0.x * w0.x / ((I.z - I.y) * I.z * w0.z * w0.z);
+    const Real across = w0.x * std::sqrt(I.x * (I.z - I.x) / (I.y * (I.z - I.y)));
+    const Jacobi f = jacobi(lambda * t, m);
+    if (period != nullptr)
+    {
+        *period = 4.0 * f.quarter / lambda;
+    }
+    return malloy::math::Vec3{w0.x * f.cn, across * f.sn, w0.z * f.dn};
+}
 } // namespace
 
 int main()
@@ -2269,20 +2347,51 @@ int main()
         //     principal moments, so when all three are equal the angular
         //     velocity is bit-for-bit constant no matter which way the body is
         //     spinning. Written with a generic omega, along no principal axis,
-        //     so the only thing making the rate vanish is the difference. ---
+        //     so the only thing making the rate vanish is the difference.
+        //
+        //     Since issue #88 the free rotation is the regrouped splitting of
+        //     the step contract: for a sphere both axis coefficients are 0, so
+        //     only the |L|^2 rotation acts, a turn of the body about omega by
+        //     |omega| dt that leaves the body-frame momentum alone. The exact
+        //     motion is therefore q(t) = q0 * (rotation by |omega| t about
+        //     omega), which holds to rounding: at most 48 eps of angle per step
+        //     (one turn, one product, one renormalization, and the reference's
+        //     own rounding), a sine-and-cosine error of a few eps of each
+        //     step's angle, and 16 eps for the comparison. Started tilted, so a
+        //     turn composed on the wrong side (r * q for q * r) shows. ---
         {
             RigidBody3D ball;
             ball.inertia = Vec3{2.5, 2.5, 2.5};
             ball.angular_velocity = Vec3{0.7, -1.3, 0.4};
+            ball.orientation = malloy::math::from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.8);
 
-            Rigid3DWorld world{SimulationSettings{0.001}, {ball}};
+            const Real dt = 0.001;
+            const int steps = 2000;
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            const Real rate = malloy::math::length(ball.angular_velocity);
+            Rigid3DWorld world{SimulationSettings{dt}, {ball}};
             const Vec3 l0 = spin_angular_momentum(world.bodies()[0]);
-            for (int i = 0; i < 2000; ++i)
+            Real worst_turn = 0.0;
+            Real worst_norm = 0.0;
+            for (int n = 1; n <= steps; ++n)
             {
                 MALLOY_CHECK_TRUE(world.step().ok());
+                const Real t = static_cast<Real>(n) * dt;
+                const malloy::math::Quat exact =
+                    ball.orientation * malloy::math::from_axis_angle(ball.angular_velocity, rate * t);
+                worst_turn = std::fmax(worst_turn,
+                                       rotation_between(world.bodies()[0].orientation, exact) /
+                                           ((48.0 * n + 8.0 * rate * t + 16.0) * machine_eps));
+                worst_norm = std::fmax(worst_norm,
+                                       std::abs(malloy::math::norm(world.bodies()[0].orientation) - 1.0));
             }
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(
                 world.bodies()[0].angular_velocity, ball.angular_velocity, 0.0));
+            MALLOY_CHECK_TRUE(worst_turn <= 1.0);
+
+            // A unit quaternion at every step, to the 4 eps renormalization
+            // leaves: the turns are unit, and step (3) removes their rounding.
+            MALLOY_CHECK_TRUE(worst_norm <= 4.0 * machine_eps);
 
             // The body spins about omega and its angular momentum is parallel
             // to omega, so the world-frame vector is fixed as well, to rounding.
@@ -2294,14 +2403,21 @@ int main()
                 (1.0 / 9007199254740992.0) * malloy::math::length(l0) *
                     2000.0 / 2.0));
             MALLOY_CHECK_TRUE(malloy::math::is_unit(world.bodies()[0].orientation));
+
+            // It really turned: 3 radians, not a body sitting still.
+            MALLOY_CHECK_TRUE(rate * dt * steps > 3.0);
         }
 
         // --- Spin about a single principal axis: exactly constant, and the
-        //     orientation follows the same discrete polygon the 2D angle does.
+        //     orientation turns by exactly the spin times the time.
         //
         //     With omega along a principal axis, `L x omega` is zero, so the
-        //     drift law below predicts no drift at all and the state is
-        //     bit-identical after thousands of steps. ---
+        //     body-frame momentum is a fixed point of every piece of the free
+        //     rotation: each axis turn either has angle 0 (skipped) or turns
+        //     about the spin axis itself, whose two other components are 0, and
+        //     the |L|^2 turn leaves the momentum alone. The angular velocity is
+        //     therefore bit-identical after thousands of steps, on all three
+        //     axes, the intermediate one included. ---
         {
             const Real spin = 1.3;
             const Real dt = 0.001;
@@ -2329,34 +2445,43 @@ int main()
                 MALLOY_CHECK_NEAR(rotational_energy(out), t0, 0.0);
                 MALLOY_CHECK_TRUE(malloy::math::is_unit(out.orientation));
 
-                // The quaternion update is a rotation by omega/2 in the
-                // (w, axis) plane stepped with explicit Euler, so each step
-                // turns the HALF angle by exactly atan(omega dt / 2) and the
-                // renormalization removes the magnitude growth. The body has
-                // therefore turned by twice that, N times over.
-                const Real half = static_cast<Real>(steps) * std::atan(spin * dt * 0.5);
-                MALLOY_CHECK_TRUE(malloy::math::approx_equal(
-                    out.orientation, malloy::math::from_axis_angle(axes[a], 2.0 * half),
-                    1e-14));
+                // Every turn of every step is about the spin axis, and the
+                // angles of one step add to (c_a I_a + I_a / I_i) spin dt =
+                // spin dt whichever axis it is, so the exact motion is a turn
+                // by spin t. Forward Euler turned the half angle by
+                // atan(spin dt / 2) per step instead, 9.2e-7 rad short here.
+                // The bound is test 1's: 48 eps per step, the reference's
+                // sine and cosine, and the comparison.
+                const Real machine_eps = std::numeric_limits<Real>::epsilon();
+                const Real turned = static_cast<Real>(steps) * dt * spin;
+                MALLOY_CHECK_TRUE(rotation_between(out.orientation,
+                                                   malloy::math::from_axis_angle(axes[a], turned)) <=
+                                  (48.0 * steps + 8.0 * turned + 16.0) * machine_eps);
 
                 // It really did turn: 6.5 radians, not a body sitting still.
-                MALLOY_CHECK_TRUE(2.0 * half > 6.0);
+                MALLOY_CHECK_TRUE(turned > 6.0);
             }
         }
 
         // --- A symmetric top precesses at a rate that is exactly predictable.
         //
         //     With Ix == Iy the third equation has a zero coefficient, so wz is
-        //     bit-constant, and the first two are a plane rotation at
-        //     Omega = wz (Iz - Ix) / Ix stepped with explicit Euler. That is the
-        //     same discrete polygon as the cyclotron in M18: per step the
-        //     magnitude grows by exactly sqrt(1 + (Omega dt)^2) and the angle
-        //     advances by exactly atan(Omega dt), never by Omega dt. ---
+        //     constant, and the first two are a plane rotation at
+        //     Omega = wz (Iz - Ix) / Ix. Forward Euler stepped that rotation as
+        //     a polygon, growing the magnitude by sqrt(1 + (Omega dt)^2) per
+        //     step (issue #88). The regrouped flow is EXACT for an axisymmetric
+        //     body: its axis coefficient for x is 0, and the one for z turns
+        //     (wx, wy) by exactly Omega dt per step while R2 leaves wz's bits
+        //     alone. So the transverse part is (across cos, across sin) of
+        //     Omega t, to rounding: per step a few eps of angle from the turn
+        //     and of magnitude from the rotation's rounding, within the scope's
+        //     (64 N + 8 |w| t + 16) eps of angle, times the radius. ---
         {
             const Real dt = 0.001;
             const int steps = 2000;
             const Real across = 0.4;
             const Real along = 1.5;
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
 
             RigidBody3D top;
             top.inertia = Vec3{1.0, 1.0, 2.0};
@@ -2369,73 +2494,145 @@ int main()
             }
 
             const Real omega = along * (2.0 - 1.0) / 1.0;
-            const Real growth =
-                std::pow(1.0 + omega * omega * dt * dt, static_cast<Real>(steps) / 2.0);
-            const Real turned = static_cast<Real>(steps) * std::atan(omega * dt);
+            const Real t = static_cast<Real>(steps) * dt;
+            const Real turned = omega * t;
             const Vec3& w = world.bodies()[0].angular_velocity;
 
-            // A few ulp per step over 2000 steps of a component near 0.4.
-            const Real bound = 1e-12;
-            MALLOY_CHECK_NEAR(w.x, across * growth * std::cos(turned), bound);
-            MALLOY_CHECK_NEAR(w.y, across * growth * std::sin(turned), bound);
+            const Real bound =
+                (64.0 * steps + 8.0 * malloy::math::length(top.angular_velocity) * t + 16.0) * machine_eps * across;
+            MALLOY_CHECK_NEAR(w.x, across * std::cos(turned), bound);
+            MALLOY_CHECK_NEAR(w.y, across * std::sin(turned), bound);
             MALLOY_CHECK_NEAR(w.z, along, 0.0); // (Ix - Iy) is exactly zero
 
             // The precession is real, not a rounding artefact: the transverse
-            // part has swung nearly 3 radians round.
+            // part has swung 3 radians round.
             MALLOY_CHECK_TRUE(turned > 2.9);
             MALLOY_CHECK_TRUE(w.x < 0.0); // past a quarter turn, into the far half
         }
 
-        // --- What semi-implicit Euler does to the conserved quantities, derived
+        // --- Oblate and prolate tops whose symmetry axis is NOT z, started
+        //     tilted: the whole motion in closed form (scope test 2).
+        //
+        //     For moments I_s about the symmetry axis e_s and I_t across it,
+        //     H = |L|^2 / (2 I_t) + (1/I_s - 1/I_t) L_s^2 / 2, and the two terms
+        //     commute (|L| is a Casimir and L_s is constant), so the exact flow
+        //     is the product of both exact flows:
+        //
+        //       q(t) = q0 * turn(L_b0, |L| t / I_t) * turn(e_s, nu t),
+        //       nu = (1/I_s - 1/I_t) I_s w_s,
+        //
+        //     with the body-frame momentum turned by -nu t about e_s: w_s
+        //     constant, and the cross-axis part rotating at
+        //     Omega = (I_s - I_t) / I_t w_s (the textbook rate, signed). The
+        //     oblate top (2, 3.5, 2) has e_s = y as its LARGEST moment and the
+        //     prolate one (0.75, 2.5, 2.5) has e_s = x as its SMALLEST, so they
+        //     run through the two different axis turns of the step. The start
+        //     orientation is tilted, so a turn composed on the wrong side or
+        //     about the wrong axis shows. Tolerance: (64 N + 8 |w| t + 16) eps of
+        //     angle, and that times |w| on the angular velocity. ---
+        {
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            const Real dt = 0.002;
+            const int steps = 2500;
+            struct Top
+            {
+                Vec3 inertia;
+                Vec3 axis; // the symmetry axis e_s
+                Vec3 spin;
+            };
+            const Top tops[2] = {{Vec3{2.0, 3.5, 2.0}, Vec3{0.0, 1.0, 0.0}, Vec3{0.6, 1.1, -0.45}},
+                                 {Vec3{0.75, 2.5, 2.5}, Vec3{1.0, 0.0, 0.0}, Vec3{1.3, -0.5, 0.35}}};
+            for (const Top& top : tops)
+            {
+                RigidBody3D body;
+                body.inertia = top.inertia;
+                body.angular_velocity = top.spin;
+                body.orientation = malloy::math::from_axis_angle(Vec3{0.4, 1.0, -0.7}, 1.1);
+
+                const Real i_s = malloy::math::dot(top.inertia, top.axis);
+                const Real i_t = top.axis.x > 0.0 ? top.inertia.y : top.inertia.x;
+                const Vec3 l0{top.inertia.x * top.spin.x, top.inertia.y * top.spin.y,
+                              top.inertia.z * top.spin.z};
+                const Real w_s = malloy::math::dot(top.spin, top.axis);
+                const Real nu = (1.0 / i_s - 1.0 / i_t) * i_s * w_s;
+                const Real size = malloy::math::length(top.spin);
+
+                Rigid3DWorld world{SimulationSettings{dt}, {body}};
+                Real worst_turn = 0.0;
+                Real worst_spin = 0.0;
+                for (int n = 1; n <= steps; ++n)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                    const RigidBody3D& out = world.bodies()[0];
+                    const Real t = static_cast<Real>(n) * dt;
+                    const Real tol = (64.0 * n + 8.0 * size * t + 16.0) * machine_eps;
+                    const malloy::math::Quat exact =
+                        body.orientation *
+                        malloy::math::from_axis_angle(l0, malloy::math::length(l0) * t / i_t) *
+                        malloy::math::from_axis_angle(top.axis, nu * t);
+                    worst_turn = std::fmax(worst_turn, rotation_between(out.orientation, exact) / tol);
+                    const Vec3 spin = malloy::math::rotate(
+                        malloy::math::from_axis_angle(top.axis, -nu * t), top.spin);
+                    worst_spin = std::fmax(worst_spin,
+                                           malloy::math::length(out.angular_velocity - spin) / (tol * size));
+                    // The symmetry-axis component is never touched (R2).
+                    MALLOY_CHECK_NEAR(malloy::math::dot(out.angular_velocity, top.axis), w_s, 0.0);
+                }
+                MALLOY_CHECK_TRUE(worst_turn <= 1.0);
+                MALLOY_CHECK_TRUE(worst_spin <= 1.0);
+
+                // The cross-axis spin really did go round, by more than a
+                // radian, and the body turned by several.
+                MALLOY_CHECK_TRUE(std::abs(nu) * dt * steps > 1.0);
+                MALLOY_CHECK_TRUE(malloy::math::length(l0) * dt * steps / i_t > 3.0);
+            }
+        }
+
+        // --- What the free rotation does to the conserved quantities, derived
         //     rather than tolerated.
         //
-        //     The update is omega' = omega + dt I^-1 u with u = L x omega, and
-        //     both L . u and omega . u vanish identically, so the first-order
-        //     terms cancel and exactly the second-order ones survive:
+        //     Before issue #88 the update was forward Euler,
+        //     omega' = omega + dt I^-1 (L x omega), which grew |L|^2 by exactly
+        //     dt^2 |L x omega|^2 every step and the energy with it: a tumbling
+        //     body sped up without limit. Now every piece of the step is an
+        //     exact flow of one term of the energy: each turns the body-frame
+        //     momentum L_b by a rotation and the body by the matching turn, so
+        //     |L_b| is unchanged and the WORLD momentum R L_b is unchanged, for
+        //     any inertia. Those are checked every step to rounding, a few eps
+        //     of |L| per step: (64 n + 16) eps |L| after n steps.
         //
-        //         |L'|^2 = |L|^2 + dt^2 |u|^2
-        //         T'     = T     + dt^2 (I^-1 u) . u / 2
-        //
-        //     Neither is an inequality or a bound. They are equalities, they are
-        //     checked every step, and they explain the exact cases above: when
-        //     omega lies along a principal axis L is parallel to omega, u is
-        //     zero, and nothing drifts at all. ---
+        //     The energy is NOT a sub-flow invariant for three distinct
+        //     moments; its bounded second-order error is measured against an
+        //     independent reference in the asymmetric-top block below. ---
         {
             const Real dt = 0.01;
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
             RigidBody3D body;
             body.inertia = asymmetric;
             body.angular_velocity = Vec3{0.9, 1.4, -0.6};
+            body.orientation = malloy::math::from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.8);
 
             Rigid3DWorld world{SimulationSettings{dt}, {body}};
+            const Vec3 world_start = spin_angular_momentum(world.bodies()[0]);
+            const Real size = malloy::math::length(world_start);
             Real worst_momentum = 0.0;
-            Real worst_energy = 0.0;
+            Real worst_world = 0.0;
             Real worst_frame = 0.0;
-            for (int i = 0; i < 200; ++i)
+            Real worst_norm = 0.0;
+            for (int n = 1; n <= 200; ++n)
             {
-                const Vec3 w = world.bodies()[0].angular_velocity;
-                const Vec3 l{asymmetric.x * w.x, asymmetric.y * w.y, asymmetric.z * w.z};
-                const Vec3 u = malloy::math::cross(l, w);
-                const Vec3 iu{u.x / asymmetric.x, u.y / asymmetric.y,
-                              u.z / asymmetric.z};
-                const Real momentum_before = malloy::math::length_squared(l);
-                const Real energy_before = rotational_energy(world.bodies()[0]);
-
                 MALLOY_CHECK_TRUE(world.step().ok());
 
                 const RigidBody3D& out = world.bodies()[0];
                 const Vec3 w1 = out.angular_velocity;
                 const Vec3 l1{asymmetric.x * w1.x, asymmetric.y * w1.y,
                               asymmetric.z * w1.z};
-                const Real momentum_after = malloy::math::length_squared(l1);
-
-                worst_momentum = std::fmax(
-                    worst_momentum,
-                    std::abs((momentum_after - momentum_before) -
-                             dt * dt * malloy::math::length_squared(u)));
-                worst_energy = std::fmax(
-                    worst_energy,
-                    std::abs((rotational_energy(out) - energy_before) -
-                             0.5 * dt * dt * malloy::math::dot(iu, u)));
+                const Real bound = (64.0 * n + 16.0) * machine_eps * size;
+                worst_momentum =
+                    std::fmax(worst_momentum, std::abs(malloy::math::length(l1) - size) / bound);
+                worst_world = std::fmax(
+                    worst_world,
+                    malloy::math::length(spin_angular_momentum(out) - world_start) / bound);
 
                 // The world-frame vector has the same length as the body-frame
                 // one, which is the whole reason the orientation must stay a
@@ -2443,22 +2640,21 @@ int main()
                 worst_frame =
                     std::fmax(worst_frame, std::abs(malloy::math::length(
                                                         spin_angular_momentum(out)) -
-                                                    std::sqrt(momentum_after)));
+                                                    malloy::math::length(l1)));
+                worst_norm =
+                    std::fmax(worst_norm, std::abs(malloy::math::norm(out.orientation) - 1.0));
             }
 
-            // |L|^2 is about 12 here, so one ulp of it is 1.8e-15, and each
-            // comparison costs a few: the difference of two such numbers plus
-            // the rounding in the predicted term. The drift being measured is
-            // 3.5e-4, so this pins it to eleven significant figures.
-            MALLOY_CHECK_TRUE(worst_momentum < 1e-13);
-            MALLOY_CHECK_TRUE(worst_energy < 1e-13);
+            MALLOY_CHECK_TRUE(worst_momentum <= 1.0);
+            MALLOY_CHECK_TRUE(worst_world <= 1.0);
             MALLOY_CHECK_TRUE(worst_frame < 1e-13);
+            MALLOY_CHECK_TRUE(worst_norm <= 4.0 * machine_eps); // scope test 7
 
-            // Both quantities GROW. They do not merely fail to be constant, and
-            // the sign is not a matter of luck: |u|^2 and (I^-1 u) . u are both
-            // sums of squares over positive moments.
-            MALLOY_CHECK_TRUE(rotational_energy(world.bodies()[0]) >
-                              rotational_energy(body));
+            // The body really tumbled: the body-frame spin moved by a large
+            // fraction of itself, so the conservation above is not a frozen
+            // state.
+            MALLOY_CHECK_FALSE(malloy::math::approx_equal(
+                world.bodies()[0].angular_velocity, body.angular_velocity, 0.3));
         }
 
         // --- The intermediate-axis theorem.
@@ -2485,92 +2681,158 @@ int main()
         //     For (1, 2, 3) those are +W^2/3, -W^2/3 and -W^2, so the rate is
         //     W/sqrt(3) about the intermediate and smallest axes and W about
         //     the largest. The two stable cases below therefore check two
-        //     DIFFERENT numbers rather than the same one twice. ---
+        //     DIFFERENT numbers rather than the same one twice.
+        //
+        //     Forward Euler stepped those motions as polygons, growing every
+        //     transverse amplitude by sqrt(1 + (mu dt)^2) per step (issue #88).
+        //     Below, each claim is checked against what the regrouped flow does
+        //     EXACTLY: its linearization about a spin is a product of its own
+        //     pieces, plane rotations where a turn is about the spin axis and
+        //     shears where a small component turns the large one, and each
+        //     prediction is written from those pieces in closed form. ---
         {
             const Real dt = 0.001;
             const int steps = 20000;
             const Real spin = 2.0;
             const Real nudge = 1.0e-3;
             const Real rate = spin / std::sqrt(3.0);
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            const Real c_j = 1.0 / asymmetric.x - 1.0 / asymmetric.y; //  1/2
+            const Real c_k = 1.0 / asymmetric.z - 1.0 / asymmetric.y; // -1/6
 
-            // Spun about x, the SMALLEST moment. The transverse pair conserves
-            // wy^2 + 3 wz^2, so it traces an ellipse and comes back.
+            // About a STABLE axis the continuum transverse amplitude is exactly
+            // constant, not merely in the linearization: with |L| and the
+            // energy both conserved, wy^2 + 3 wz^2 = (|L|^2 - 2T) / 2 about x and
+            // wx^2 + wy^2 = (6T - |L|^2) / 2 about z. The step keeps |L|; what it
+            // does to the amplitude is its linear map M of the two transverse
+            // momenta per step. M is symmetric (equal diagonal, determinant 1),
+            // and such a map keeps the quadratic form -m21 a^2 + m12 b^2, so the
+            // amplitude runs round one fixed ellipse between two values, each
+            // reached on an axis of it. Both are asserted to 1e-10 of the nudge:
+            // the rounding of 20000 steps of a few eps each (2e-11), the dropped
+            // O(nudge^2) terms (1e-13) and the sampling of the extremes (1e-13).
+            // The departure from the continuum is 3e-8 about x and 4e-7 about z,
+            // so this pins the step's own map, and forward Euler's growth, a
+            // factor 1.01 to 1.04 by the end, is far outside it.
+
+            // Spun about x, the SMALLEST moment. With (y, z) the transverse
+            // momenta, A_j(dt/2) is the plane rotation by psi = (dt/2) c_j Lx,
+            // R = [[c, s], [-s, c]], and A_k(dt) turns about z by dt c_k z, which
+            // to first order adds -Lx dt c_k z to y, the shear [[1, tau], [0, 1]]
+            // with tau = -dt c_k Lx. So M = R S R, m12 = sin 2psi + tau c^2 and
+            // m21 = -sin 2psi + tau s^2. From (y, z) = (2 nudge, 0) the amplitude
+            // is the nudge where z = 0, and nudge sqrt(4 (-m21) / (3 m12)) where
+            // y = 0.
             {
                 RigidBody3D body;
                 body.inertia = asymmetric;
                 body.angular_velocity = Vec3{spin, nudge, 0.0};
 
+                const Real psi = 0.5 * dt * c_j * asymmetric.x * spin;
+                const Real tau = -dt * c_k * asymmetric.x * spin;
+                const Real c = std::cos(psi);
+                const Real s = std::sin(psi);
+                const Real m12 = 2.0 * s * c + tau * c * c;
+                const Real m21 = -2.0 * s * c + tau * s * s;
+                const Real other = nudge * std::sqrt(4.0 * -m21 / (3.0 * m12));
+
                 Rigid3DWorld world{SimulationSettings{dt}, {body}};
                 Real worst = 0.0;
+                Real least = spin;
                 Real lowest_spin = spin;
                 for (int i = 0; i < steps; ++i)
                 {
                     MALLOY_CHECK_TRUE(world.step().ok());
                     const Vec3& w = world.bodies()[0].angular_velocity;
-                    worst = std::fmax(worst, std::sqrt(w.y * w.y + 3.0 * w.z * w.z));
+                    const Real amplitude = std::sqrt(w.y * w.y + 3.0 * w.z * w.z);
+                    worst = std::fmax(worst, amplitude);
+                    least = std::fmin(least, amplitude);
                     lowest_spin = std::fmin(lowest_spin, w.x);
                 }
 
-                // Explicit Euler on a rotation grows the amplitude by exactly
-                // sqrt(1 + (mu dt)^2) per step, the same polygon factor as the
-                // cyclotron, so this is an equality and not a fudge. What is
-                // left over is the O(nudge^2) the linearization drops.
-                const Real predicted =
-                    nudge * std::pow(1.0 + rate * rate * dt * dt,
-                                     static_cast<Real>(steps) / 2.0);
-                MALLOY_CHECK_TRUE(worst <= predicted * (1.0 + 1e-6));
-                MALLOY_CHECK_TRUE(worst >= predicted * 0.99);
+                MALLOY_CHECK_NEAR(worst, std::fmax(nudge, other), 1e-10 * nudge);
+                MALLOY_CHECK_NEAR(least, std::fmin(nudge, other), 1e-10 * nudge);
+                // The ellipse is really not a circle at this step: the two
+                // extremes differ by 3e-8 of the nudge, 300 times the tolerance.
+                MALLOY_CHECK_TRUE(std::abs(other - nudge) > 1e-8 * nudge);
 
                 // The spin itself never wavers: it is disturbed only at second
                 // order in the nudge.
                 MALLOY_CHECK_TRUE(std::abs(lowest_spin - spin) < 1e-5);
             }
 
-            // Spun about z, the LARGEST moment. Here the transverse pair
-            // conserves wx^2 + wy^2 exactly, a circle rather than an ellipse.
+            // Spun about z, the LARGEST moment. With (a, b) = (Lx, Ly),
+            // A_j(dt/2) turns about x by (dt/2) c_j a, which to first order adds
+            // Lz (dt/2) c_j a to b, the shear [[1, 0], [sigma, 1]] with
+            // sigma = (dt/2) c_j Lz, and A_k(dt) is the plane rotation of (a, b)
+            // by phi = dt c_k Lz. So M = S R S, m12 = sin phi and
+            // m21 = 2 sigma cos phi - sin phi + sigma^2 sin phi. From
+            // (a, b) = (0, 2 nudge) the amplitude is the nudge where a = 0 and
+            // 2 nudge sqrt(m12 / -m21) where b = 0. The coefficients differ from
+            // the case above (mu is W here, W/sqrt(3) there), so this is a
+            // second check, not the same one twice.
             {
                 RigidBody3D body;
                 body.inertia = asymmetric;
                 body.angular_velocity = Vec3{0.0, nudge, spin};
 
+                const Real sigma = 0.5 * dt * c_j * asymmetric.z * spin;
+                const Real phi = dt * c_k * asymmetric.z * spin;
+                const Real m12 = std::sin(phi);
+                const Real m21 = 2.0 * sigma * std::cos(phi) - std::sin(phi) +
+                                 sigma * sigma * std::sin(phi);
+                const Real other = 2.0 * nudge * std::sqrt(m12 / -m21);
+
                 Rigid3DWorld world{SimulationSettings{dt}, {body}};
                 Real worst = 0.0;
+                Real least = spin;
                 Real lowest_spin = spin;
                 for (int i = 0; i < steps; ++i)
                 {
                     MALLOY_CHECK_TRUE(world.step().ok());
                     const Vec3& w = world.bodies()[0].angular_velocity;
-                    worst = std::fmax(worst, std::sqrt(w.x * w.x + w.y * w.y));
+                    const Real amplitude = std::sqrt(w.x * w.x + w.y * w.y);
+                    worst = std::fmax(worst, amplitude);
+                    least = std::fmin(least, amplitude);
                     lowest_spin = std::fmin(lowest_spin, w.z);
                 }
 
-                // mu is W rather than W/sqrt(3) on this axis, which is a
-                // different number and therefore a real check on the
-                // coefficients rather than a repeat of the case above.
-                const Real predicted =
-                    nudge * std::pow(1.0 + spin * spin * dt * dt,
-                                     static_cast<Real>(steps) / 2.0);
-                MALLOY_CHECK_TRUE(worst <= predicted * (1.0 + 1e-6));
-                MALLOY_CHECK_TRUE(worst >= predicted * 0.99);
+                MALLOY_CHECK_NEAR(worst, std::fmax(nudge, other), 1e-10 * nudge);
+                MALLOY_CHECK_NEAR(least, std::fmin(nudge, other), 1e-10 * nudge);
+                MALLOY_CHECK_TRUE(std::abs(other - nudge) > 1e-7 * nudge);
                 MALLOY_CHECK_TRUE(std::abs(lowest_spin - spin) < 1e-5);
             }
 
             // Spun about y, the INTERMEDIATE moment. The body flips.
             {
-                RigidBody3D body;
-                body.inertia = asymmetric;
-                body.angular_velocity = Vec3{nudge, spin, 0.0};
-
-                Rigid3DWorld world{SimulationSettings{dt}, {body}};
-                Real lowest = spin;
-                Real fastest = 0.0;
-                for (int i = 0; i < steps; ++i)
-                {
-                    MALLOY_CHECK_TRUE(world.step().ok());
-                    const Vec3& w = world.bodies()[0].angular_velocity;
-                    lowest = std::fmin(lowest, w.y);
-                    fastest = std::fmax(fastest, malloy::math::length(w));
-                }
+                const auto flip = [&](Real h, Real& lowest, Real& fastest, Real& drift,
+                                      Real& start_energy, Real& start_momentum) {
+                    RigidBody3D body;
+                    body.inertia = asymmetric;
+                    body.angular_velocity = Vec3{nudge, spin, 0.0};
+                    Rigid3DWorld world{SimulationSettings{h}, {body}};
+                    start_energy = rotational_energy(world.bodies()[0]);
+                    start_momentum =
+                        malloy::math::length_squared(spin_angular_momentum(world.bodies()[0]));
+                    lowest = spin;
+                    fastest = 0.0;
+                    drift = 0.0;
+                    const int count = static_cast<int>(std::lround(20.0 / h));
+                    for (int i = 0; i < count; ++i)
+                    {
+                        if (!world.step().ok())
+                        {
+                            return false;
+                        }
+                        const RigidBody3D& out = world.bodies()[0];
+                        lowest = std::fmin(lowest, out.angular_velocity.y);
+                        fastest = std::fmax(fastest, malloy::math::length(out.angular_velocity));
+                        drift = std::fmax(drift, std::abs(rotational_energy(out) - start_energy));
+                    }
+                    return true;
+                };
+                Real lowest = 0.0, fastest = 0.0, drift = 0.0, energy = 0.0, momentum = 0.0;
+                MALLOY_CHECK_TRUE(flip(dt, lowest, fastest, drift, energy, momentum));
 
                 // It does not wobble: it reverses. A nudge of a thousandth
                 // turns into a full change of sign of the spin itself, which is
@@ -2579,29 +2841,62 @@ int main()
                 MALLOY_CHECK_TRUE(lowest < -0.9 * spin);
 
                 // And it reverses along the path the conserved quantities
-                // allow. Starting on the separatrix fixes |L|^2 = (I2 W)^2 and
-                // 2T = I2 W^2; where the body passes through wy = 0 those two
-                // give wz^2 = I2 (I2 - I1) W^2 / (I3 (I3 - I1)) = W^2/3 and
-                // wx^2 = W^2, so the fastest the body ever turns is
+                // allow. With moments (1, 2, 3), for ANY state,
                 //
-                //     |omega| = 2 W / sqrt(3)
+                //     |omega|^2 = (8 T - |L|^2) / 3 - wy^2 / 3,
                 //
-                // The gap from that is the accumulated per-step drift measured
-                // above, which over 20000 steps is a few parts in ten thousand.
-                const Real peak = 2.0 * spin / std::sqrt(3.0);
-                MALLOY_CHECK_TRUE(fastest > peak);
-                MALLOY_CHECK_TRUE(fastest < peak * 1.001);
+                // so where the body passes through wy = 0 it turns as fast as
+                // its energy and |L| allow. On the separatrix that is
+                // |omega|^2 = 4 W^2 / 3; the start's own value, peak below, is
+                // (8 T0 - |L0|^2) / 3 = 4 W^2 / 3 + nudge^2, the nudge's
+                // 1e-6 above it. The step keeps |L| to
+                // rounding, and the energy moves by the splitting's
+                // second-order error, measured in the same run as `drift`; so
+                // the fastest sample lies between
+                //
+                //     peak^2 - (8/3) drift - dt^2 W^4 / 36   and
+                //     peak^2 + (8/3) drift,
+                //
+                // the low side's last term the sample nearest the crossing
+                // (wy moves there at most W^2 / sqrt(3) per unit time, half a
+                // step away), plus the rounding of |L|^2, (64 N + 16) eps of it
+                // twice. Forward Euler, whose energy grew, ran past the peak by
+                // parts in ten thousand.
+                const Real peak_sq = (8.0 * energy - momentum) / 3.0;
+                const Real rounding = 2.0 * (64.0 * steps + 16.0) * machine_eps * momentum / 3.0;
+                MALLOY_CHECK_TRUE(fastest * fastest <= peak_sq + 8.0 / 3.0 * drift + rounding);
+                MALLOY_CHECK_TRUE(fastest * fastest >=
+                                  peak_sq - 8.0 / 3.0 * drift -
+                                      dt * dt * spin * spin * spin * spin / 36.0 - rounding);
+                MALLOY_CHECK_NEAR(peak_sq, 4.0 * spin * spin / 3.0 + nudge * nudge, 1e-14);
+
+                // The energy's error is the second-order one, not a drift:
+                // halving the step quarters it (the scope's order criterion,
+                // p in [1.8, 2.2]), and it is far below a part in a million.
+                Real lowest2 = 0.0, fastest2 = 0.0, drift2 = 0.0, energy2 = 0.0, momentum2 = 0.0;
+                MALLOY_CHECK_TRUE(flip(0.5 * dt, lowest2, fastest2, drift2, energy2, momentum2));
+                const Real order = std::log2(drift / drift2);
+                MALLOY_CHECK_TRUE(order >= 1.8 && order <= 2.2);
+                MALLOY_CHECK_TRUE(drift < 1e-6 * energy);
+                MALLOY_CHECK_TRUE(lowest2 < -0.9 * spin);
             }
 
             // The exponential growth rate itself, against the exact discrete
-            // linearization rather than its continuum limit. The transverse map
-            // has eigenvalues 1 +/- rate*dt, so starting from (nudge, 0) the
-            // growing component is exactly
+            // linearization rather than its continuum limit. With (a, c) =
+            // (Lx, Lz) small and Ly = I2 W, A_j(dt/2) adds -Ly (dt/2) c_j a to c
+            // and A_k(dt) adds Ly dt c_k c to a: three shears,
+            // M = S1 S2 S1 with S1 = [[1, 0], [-s1, 1]], S2 = [[1, s2], [0, 1]],
+            // s1 = (dt/2) c_j Ly and s2 = dt c_k Ly. Its diagonal is
+            // 1 - s1 s2 = 1 + (W dt)^2 / 6 = cosh(theta), so its eigenvalues are
+            // e^(+/-theta) with theta = 2 asinh(rate dt / 2), and from (tiny, 0)
+            // the growing component is exactly
             //
-            //     (nudge/2) [ (1 + rate dt)^n + (1 - rate dt)^n ]
+            //     tiny cosh(n theta),
             //
-            // A small nudge keeps the dropped O(nudge^2) terms near 1e-17, so
-            // this is asserted to fifteen significant figures.
+            // where the continuum has tiny cosh(rate t): theta is rate dt to
+            // second order. A small nudge keeps the dropped O(nudge^2) terms
+            // near 1e-17, so this is asserted to fifteen significant figures,
+            // as the forward-Euler law it replaces was.
             {
                 const Real tiny = 1.0e-6;
                 const int short_run = 2000;
@@ -2614,11 +2909,14 @@ int main()
                 {
                     MALLOY_CHECK_TRUE(world.step().ok());
                 }
-                const Real predicted =
-                    0.5 * tiny *
-                    (std::pow(1.0 + rate * dt, short_run) +
-                     std::pow(1.0 - rate * dt, short_run));
+                const Real theta = 2.0 * std::asinh(0.5 * rate * dt);
+                const Real predicted = tiny * std::cosh(short_run * theta);
                 MALLOY_CHECK_NEAR(world.bodies()[0].angular_velocity.x, predicted, 1e-15);
+
+                // The continuum value differs by 6e-13, 600 times the
+                // tolerance, so the check sees the step and not just the physics.
+                MALLOY_CHECK_TRUE(std::abs(tiny * std::cosh(rate * short_run * dt) - predicted) >
+                                  5e-13);
 
                 // Five times its starting size in two seconds, and still only
                 // five parts per million of the spin: this is the early phase,
@@ -2627,47 +2925,204 @@ int main()
             }
         }
 
-        // --- The orientation is built from the angular velocity AFTER Euler's
-        //     equations have been applied, not before.
+        // --- The ORDER of the step under a torque, against an analytic law
+        //     (scope test 5): one full kick, then the free rotation.
         //
-        //     That is what makes this semi-implicit, the same "velocities
-        //     first" ordering every other world here uses, and it is otherwise
-        //     invisible: swapping the two changes the result only at O(dt), the
-        //     same order as the scheme's own error, so no convergence test can
-        //     see it.
+        //     A sphere of moment I under a world torque tau parallel to its
+        //     spin turns about that fixed axis by the continuum angle
         //
-        //     It is visible as a DIRECTION. Starting from the identity, the
-        //     quaternion increment is (dt/2)(0, omega), so after one step the
-        //     orientation's vector part points exactly along whichever omega
-        //     was used. Here the two differ by rate * dt, which is large enough
-        //     to separate them by eleven orders of magnitude. ---
+        //       theta(t) = (|L0| t + |tau| t^2 / 2) / I.
+        //
+        //     A step kicks the spin by tau dt / I and then turns the body by dt
+        //     times the KICKED spin, so after n steps the angle is the sum of
+        //     dt w_m over m = 1..n, w_m = w0 + m dt |tau| / I, which is
+        //
+        //       theta_n = theta(t_n) + |tau| dt t_n / (2 I),
+        //
+        //     ahead of the continuum by a first-order offset. Half a kick on
+        //     each side of the turn would put it exactly on theta(t_n), and the
+        //     turn before the kick the same offset behind, so the law separates
+        //     the three orders.
+        //
+        //     Dyadic data make every kick exact: I = 2, tau = 0.25 e3,
+        //     w0 = 0.25 e3, dt = 1/64, so tau dt / I = 2^-9 and the spin is bit
+        //     for bit 0.25 + n / 512. The orientation is checked to the sphere
+        //     test's angle tolerance. The start is turned about e3 (not the
+        //     identity), which keeps the body-frame torque bit-equal to the
+        //     world one; the torque's frame is tested on a tilted body in M21.
+        //     Halving dt halves the offset (first order under forcing), and
+        //     with no torque it is zero (the free flow is exact for a sphere). ---
         {
-            const Real dt = 0.01;
-            RigidBody3D body;
-            body.inertia = asymmetric;
-            body.angular_velocity = Vec3{0.9, 1.4, -0.6};
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            const Real moment = 2.0;
+            const Vec3 axis{0.0, 0.0, 1.0};
+            const malloy::math::Quat start = malloy::math::from_axis_angle(axis, 0.7);
+            const auto run = [&](Real dt, Real torque, int steps, Real& offset) {
+                RigidBody3D ball;
+                ball.inertia = Vec3{moment, moment, moment};
+                ball.angular_velocity = Vec3{0.0, 0.0, 0.25};
+                ball.orientation = start;
+                malloy::rigid::Rigid3DSettings settings;
+                settings.torque = Vec3{0.0, 0.0, torque};
+                Rigid3DWorld world{SimulationSettings{dt}, {ball}, settings};
+                Real worst = 0.0;
+                for (int n = 1; n <= steps; ++n)
+                {
+                    if (!world.step().ok())
+                    {
+                        return 2.0;
+                    }
+                    const RigidBody3D& out = world.bodies()[0];
+                    const Real t = static_cast<Real>(n) * dt;
+                    const Real spin = 0.25 + static_cast<Real>(n) * dt * torque / moment;
+                    if (!(out.angular_velocity.x == 0.0 && out.angular_velocity.y == 0.0 &&
+                          out.angular_velocity.z == spin))
+                    {
+                        return 2.0; // the kicks are exact: the spin is bit for bit
+                    }
+                    const Real continuum = (moment * 0.25 * t + torque * t * t / 2.0) / moment;
+                    const Real kd = continuum + torque * dt * t / (2.0 * moment);
+                    worst = std::fmax(worst, rotation_between(out.orientation,
+                                                              start * malloy::math::from_axis_angle(axis, kd)) /
+                                                 ((48.0 * n + 8.0 * spin * t + 16.0) * machine_eps));
+                    offset = rotation_between(out.orientation,
+                                              start * malloy::math::from_axis_angle(axis, continuum));
+                }
+                return worst;
+            };
+            Real offset = 0.0;
+            Real halved = 0.0;
+            Real none = 0.0;
+            MALLOY_CHECK_TRUE(run(1.0 / 64.0, 0.25, 640, offset) <= 1.0);
+            MALLOY_CHECK_TRUE(run(1.0 / 128.0, 0.25, 1280, halved) <= 1.0);
+            MALLOY_CHECK_TRUE(run(1.0 / 64.0, 0.0, 640, none) <= 1.0);
 
-            Rigid3DWorld world{SimulationSettings{dt}, {body}};
-            MALLOY_CHECK_TRUE(world.step().ok());
+            // At t = 10: an offset of 0.25 (1/64) 10 / 4 rad, then half that,
+            // then none, each to the angle tolerance.
+            const Real tol = (48.0 * 1280.0 + 8.0 * 1.5 * 10.0 + 16.0) * machine_eps;
+            MALLOY_CHECK_NEAR(offset, 0.25 / 64.0 * 10.0 / 4.0, tol);
+            MALLOY_CHECK_NEAR(halved, 0.5 * offset, tol);
+            MALLOY_CHECK_NEAR(none, 0.0, tol);
+        }
 
-            const RigidBody3D& out = world.bodies()[0];
-            MALLOY_CHECK_TRUE(malloy::math::is_unit(out.orientation));
+        // --- A free ASYMMETRIC top against its closed form (scope test 6).
+        //
+        //     Spheres and symmetric tops are exact under the free rotation; for
+        //     three distinct moments it is second order. That is measured
+        //     against an independent reference, the elliptic-function solution
+        //     (`free_top` above), not against the method itself: a
+        //     self-convergence test passes an error made the same way at every
+        //     step size.
+        //
+        //       1. Order: the body-frame spin's error at t = 10 s at
+        //          dt = 1/30, 1/60 and 1/120 falls by four per halving,
+        //          p in [1.8, 2.2] on both pairs.
+        //       2. Energy envelope: e(h), the largest |T_n - T_0| / T_0 over
+        //          12 s (more than two reduced periods), is second order,
+        //          p in [1.8, 2.2], and C = max e(h) / h^2 is its constant.
+        //       3. No secular drift over 48 reduced periods at dt = 1/30 and
+        //          1/60. The late maximum stays within 2 C h^2: a modified
+        //          energy exists for small h, so the error is periodic and one
+        //          period already samples its maximum. And with s the least-
+        //          squares slope of the signed error against time,
+        //          D = |s| T_long / (C h^2) <= 0.25: a bounded periodic error
+        //          of amplitude C h^2 gives D <= 12 P / T_long = 0.25 at
+        //          T_long = 48 P, and a drift of a quarter of the envelope over
+        //          the run fails.
+        //       4. |L| and the world momentum to rounding throughout, and a
+        //          unit quaternion at every step.
+        //
+        //     Moments (1, 2, 3) started at (0.6, 0, 1.2): |L|^2 = 13.32 is above
+        //     2 T I2 = 9.36, so it tumbles about z; m = 1/12, lambda = 1.2, and
+        //     the reduced period P = 4 K(m) / lambda is 5.35 s. ---
+        {
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            const Vec3 w0{0.6, 0.0, 1.2};
+            Real period = 0.0;
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(free_top(asymmetric, w0, 0.0, &period), w0,
+                                                         1e-15));
+            MALLOY_CHECK_TRUE(period > 5.3 && period < 5.4);
 
-            // Parallel to the updated omega, to rounding.
-            MALLOY_CHECK_TRUE(
-                malloy::math::length(
-                    malloy::math::cross(out.orientation.v, out.angular_velocity)) < 1e-16);
+            // 1. Order against the closed form.
+            Real error[3] = {0.0, 0.0, 0.0};
+            const Real rates[3] = {30.0, 60.0, 120.0};
+            for (int k = 0; k < 3; ++k)
+            {
+                const Real dt = 1.0 / rates[k];
+                const int steps = static_cast<int>(10.0 * rates[k]);
+                RigidBody3D body;
+                body.inertia = asymmetric;
+                body.angular_velocity = w0;
+                body.orientation = malloy::math::from_axis_angle(Vec3{0.3, -1.0, 0.6}, 2.0);
+                Rigid3DWorld world{SimulationSettings{dt}, {body}};
+                for (int i = 0; i < steps; ++i)
+                {
+                    MALLOY_CHECK_TRUE(world.step().ok());
+                }
+                error[k] = malloy::math::length(world.bodies()[0].angular_velocity -
+                                                free_top(asymmetric, w0, steps * dt));
+            }
+            const Real p1 = std::log2(error[0] / error[1]);
+            const Real p2 = std::log2(error[1] / error[2]);
+            MALLOY_CHECK_TRUE(p1 >= 1.8 && p1 <= 2.2);
+            MALLOY_CHECK_TRUE(p2 >= 1.8 && p2 <= 2.2);
+            MALLOY_CHECK_TRUE(error[0] > 1e-6); // a real error, not rounding
 
-            // And measurably NOT parallel to the one the step started with, so
-            // this distinguishes the two rather than holding either way.
-            MALLOY_CHECK_TRUE(
-                malloy::math::length(
-                    malloy::math::cross(out.orientation.v, body.angular_velocity)) > 1e-5);
+            // 2. and 3. The energy, short and long, with |L|, L and |q|.
+            const auto energy_run = [&](Real dt, Real span, Real& peak, Real& slope, Real& worst_l,
+                                        Real& worst_q) {
+                RigidBody3D body;
+                body.inertia = asymmetric;
+                body.angular_velocity = w0;
+                body.orientation = malloy::math::from_axis_angle(Vec3{0.3, -1.0, 0.6}, 2.0);
+                Rigid3DWorld world{SimulationSettings{dt}, {body}};
+                const Real t0 = rotational_energy(world.bodies()[0]);
+                const Vec3 l0 = spin_angular_momentum(world.bodies()[0]);
+                const int steps = static_cast<int>(std::ceil(span / dt));
+                Real st = 0.0, se = 0.0, stt = 0.0, ste = 0.0;
+                peak = 0.0;
+                worst_l = 0.0;
+                worst_q = 0.0;
+                for (int n = 1; n <= steps; ++n)
+                {
+                    if (!world.step().ok())
+                    {
+                        return false;
+                    }
+                    const RigidBody3D& out = world.bodies()[0];
+                    const Real t = n * dt;
+                    const Real e = (rotational_energy(out) - t0) / t0;
+                    peak = std::fmax(peak, std::abs(e));
+                    st += t;
+                    se += e;
+                    stt += t * t;
+                    ste += t * e;
+                    worst_l = std::fmax(worst_l, malloy::math::length(spin_angular_momentum(out) - l0) /
+                                                     ((64.0 * n + 16.0) * machine_eps * malloy::math::length(l0)));
+                    worst_q = std::fmax(worst_q, std::abs(malloy::math::norm(out.orientation) - 1.0));
+                }
+                const Real count = static_cast<Real>(steps);
+                slope = (ste - st * se / count) / (stt - st * st / count);
+                return true;
+            };
+            Real e30 = 0.0, e60 = 0.0, unused = 0.0, worst_l = 0.0, worst_q = 0.0;
+            MALLOY_CHECK_TRUE(energy_run(1.0 / 30.0, 12.0, e30, unused, worst_l, worst_q));
+            MALLOY_CHECK_TRUE(energy_run(1.0 / 60.0, 12.0, e60, unused, worst_l, worst_q));
+            const Real p_energy = std::log2(e30 / e60);
+            MALLOY_CHECK_TRUE(p_energy >= 1.8 && p_energy <= 2.2);
+            const Real envelope = std::fmax(e30 * 30.0 * 30.0, e60 * 60.0 * 60.0); // C
 
-            // The step really did change omega, which is what gives the two
-            // directions something to disagree about.
-            MALLOY_CHECK_FALSE(malloy::math::approx_equal(
-                out.angular_velocity, body.angular_velocity, 1e-4));
+            for (const Real rate : {30.0, 60.0})
+            {
+                const Real h = 1.0 / rate;
+                const Real span = 48.0 * period;
+                Real late = 0.0, slope = 0.0;
+                MALLOY_CHECK_TRUE(energy_run(h, span, late, slope, worst_l, worst_q));
+                MALLOY_CHECK_TRUE(late <= 2.0 * envelope * h * h);
+                MALLOY_CHECK_TRUE(std::abs(slope) * span / (envelope * h * h) <= 0.25);
+                MALLOY_CHECK_TRUE(worst_l <= 1.0);
+                MALLOY_CHECK_TRUE(worst_q <= 4.0 * machine_eps);
+            }
         }
 
         // --- Angular momentum is spin PLUS orbital, as it is in two dimensions.
@@ -2748,12 +3203,13 @@ int main()
         // --- The zero-drift condition is an EIGENSPACE condition, not a
         //     principal-axis one.
         //
-        //     The drift vanishes exactly when u = L x omega is zero, that is
-        //     when I omega is parallel to omega. For three distinct moments the
-        //     only such directions are the three principal axes. For an
-        //     AXISYMMETRIC body two moments are equal, that eigenspace is a
-        //     plane, and every direction in it qualifies: not just the two
-        //     principal axes lying in it.
+        //     The spin is constant exactly when u = L x omega is zero, that is
+        //     when I omega is parallel to omega, and there the step keeps it bit
+        //     for bit (R1 to R3: every axis turn has angle 0 or turns two zero
+        //     components). For three distinct moments the only such directions
+        //     are the three principal axes. For an AXISYMMETRIC body two moments
+        //     are equal, that eigenspace is a plane, and every direction in it
+        //     qualifies: not just the two principal axes lying in it.
         //
         //     The angular velocity below is in the degenerate plane but along
         //     neither axis of it, so it is a case the principal-axis statement
@@ -2787,8 +3243,12 @@ int main()
                 world.bodies()[0].angular_velocity, Vec3(0.6, -0.8, 0.0), 0.0));
             MALLOY_CHECK_NEAR(rotational_energy(world.bodies()[0]), energy_start, 0.0);
 
-            // Tilt the same body out of that plane and it drifts, so the
-            // exactness above is the eigenspace and not the inertia.
+            // Tilt the same body out of that plane and it precesses, so the
+            // exactness above is the eigenspace and not the inertia. The flow
+            // is exact for an axisymmetric body: wz is kept bit for bit, and
+            // (wx, wy) turn about z by Omega t, Omega = (Iz - Ix) / Ix wz, here
+            // 2.5 rad in 3 s (forward Euler grew the energy instead). The
+            // energy is kept to rounding, (64 N + 16) eps of itself.
             RigidBody3D tilted = top;
             tilted.angular_velocity = Vec3{0.6, -0.8, 0.5};
             Rigid3DWorld drifting{SimulationSettings{0.001}, {tilted}};
@@ -2797,7 +3257,17 @@ int main()
             {
                 MALLOY_CHECK_TRUE(drifting.step().ok());
             }
-            MALLOY_CHECK_TRUE(rotational_energy(drifting.bodies()[0]) > tilted_start);
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            const Vec3& w = drifting.bodies()[0].angular_velocity;
+            const Real omega = (4.0 - 1.5) / 1.5 * 0.5;
+            const Real turned = omega * 3.0;
+            const Vec3 exact{0.6 * std::cos(turned) + 0.8 * std::sin(turned),
+                             0.6 * std::sin(turned) - 0.8 * std::cos(turned), 0.5};
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(w, exact, (64.0 * 3000 + 16.0) * machine_eps));
+            MALLOY_CHECK_NEAR(w.z, 0.5, 0.0);
+            MALLOY_CHECK_NEAR(rotational_energy(drifting.bodies()[0]), tilted_start,
+                              (64.0 * 3000 + 16.0) * machine_eps * tilted_start);
+            MALLOY_CHECK_TRUE(turned > 2.0); // it really went round
         }
 
         // --- The world frame is not the body frame, and that is the whole
@@ -2806,23 +3276,27 @@ int main()
         //     Under torque-free rotation the WORLD-frame angular momentum is
         //     fixed while the BODY-frame vector I omega tumbles with the body.
         //     Measuring both at two step sizes separates the two claims from
-        //     each other: the world-frame deviation is integration error and
-        //     falls with dt, the body-frame swing is the physics and does not.
+        //     each other: the world-frame deviation is the integrator's, the
+        //     body-frame swing is the physics and does not depend on dt.
         //
-        //     The orientation is integrated with a first-order scheme, so the
-        //     former is O(dt) and a tenfold smaller step buys a tenfold smaller
-        //     deviation. That ratio is asserted, because "small" alone would
-        //     also be satisfied by an implementation that never rotated
-        //     anything at all. ---
+        //     Since issue #88 every piece of the free rotation keeps the world
+        //     momentum exactly, so the deviation is rounding alone at BOTH step
+        //     sizes, (64 N + 16) eps |L| after N steps, where forward Euler's
+        //     was a first-order integration error. A bound this tight
+        //     is not satisfied by an implementation that never rotated
+        //     anything: its world vector would swing with the body's. ---
         {
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
             Real deviation[2] = {0.0, 0.0};
             Real tumble[2] = {0.0, 0.0};
+            Real allowed[2] = {0.0, 0.0};
             const Real steps[2] = {1e-3, 1e-4};
             for (int k = 0; k < 2; ++k)
             {
                 RigidBody3D body;
                 body.inertia = asymmetric;
                 body.angular_velocity = Vec3{0.9, 1.4, -0.6};
+                body.orientation = malloy::math::from_axis_angle(Vec3{-0.5, 1.0, 2.0}, 1.3);
 
                 Rigid3DWorld world{SimulationSettings{steps[k]}, {body}};
                 const Vec3 world_start = spin_angular_momentum(world.bodies()[0]);
@@ -2831,6 +3305,7 @@ int main()
                                       asymmetric.z * body.angular_velocity.z};
 
                 const int count = static_cast<int>(2.0 / steps[k]);
+                allowed[k] = (64.0 * count + 16.0) * machine_eps * malloy::math::length(world_start);
                 for (int i = 0; i < count; ++i)
                 {
                     MALLOY_CHECK_TRUE(world.step().ok());
@@ -2846,10 +3321,9 @@ int main()
                 }
             }
 
-            // First order: ten times the step, ten times the error.
-            const Real ratio = deviation[0] / deviation[1];
-            MALLOY_CHECK_TRUE(ratio > 9.5);
-            MALLOY_CHECK_TRUE(ratio < 10.5);
+            // Rounding only, at both step sizes.
+            MALLOY_CHECK_TRUE(deviation[0] <= allowed[0]);
+            MALLOY_CHECK_TRUE(deviation[1] <= allowed[1]);
 
             // The body really is tumbling, by more than |L| itself, and by the
             // same amount at both step sizes because it is not an error term.
@@ -2857,10 +3331,10 @@ int main()
             MALLOY_CHECK_TRUE(tumble[1] > 5.0);
             MALLOY_CHECK_NEAR(tumble[0], tumble[1], 0.01);
 
-            // Three orders of magnitude between the two, which is what makes
+            // Ten orders of magnitude between the two, which is what makes
             // returning the unrotated vector from `angular_momentum` a failure
             // rather than a rounding difference.
-            MALLOY_CHECK_TRUE(tumble[0] > 1000.0 * deviation[0]);
+            MALLOY_CHECK_TRUE(tumble[0] > 1e10 * deviation[0]);
         }
 
         // --- Nothing acts on the translation, and the diagnostics are sums.
@@ -2961,8 +3435,9 @@ int main()
         const Vec3 asymmetric{1.0, 2.0, 3.0};
 
         // --- The torque setting is validated, and squarable rather than merely
-        //     finite: it enters |u|^2 in the drift law, so one whose square
-        //     overflows is refused up front, the bound softening carries. ---
+        //     finite: it enters the momentum law as dt^2 |torque|^2, so one
+        //     whose square overflows is refused up front, the bound softening
+        //     carries. ---
         {
             MALLOY_CHECK_TRUE(Rigid3DSettings{}.is_valid());          // zero
             MALLOY_CHECK_TRUE((Rigid3DSettings{Vec3{1.0, -2.0, 3.0}}.is_valid()));
@@ -3010,9 +3485,10 @@ int main()
         //     axis. The torque is world-frame, but the body only ever rotates
         //     about that same axis, and a rotation about an axis fixes it, so
         //     the body-frame torque stays equal to the world one bit for bit.
-        //     The gyroscopic term is zero because omega stays along the axis.
-        //     What is left is I wx' = T, integrated exactly by forward Euler
-        //     because the right side is constant:
+        //     The gyroscopic term is zero because omega stays along the axis,
+        //     and every turn of the free rotation is about it. What is left is
+        //     I wx' = T, integrated exactly by the step's torque kick because
+        //     the right side is constant:
         //
         //       wx(n) = n dt T / Ix,   wy = wz = 0,   L_world = (T t, 0, 0).
         //
@@ -3060,78 +3536,109 @@ int main()
 
         // --- The forced per-step laws, derived and asserted every step.
         //
-        //     With L = I omega and u = L x omega + T_body, the forward-Euler
-        //     step omega' = omega + dt I^-1 u gives, exactly,
+        //     A step kicks the world momentum by exactly torque dt, and the free
+        //     rotation that follows keeps the world momentum and |L| (issue
+        //     #88), so for ANY inertia
         //
-        //       |L'|^2 = |L|^2 + 2 dt (L . T_body) + dt^2 |u|^2
-        //       T'     = T     +     dt (omega . T_body) + dt^2 (I^-1 u).u / 2
+        //       L_world(n+1) = L_world(n) + torque dt,
+        //       |L(n+1)|^2   = |L(n)|^2 + 2 dt (L . T_body) + dt^2 |torque|^2,
         //
-        //     The cross term drops out of both first-order parts because it is
-        //     orthogonal to L and to omega; only the torque survives there.
-        //     With T_body = 0 these are the M20 laws. A tumbling body, a tilted
-        //     start and an off-axis torque, so no term is accidentally zero. ---
+        //     with L . T_body = L_world . torque. Forward Euler's last term was
+        //     dt^2 |L x omega + T_body|^2, the gyroscopic part a growth of its
+        //     own. The kick changes the energy by exactly
+        //
+        //       dt (omega . T_body) + dt^2 (T_body . I^-1 T_body) / 2,
+        //
+        //     and the free rotation keeps the energy of a sphere or an
+        //     axisymmetric body, so for those that is the whole step; for three
+        //     distinct moments the rotation adds its own second-order error,
+        //     measured against the closed form in M20. A tumbling body, a tilted
+        //     start and an off-axis torque, so no term is accidentally zero. The
+        //     per-step laws are checked to a few ulp of |L|^2 (about 12, one ulp
+        //     1.8e-15). The world law accumulated, L_world(t_n) =
+        //     L_world(0) + torque t_n, is checked within (64 n + 16) eps of the
+        //     largest |L| (scope test 4): from a tilted start, so a torque
+        //     applied in the body frame fails it. ---
         {
             const Vec3 torque{0.7, -0.4, 0.9};
             const Real dt = 0.01;
-            RigidBody3D body;
-            body.inertia = asymmetric;
-            body.angular_velocity = Vec3{0.9, 1.4, -0.6};
-            body.orientation = malloy::math::from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.8);
-
-            Rigid3DWorld world{SimulationSettings{dt}, {body}, Rigid3DSettings{torque}};
-            Real worst_momentum = 0.0;
-            Real worst_energy = 0.0;
-            for (int i = 0; i < 200; ++i)
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
+            for (const Vec3& inertia : {asymmetric, Vec3{1.5, 2.5, 1.5}})
             {
-                const RigidBody3D& s = world.bodies()[0];
-                const Vec3 tb =
-                    malloy::math::rotate(malloy::math::conjugate(s.orientation), torque);
-                const Vec3 w = s.angular_velocity;
-                const Vec3 l{asymmetric.x * w.x, asymmetric.y * w.y, asymmetric.z * w.z};
-                const Vec3 u = malloy::math::cross(l, w) + tb;
-                const Vec3 iu{u.x / asymmetric.x, u.y / asymmetric.y, u.z / asymmetric.z};
-                const Real momentum_before = malloy::math::length_squared(l);
-                const Real energy_before = rotational_energy(s);
+                const bool axisymmetric = inertia.x == inertia.z;
+                RigidBody3D body;
+                body.inertia = inertia;
+                body.angular_velocity = Vec3{0.9, 1.4, -0.6};
+                body.orientation = malloy::math::from_axis_angle(Vec3{1.0, -2.0, 0.5}, 0.8);
 
-                MALLOY_CHECK_TRUE(world.step().ok());
+                Rigid3DWorld world{SimulationSettings{dt}, {body}, Rigid3DSettings{torque}};
+                const Vec3 world_start = spin_angular_momentum(world.bodies()[0]);
+                Real largest = malloy::math::length(world_start);
+                Real worst_momentum = 0.0;
+                Real worst_energy = 0.0;
+                Real worst_world = 0.0;
+                for (int n = 1; n <= 200; ++n)
+                {
+                    const RigidBody3D& s = world.bodies()[0];
+                    const Vec3 tb =
+                        malloy::math::rotate(malloy::math::conjugate(s.orientation), torque);
+                    const Vec3 w = s.angular_velocity;
+                    const Vec3 l{inertia.x * w.x, inertia.y * w.y, inertia.z * w.z};
+                    const Vec3 itb{tb.x / inertia.x, tb.y / inertia.y, tb.z / inertia.z};
+                    const Real momentum_before = malloy::math::length_squared(l);
+                    const Real energy_before = rotational_energy(s);
 
-                const RigidBody3D& s1 = world.bodies()[0];
-                const Vec3 w1 = s1.angular_velocity;
-                const Vec3 l1{asymmetric.x * w1.x, asymmetric.y * w1.y,
-                              asymmetric.z * w1.z};
+                    MALLOY_CHECK_TRUE(world.step().ok());
 
-                const Real pred_momentum =
-                    momentum_before + 2.0 * dt * malloy::math::dot(l, tb) +
-                    dt * dt * malloy::math::length_squared(u);
-                const Real pred_energy = energy_before + dt * malloy::math::dot(w, tb) +
-                                         0.5 * dt * dt * malloy::math::dot(iu, u);
-                worst_momentum = std::fmax(
-                    worst_momentum, std::abs(malloy::math::length_squared(l1) - pred_momentum));
-                worst_energy =
-                    std::fmax(worst_energy, std::abs(rotational_energy(s1) - pred_energy));
+                    const RigidBody3D& s1 = world.bodies()[0];
+                    const Vec3 w1 = s1.angular_velocity;
+                    const Vec3 l1{inertia.x * w1.x, inertia.y * w1.y, inertia.z * w1.z};
+
+                    const Real pred_momentum = momentum_before + 2.0 * dt * malloy::math::dot(l, tb) +
+                                               dt * dt * malloy::math::length_squared(torque);
+                    const Real pred_energy = energy_before + dt * malloy::math::dot(w, tb) +
+                                             0.5 * dt * dt * malloy::math::dot(tb, itb);
+                    worst_momentum = std::fmax(
+                        worst_momentum, std::abs(malloy::math::length_squared(l1) - pred_momentum));
+                    worst_energy =
+                        std::fmax(worst_energy, std::abs(rotational_energy(s1) - pred_energy));
+
+                    const Vec3 lw = spin_angular_momentum(s1);
+                    largest = std::fmax(largest, malloy::math::length(lw));
+                    worst_world = std::fmax(
+                        worst_world,
+                        malloy::math::length(lw - (world_start + torque * (static_cast<Real>(n) * dt))) /
+                            ((64.0 * n + 16.0) * machine_eps * largest));
+                }
+                MALLOY_CHECK_TRUE(worst_momentum < 1e-13);
+                MALLOY_CHECK_TRUE(worst_world <= 1.0);
+                if (axisymmetric)
+                {
+                    MALLOY_CHECK_TRUE(worst_energy < 1e-13);
+                }
+
+                // The torque did net work here, so the energy did not merely
+                // wander at second order.
+                MALLOY_CHECK_TRUE(rotational_energy(world.bodies()[0]) !=
+                                  rotational_energy(body));
             }
-            MALLOY_CHECK_TRUE(worst_momentum < 1e-13);
-            MALLOY_CHECK_TRUE(worst_energy < 1e-13);
-
-            // The torque did net work here, so the energy is not merely
-            // drifting at second order as it did in M20.
-            MALLOY_CHECK_TRUE(rotational_energy(world.bodies()[0]) !=
-                              rotational_energy(body));
         }
 
         // --- The world-frame linear law, for a body that is NOT spinning up
         //     cleanly: a fast symmetric top with a torque across its spin.
         //
         //     dL/dt = torque holds in the world frame no matter what the body
-        //     does, so L_world(t) = L_world(0) + torque t is the continuum law
-        //     and the discrete scheme tracks it to FIRST order. Measuring the
-        //     deviation at two step sizes separates the law (exact) from the
-        //     integration error (falls with dt), the same way M20 separated the
-        //     world frame from the body frame. ---
+        //     does, so L_world(t) = L_world(0) + torque t is the continuum law.
+        //     The step reproduces it exactly at every step boundary (the kick
+        //     adds torque dt and the rotation keeps the world momentum), so the
+        //     deviation is rounding at BOTH step sizes, (64 N + 16) eps of the
+        //     largest |L|, where forward Euler's was a first-order error. ---
         {
             const Real T = 0.3;
             const Real spin = 8.0;
+            const Real machine_eps = std::numeric_limits<Real>::epsilon();
             Real deviation[2] = {0.0, 0.0};
+            Real allowed[2] = {0.0, 0.0};
             Real tilt[2] = {0.0, 0.0};
             const Real steps[2] = {1e-3, 1e-4};
             for (int k = 0; k < 2; ++k)
@@ -3144,6 +3651,7 @@ int main()
                 const Vec3 start = total_angular_momentum3d(world.bodies());
 
                 const int count = static_cast<int>(4.0 / steps[k]);
+                Real largest = malloy::math::length(start);
                 for (int n = 1; n <= count; ++n)
                 {
                     MALLOY_CHECK_TRUE(world.step().ok());
@@ -3152,13 +3660,13 @@ int main()
                                      start.y, start.z};
                     deviation[k] = std::fmax(deviation[k], malloy::math::length(lw - exact));
                     tilt[k] = std::fmax(tilt[k], std::abs(lw.x));
+                    largest = std::fmax(largest, malloy::math::length(lw));
                 }
+                allowed[k] = (64.0 * count + 16.0) * machine_eps * largest;
             }
 
-            // First order: ten times the step, ten times the deviation.
-            const Real ratio = deviation[0] / deviation[1];
-            MALLOY_CHECK_TRUE(ratio > 9.5);
-            MALLOY_CHECK_TRUE(ratio < 10.5);
+            MALLOY_CHECK_TRUE(deviation[0] <= allowed[0]);
+            MALLOY_CHECK_TRUE(deviation[1] <= allowed[1]);
 
             // The angular momentum really did tilt into x, by more than a
             // radian's worth, so the law is being tracked over real motion and
@@ -5705,14 +6213,50 @@ int main()
         // no spin at all while a spun: the four corners did not leave
         // together.) Every point reversing at e = 1 conserves kinetic energy
         // exactly, sum lambda (u- + u+) / 2 = 0, and the impulses are equal
-        // and opposite, so momentum is kept. b's normal is its principal z
-        // axis, so a normal impulse gives it no spin about it; the step's
-        // forward-Euler Euler equations then add exactly
-        // dt (Ix - Iy) / Iz wx wy. Checked at the step that resolves the
-        // landing: later, each body's free precession turns its spin.
+        // and opposite, so momentum is kept. Checked at the step that resolves
+        // the landing, which ends with each body's free rotation over dt:
+        //
+        //   - Each body's normal is one of its principal axes (z), so a normal
+        //     impulse gives it no spin about it: w = (wx, wy, 0) in each body
+        //     frame. Then L x w lies along the normal, so the free rotation
+        //     moves the in-plane spin only at SECOND order,
+        //     (dt^2 / 2) d2w/dt2, with, in the body frame and u = L x w,
+        //
+        //       d2w/dt2 = w x I^-1 u - I^-1 (w x u) + I^-1 (L x I^-1 u),
+        //
+        //     the derivative of dw/dt = I^-1 u along the motion (the world
+        //     inertia turns with the body). Forward Euler, a first-order map,
+        //     had no such term, and this check bounded the raw in-plane part by
+        //     the impact tolerance; the exact flow moves it by up to 2.5e-10
+        //     here (issue #88). The term is subtracted for both bodies, and
+        //     what is left is held to the same bound as before: corners at
+        //     least 0.6 apart, each within 1e-12 of the velocity scale (1) of
+        //     its target, give 2e-12 / 0.6 per axis, with the third-order
+        //     remainder, (dt |w|)^3 |w| ~ 4e-13 at |w| = 0.14, inside it.
+        //   - b is axisymmetric about its x axis (Iy = Iz), so its rotation is
+        //     the exact precession: wx kept, (wy, wz) turned about x by
+        //     Omega dt, Omega = (Iy - Ix) / Iy wx. From wz = 0 that leaves
+        //     wz = -wy tan(Omega dt) after the step (forward Euler's first-order
+        //     dt (Ix - Iy) / Iz wx wy differs from it by 1e-15).
+        //   - The energy to the impact tolerance times the impulse (about
+        //     1.8e-12): b's rotation keeps its energy exactly, and a's changes
+        //     it by the splitting's third-order error, (dt |w|)^3 T ~ 4e-14.
         {
             const Quat r = from_axis_angle(Vec3{0.3, -0.7, 0.2}, 0.9);
             const Vec3 up = rotate(r, Vec3{0.0, 0.0, 1.0});
+            const Real dt = 0.001;
+            // (dt^2 / 2) d2w/dt2 of the torque-free motion, in the world frame.
+            const auto precession = [dt](const RigidBody3D& body) {
+                const Vec3& w = body.angular_velocity;
+                const Vec3& m = body.inertia;
+                const auto inverse = [&m](const Vec3& v) { return Vec3{v.x / m.x, v.y / m.y, v.z / m.z}; };
+                const Vec3 l{m.x * w.x, m.y * w.y, m.z * w.z};
+                const Vec3 u = malloy::math::cross(l, w);
+                const Vec3 rate = inverse(u);
+                const Vec3 second = malloy::math::cross(w, rate) - inverse(malloy::math::cross(w, u)) +
+                                    inverse(malloy::math::cross(l, rate));
+                return rotate(body.orientation, second) * (0.5 * dt * dt);
+            };
             for (int degrees = 1; degrees < 90; ++degrees)
             {
                 const Real twist = degrees * 3.14159265358979323846 / 180.0;
@@ -5728,7 +6272,7 @@ int main()
                 b.orientation = normalize(r * from_axis_angle(Vec3{0.0, 0.0, 1.0}, twist));
                 b.position = rotate(r, Vec3{0.1, 0.05, 0.0}) + up * 0.8053;
                 b.velocity = up * -1.0;
-                Rigid3DWorld w{SimulationSettings{0.001}, {a, b}};
+                Rigid3DWorld w{SimulationSettings{dt}, {a, b}};
                 const Real energy = malloy::rigid::total_kinetic_energy3d(w.bodies());
                 const Vec3 momentum = malloy::rigid::total_linear_momentum3d(w.bodies());
                 int steps = 0;
@@ -5742,20 +6286,13 @@ int main()
                 const RigidBody3D& small = w.bodies()[1];
                 MALLOY_CHECK_TRUE(malloy::math::dot(small.velocity - big.velocity, up) > 0.9);
                 const Vec3 relative = rotate(small.orientation, small.angular_velocity) -
-                                      rotate(big.orientation, big.angular_velocity);
-                // The impact phase leaves each corner within 1e-12 of the
-                // velocity scale (1) of its target; corners at least 0.6 apart
-                // bound the relative in-plane spin by 2e-12 / 0.6 per axis, and
-                // the step's precession of the in-plane part is second order
-                // in the normal spin.
+                                      rotate(big.orientation, big.angular_velocity) -
+                                      (precession(small) - precession(big));
                 MALLOY_CHECK_NEAR(malloy::math::length(relative - up * malloy::math::dot(relative, up)),
                                   0.0, 1e-11);
                 const Vec3& ws = small.angular_velocity;
                 const Vec3& is = small.inertia;
-                MALLOY_CHECK_NEAR(ws.z, 0.001 * (is.x - is.y) / is.z * ws.x * ws.y, 1e-12);
-                // The energy to the impact tolerance times the impulse (about
-                // 1.8e-12), plus one step of forward Euler's second-order drift,
-                // (1/2) Iz (dt (Ix - Iy) / Iz wx wy)^2 <= 7e-12 for a.
+                MALLOY_CHECK_NEAR(ws.z, -ws.y * std::tan(dt * (is.y - is.x) / is.y * ws.x), 1e-12);
                 MALLOY_CHECK_NEAR(malloy::rigid::total_kinetic_energy3d(w.bodies()), energy, 1e-10);
                 MALLOY_CHECK_TRUE(malloy::math::approx_equal(
                     malloy::rigid::total_linear_momentum3d(w.bodies()), momentum, 1e-14));
@@ -6781,18 +7318,44 @@ int main()
             g.step();
             return g.bodies();
         };
+        // In 3D the forcing before the solve is the velocity's forcing and the
+        // spin's torque KICK alone, at the start pose (issue #88): the free
+        // rotation now comes AFTER the solve, so a ghost step, which rotates
+        // the bodies, is no longer the pre-solve state of an asymmetric one.
+        // Written out instead, in the step's own arithmetic.
         const auto m40_presolve3 = [](const Rigid3DWorld& w) {
-            std::vector<RigidBody3D> ghost = w.bodies();
-            for (RigidBody3D& b : ghost)
+            std::vector<RigidBody3D> pre = w.bodies();
+            const Rigid3DSettings& s = w.settings();
+            const Real dt = w.simulation_settings().dt;
+            for (RigidBody3D& b : pre)
             {
-                b.half_extents = Vec3{};
-                b.radius = 0.0;
+                b.velocity += s.gravity * dt;
+                b.velocity += (s.force / b.mass) * dt;
+                const Vec3 tb = rotate(malloy::math::conjugate(b.orientation), s.torque);
+                b.angular_velocity += Vec3{tb.x / b.inertia.x, tb.y / b.inertia.y, tb.z / b.inertia.z} * dt;
             }
-            Rigid3DSettings s = w.settings();
-            s.ground.clear();
-            Rigid3DWorld g{w.simulation_settings(), ghost, s};
-            g.step();
-            return g.bodies();
+            return pre;
+        };
+        // The exact SOLVED state of a 3D step, from the bodies before it and
+        // the world after it: the start pose, the end velocities, and the spin
+        // that carries each body's end WORLD angular momentum in its start
+        // pose. After the solve the step only rotates each body freely,
+        // translates it and projects it, and each of those keeps every
+        // velocity and every body's world angular momentum (rigid3d_world.hpp,
+        // steps 2 to 4 and D), so this is the state the impulses left.
+        const auto m40_solved3 = [](const std::vector<RigidBody3D>& before, const Rigid3DWorld& w) {
+            std::vector<RigidBody3D> solved = before;
+            for (std::size_t k = 0; k < solved.size(); ++k)
+            {
+                const RigidBody3D& after = w.bodies()[k];
+                const Vec3& m = after.inertia;
+                const Vec3& s = after.angular_velocity;
+                const Vec3 l = rotate(after.orientation, Vec3{m.x * s.x, m.y * s.y, m.z * s.z});
+                const Vec3 lb = rotate(malloy::math::conjugate(before[k].orientation), l);
+                solved[k].angular_velocity = Vec3{lb.x / m.x, lb.y / m.y, lb.z / m.z};
+                solved[k].velocity = after.velocity;
+            }
+            return solved;
         };
         // Tilt of a 2D box from its nearest face-down pose; of a 3D box, the
         // angle between `up` and its most nearly vertical face normal.
@@ -6910,9 +7473,9 @@ int main()
         // landing corner of at most 0.27 s (corner moment (4/3) m (a^2 + b^2),
         // angular acceleration about 9.4 rad/s^2 over 0.35 rad), doubled.
         // w is the smaller face (2 x 0.25), so the bound holds on any face.
-        // Frictionless, nothing stops a spin about the vertical, and the
-        // documented forward-Euler rotation of an ANISOTROPIC body tilts its
-        // angular momentum while it rocks (the exact M20 drift law), so the
+        // Frictionless, nothing stops a spin about the vertical, and before
+        // issue #88 the forward-Euler rotation of an ANISOTROPIC body tilted
+        // its angular momentum while it rocked (the old M20 drift law), so the
         // frictionless 3D case uses a CUBE: no gyroscopic term, L_z stays 0
         // (AC-13b), and it must come fully to rest.
         // ---------------------------------------------------------------------
@@ -7036,6 +7599,11 @@ int main()
         // 1e-8 times the larger of the pre-solve and solved states' scale (the
         // warm start and the prepass act between the two) plus |g| dt.
         // Setups: a tilted landing, a nudged box, a staggered 3-stack.
+        // In 3D the comparison is between the exact pre-solve and SOLVED
+        // states (m40_presolve3, m40_solved3): since issue #88 the free
+        // rotation follows the solve and changes an asymmetric body's energy
+        // by its own second-order error, and the projection's turn re-expresses
+        // the world momentum in a turned frame, neither of which is the solve's.
         // ---------------------------------------------------------------------
         {
             Real worst = 0.0;
@@ -7084,19 +7652,21 @@ int main()
                     const Real n = static_cast<Real>(init.size());
                     for (int i = 0; i < 1500; ++i)
                     {
+                        const std::vector<RigidBody3D> before = w.bodies();
                         const std::vector<RigidBody3D> pre = m40_presolve3(w);
                         w.step();
+                        const std::vector<RigidBody3D> solved = m40_solved3(before, w);
                         Real flow = 0.0;
                         for (std::size_t k = 0; k < pre.size(); ++k)
                         {
                             flow += pre[k].mass *
-                                    (length(w.bodies()[k].velocity - pre[k].velocity) + m40_gdt);
+                                    (length(solved[k].velocity - pre[k].velocity) + m40_gdt);
                         }
                         const Real r = m40_rest_tol *
-                                       (m40_gdt + std::fmax(m40_scale3(pre), m40_scale3(w.bodies())));
+                                       (m40_gdt + std::fmax(m40_scale3(pre), m40_scale3(solved)));
                         const Real allowed = (1.0 + mu) * r * 0.5 * n * (n + 1.0) * flow +
                                              64.0 * m40_eps * m40_ke3(pre);
-                        const Real gain = m40_ke3(w.bodies()) - m40_ke3(pre);
+                        const Real gain = m40_ke3(solved) - m40_ke3(pre);
                         worst = std::fmax(worst, gain / allowed);
                     }
                 }
@@ -7277,6 +7847,8 @@ int main()
         // (c) Below the threshold a resting box keeps no micro-bounce: placed at
         //     rest at e 0.5 and e 1, over 0.5 s to 1 s its speed stays within
         //     the rest bound (before M40: e g dt / (1 + e), and g dt at e 1).
+        // (d) and (e), issue #88: the prediction under the kick-then-rotate
+        //     order, and a fast anisotropic tumbler's bounces (below).
         // ---------------------------------------------------------------------
         for (const Real g : {0.0, m40_g})
         {
@@ -7350,6 +7922,265 @@ int main()
                       v2, m40_rest_speed(r, 0.5, m40_brick_R));
             m40_check(e > 0.75 ? "AC-6c 3D at rest, e 1: no micro-bounce" : "AC-6c 3D at rest, e .5: no micro-bounce",
                       v3, m40_rest_speed(r, 0.5, m40_block_R));
+        }
+        // (d) Issue #88, the prediction. The impact phase predicts delta, the
+        //     change the step makes to a point's normal velocity between the
+        //     impact and rest phases. Since the fix that change is the forcing
+        //     and the torque KICK alone, body b's minus body a's: the
+        //     gyroscopic change of the spin happens in the free rotation, after
+        //     the solve. A fast anisotropic box under a torque and a force lands
+        //     on ONE corner at e 0.5; from the exact pre-solve and solved states
+        //     the corner must leave at -e (v_n + delta / 2) + delta / 2, with
+        //     delta read off the pre-solve state, to the impact tolerance.
+        //     Forward Euler's gyroscopic term, kept in delta, would move that
+        //     target by half of it, measured here too: it must exceed a million
+        //     times the tolerance (it is 9e-4 m/s), so keeping it fails.
+        {
+            const Real e = 0.5;
+            const Vec3 half{0.6, 0.35, 0.15};
+            Rigid3DSettings s = m40_floor3(m40_g, e, 0.0);
+            s.torque = Vec3{0.4, -0.7, 0.3};
+            s.force = Vec3{0.3, 0.0, -0.5};
+            RigidBody3D b0 = m40_box3(1.0, half, Vec3{}, from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.3),
+                                      Vec3{0.2, -0.1, 0.0}, Vec3{2.0, 6.0, 4.0});
+            int low = 0;
+            for (int i = 1; i < 8; ++i)
+            {
+                if (m40_corner3(b0, i).z < m40_corner3(b0, low).z)
+                {
+                    low = i;
+                }
+            }
+            Real clearance = 1e300; // of the next corner above the lowest
+            for (int i = 0; i < 8; ++i)
+            {
+                if (i != low)
+                {
+                    clearance = std::fmin(clearance, m40_corner3(b0, i).z - m40_corner3(b0, low).z);
+                }
+            }
+            const Vec3 arm = m40_corner3(b0, low) - b0.position;
+            b0.position.z = -arm.z; // the corner exactly touching
+            b0.velocity.z = -2.0 - cross(rotate(b0.orientation, b0.angular_velocity), arm).z;
+            const auto normal_speed = [&arm](const RigidBody3D& b) {
+                return b.velocity.z + cross(rotate(b.orientation, b.angular_velocity), arm).z;
+            };
+
+            Rigid3DWorld w{SimulationSettings{m40_dt}, {b0}, s};
+            const std::vector<RigidBody3D> before = w.bodies();
+            const RigidBody3D pre = m40_presolve3(w)[0];
+            MALLOY_CHECK_TRUE(w.step().ok());
+            const RigidBody3D solved = m40_solved3(before, w)[0];
+
+            const Real vn = normal_speed(b0);
+            const Real delta = normal_speed(pre) - vn;
+            const Real middle = vn + delta / 2.0;
+            const Real threshold = 4.0 * m40_dt * (m40_g + length(s.force) / b0.mass);
+            const Real vs = std::fmax(m40_scale3({b0}), std::fmax(m40_scale3({pre}), m40_scale3({solved})));
+            m40_check("AC-6d one corner in the manifold (clearance of the next, m)",
+                      1e-4 * 0.6 / clearance, 1.0);
+            m40_check("AC-6d the corner approaches past the threshold (v_mid + v_th)",
+                      middle + threshold, 0.0);
+            const Real tol = 4.0 * m40_impact_tol * vs + 64.0 * m40_eps * vs;
+            m40_check("AC-6d corner leaves at -e (v_n + delta / 2) + delta / 2 (KD delta)",
+                      std::fabs(normal_speed(solved) - (-e * middle + delta / 2.0)), tol);
+            const Vec3& m = b0.inertia;
+            const Vec3& sp = b0.angular_velocity;
+            const Vec3 u = cross(Vec3{m.x * sp.x, m.y * sp.y, m.z * sp.z}, sp);
+            const Vec3 gyro = rotate(b0.orientation, Vec3{u.x / m.x, u.y / m.y, u.z / m.z} * m40_dt);
+            m40_check("AC-6d forward Euler's gyroscopic delta would move the target (1e6 tol / half of it)",
+                      1e6 * tol / (std::fabs(cross(gyro, arm).z) / 2.0), 1.0);
+        }
+        // (e) Issue #88, the regression the scope asks for: a fast anisotropic
+        //     tumbler bounces. The free rotation after the solve moves an
+        //     asymmetric body's spin, and so a corner's normal velocity, by up
+        //     to dt (I_max / I_min) |w|^2 |r| per step, unpredicted; here that
+        //     is 132 dt, above the threshold's 8 |g| dt. The box (0.6, 0.35,
+        //     0.15), spin (2, 6, 4), tilted 0.3 rad about (1, 1, 0), dropped from
+        //     2 m at e 0.5, mu 0 and 0.5, dt 0.002, 0.001 and 0.0005, 4 s:
+        //       - every impact step whose manifold is all impact points obeys
+        //         the mid-step law at each of them, from the exact solved
+        //         state, to the impact tolerance (a step that mixes in a point
+        //         below the threshold is counted, not checked: the rest phase
+        //         then acts on the same body after the impact). With friction,
+        //         only a ONE-point impact is held to it: a frictional impact
+        //         at several points can stop at the 100-sweep cap
+        //         (kMaxSweeps, ADR 0011), short of the tolerance, as it
+        //         already did on the forward-Euler step in this scenario
+        //         (measured with an instrumented build: the impact phase
+        //         stopped at the cap once there and 3 times here, the worst
+        //         law error 2.2e-6 m/s), so those are counted and their worst
+        //         printed;
+        //       - the energy never rises above the start by more than this
+        //         body's own rotational envelope, the largest change of its
+        //         rotational energy rotating freely from the same start for the
+        //         same time (translation in free flight only sheds energy, M22,
+        //         and every impact at e < 1 dissipates), and no impact step
+        //         raises it by more than the largest single-step change of that
+        //         free rotation;
+        //       - the first apex converges as dt halves. Its order is printed,
+        //         not assumed: impacts are not smooth.
+        {
+            const Vec3 half{0.6, 0.35, 0.15};
+            const Real g = 9.81;
+            const Real e = 0.5;
+            const Real margin = 1e-4 * 0.6;
+            Real worst_law = 0.0;
+            Real worst_rise = 0.0;
+            Real worst_jump = 0.0;
+            int impacts = 0;
+            int mixed = 0;
+            int checked = 0;
+            int frictional = 0;
+            Real worst_capped = 0.0;
+            Real apex[2][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+            for (int f = 0; f < 2; ++f)
+            {
+                const Real mu = f == 0 ? 0.0 : 0.5;
+                for (int k = 0; k < 3; ++k)
+                {
+                    const Real dt = 0.002 / static_cast<Real>(1 << k);
+                    const int count = static_cast<int>(std::lround(4.0 / dt));
+                    Rigid3DSettings s = m40_floor3(g, e, mu);
+                    const RigidBody3D b0 = m40_box3(1.0, half, Vec3{0.0, 0.0, 2.0},
+                                                    from_axis_angle(Vec3{1.0, 1.0, 0.0}, 0.3), Vec3{},
+                                                    Vec3{2.0, 6.0, 4.0});
+                    if (f == 0 && k == 0)
+                    {
+                        const Real ratio = std::fmax(std::fmax(b0.inertia.x, b0.inertia.y), b0.inertia.z) /
+                                           std::fmin(std::fmin(b0.inertia.x, b0.inertia.y), b0.inertia.z);
+                        m40_check("AC-6e the tumble is fast: 8 |g| / ((I_max / I_min) |w|^2 |r|)",
+                                  8.0 * g / (ratio * dot(b0.angular_velocity, b0.angular_velocity) *
+                                             length(half)),
+                                  1.0);
+                    }
+
+                    // This body's own rotational envelope, rotating freely.
+                    RigidBody3D lone = b0;
+                    lone.half_extents = Vec3{};
+                    Rigid3DWorld spinning{SimulationSettings{dt}, {lone}};
+                    const Real t0 = malloy::rigid::rotational_energy(lone);
+                    Real envelope = 0.0;
+                    Real step_envelope = 0.0;
+                    Real last = t0;
+                    for (int i = 0; i < count; ++i)
+                    {
+                        MALLOY_CHECK_TRUE(spinning.step().ok());
+                        const Real t = malloy::rigid::rotational_energy(spinning.bodies()[0]);
+                        envelope = std::fmax(envelope, std::fabs(t - t0));
+                        step_envelope = std::fmax(step_envelope, std::fabs(t - last));
+                        last = t;
+                    }
+
+                    Rigid3DWorld w{SimulationSettings{dt}, {b0}, s};
+                    const Real e0 = m40_energy3(w);
+                    Real z1 = b0.position.z;
+                    Real z2 = z1;
+                    bool first = true;
+                    for (int i = 1; i <= count; ++i)
+                    {
+                        const std::vector<RigidBody3D> before = w.bodies();
+                        const RigidBody3D pre = m40_presolve3(w)[0];
+                        const RigidBody3D& b = before[0];
+                        const Real threshold = 4.0 * dt * g;
+                        int in = 0;
+                        int active = 0;
+                        Vec3 arms[8];
+                        Real middles[8];
+                        Real deltas[8];
+                        for (int c = 0; c < 8; ++c)
+                        {
+                            const Vec3 corner = m40_corner3(b, c);
+                            if (corner.z > margin)
+                            {
+                                continue;
+                            }
+                            const Vec3 arm = corner - b.position;
+                            const Real vn = b.velocity.z + cross(rotate(b.orientation, b.angular_velocity), arm).z;
+                            const Real delta =
+                                pre.velocity.z + cross(rotate(pre.orientation, pre.angular_velocity), arm).z - vn;
+                            const Real middle = vn + delta / 2.0;
+                            const Real gap = corner.z;
+                            ++in;
+                            if (middle < -threshold && (!(gap > 0.0) || -middle * dt >= gap))
+                            {
+                                arms[active] = arm;
+                                middles[active] = middle;
+                                deltas[active] = delta;
+                                ++active;
+                            }
+                        }
+                        const Real energy_before = m40_energy3(w);
+                        MALLOY_CHECK_TRUE(w.step().ok());
+                        if (active > 0)
+                        {
+                            ++impacts;
+                            worst_jump = std::fmax(worst_jump, (m40_energy3(w) - energy_before) / step_envelope);
+                            if (active < in)
+                            {
+                                ++mixed;
+                            }
+                            else
+                            {
+                                const RigidBody3D solved = m40_solved3(before, w)[0];
+                                const Real vs = std::fmax(m40_scale3({b}), m40_scale3({solved}));
+                                const bool held = mu == 0.0 || active == 1;
+                                for (int a = 0; a < active; ++a)
+                                {
+                                    const Real out =
+                                        solved.velocity.z +
+                                        cross(rotate(solved.orientation, solved.angular_velocity), arms[a]).z;
+                                    const Real error = std::fabs(out - (-e * middles[a] + deltas[a] / 2.0));
+                                    if (held)
+                                    {
+                                        worst_law = std::fmax(
+                                            worst_law, error / (4.0 * m40_impact_tol * vs + 64.0 * m40_eps * vs));
+                                    }
+                                    else
+                                    {
+                                        worst_capped = std::fmax(worst_capped, error);
+                                    }
+                                }
+                                if (held)
+                                {
+                                    ++checked;
+                                }
+                                else
+                                {
+                                    ++frictional;
+                                }
+                            }
+                        }
+                        worst_rise = std::fmax(worst_rise, (m40_energy3(w) - e0) / envelope);
+                        const Real z = w.bodies()[0].position.z;
+                        if (first && i >= 2 && z1 > z2 && z1 >= z)
+                        {
+                            apex[f][k] = z1;
+                            first = false;
+                        }
+                        z2 = z1;
+                        z1 = z;
+                    }
+                }
+            }
+            m40_check("AC-6e every held impact: mid-step law, |error| / tolerance", worst_law, 1.0);
+            m40_check("AC-6e impacts held to the law (1 / count)", 1.0 / static_cast<Real>(checked), 1.0);
+            std::cout << "  M40 info  AC-6e impact steps " << impacts << ": " << checked << " held, " << mixed
+                      << " mixed with a resting point, " << frictional
+                      << " frictional at several points (worst " << worst_capped << " m/s)\n";
+            m40_check("AC-6e energy rise above the start / the rotational envelope", worst_rise, 1.0);
+            m40_check("AC-6e energy rise across an impact step / the single-step envelope", worst_jump, 1.0);
+            for (int f = 0; f < 2; ++f)
+            {
+                const Real coarse = std::fabs(apex[f][0] - apex[f][1]);
+                const Real fine = std::fabs(apex[f][1] - apex[f][2]);
+                m40_check(f == 0 ? "AC-6e first apex converges, mu 0 (fine / coarse difference)"
+                                 : "AC-6e first apex converges, mu .5 (fine / coarse difference)",
+                          fine / coarse, 1.0);
+                std::cout << "  M40 info  AC-6e first apex, mu " << (f == 0 ? "0" : ".5") << ": "
+                          << apex[f][0] << ", " << apex[f][1] << ", " << apex[f][2] << " m; observed order "
+                          << std::log2(coarse / fine) << "\n";
+            }
         }
 
         // ---------------------------------------------------------------------

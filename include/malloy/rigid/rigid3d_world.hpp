@@ -81,7 +81,8 @@ struct Rigid3DSettings
     // never turns, unlike a floor built from spheres. Empty by default.
     std::vector<collide::Plane3> ground{};
 
-    // Valid when the torque is SQUARABLE (it enters |u|^2 in the drift law),
+    // Valid when the torque is SQUARABLE (it enters the momentum law below as
+    // dt^2 |torque|^2),
     // the force is SQUARABLE (its square enters the free-flight energy drift, as
     // gravity's does), restitution is in [0, 1] and finite, friction is
     // non-negative and finite, gravity is SQUARABLE, and every ground plane is
@@ -151,24 +152,18 @@ public:
     //      scale with mass and acts through the centre of mass, so it changes
     //      the velocity but makes no torque. Both are zero by default.
     //
-    //   1. integrate the angular velocity with Euler's equations, in the body
-    //      frame, where the inertia is diagonal, using FORWARD Euler (the rate
-    //      depends on the old angular velocity and orientation, so there is no
-    //      older state to evaluate it at):
+    //   1. KICK the angular velocity with the applied torque (M21), in the body
+    //      frame, where the inertia is diagonal:
     //
-    //        Ix wx' = (Iy - Iz) wy wz + Tx
-    //        Iy wy' = (Iz - Ix) wz wx + Ty
-    //        Iz wz' = (Ix - Iy) wx wy + Tz
+    //        omega += dt I^-1 T_body,   T_body = R^-1 T_world,
     //
-    //      where (Tx, Ty, Tz) is the applied torque expressed in the BODY
-    //      frame. The setting is a WORLD-frame torque, so it is rotated in by
-    //      the body's current orientation, T_body = R^-1 T_world, before this
-    //      step. Euler's equations are diagonal only in the body frame, which
-    //      is why the torque comes to them rather than the other way round.
-    //
-    //      The gyroscopic part is the DIFFERENCE of principal moments, exactly
-    //      as in M20: a sphere still cannot precess, and it is nonzero only in
-    //      three dimensions. The torque is what M21 adds to it.
+    //      at the start-of-step orientation. The setting is a WORLD-frame
+    //      torque, so it is rotated in by the body's current orientation; the
+    //      kick then adds exactly T_world dt to the world angular momentum.
+    //      There is no gyroscopic term here: the L x omega of Euler's equations
+    //      belongs to the free rotation, step 2. (Before issue #88 this step
+    //      was forward Euler on the whole of Euler's equations, which grew |L|
+    //      and the energy by a second-order term every step, without bound.)
     //
     //   C. REST phase, every point: sequential impulses drive each point's
     //      normal velocity to 0 (to -gap/dt for a point still apart, so it may
@@ -194,24 +189,40 @@ public:
     //      Only bodies that received a nonzero impulse are written back, so a
     //      body out of contact is bit for bit what it was without contacts.
     //
-    //   2. integrate the orientation with the UPDATED angular velocity. This
-    //      coupling is what makes the world semi-implicit in the sense every
-    //      other world here uses, velocities before positions, and it is the
-    //      only place the word applies: step 1 above is forward Euler.
+    //   2. ROTATE each body freely over dt (issue #88), with the solved
+    //      angular velocity, so velocities still come before positions. Its
+    //      energy, with L = I omega in the body frame and the axes ordered by
+    //      moment (j the smallest, i the MEDIAN, k the largest, ties by index),
+    //      is regrouped as
     //
-    //        q' = q + (dt/2) * q * (0, omega_body)
+    //        H = |L|^2 / (2 I_i) + c_j L_j^2 / 2 + c_k L_k^2 / 2,
+    //        c_j = 1/I_j - 1/I_i,  c_k = 1/I_k - 1/I_i,
     //
-    //      The body-frame form puts the quaternion on the left. Using the world
-    //      frame would put it on the right, and mixing the two is a silent way
-    //      to rotate backwards.
+    //      and stepped by the symmetric composition A_j(dt/2), A_k(dt), C(dt),
+    //      A_j(dt/2) of the three terms' EXACT flows. A_a(s) turns the body by
+    //      phi = s c_a L_a about its own axis a, q <- q r, and the body-frame
+    //      momentum by -phi about that axis, leaving L_a alone; C(s) turns the
+    //      body by s |L| / I_i about L and leaves the momentum alone. So:
     //
-    //   3. RENORMALIZE the orientation. Integrating a unit quaternion does not
-    //      keep it unit: the step above is a first-order move along a curve
-    //      that lies on the unit sphere, so it leaves tangentially. The size of
-    //      that is exact rather than approximate, because the quaternion norm
-    //      is multiplicative and the update is a right multiplication:
+    //      - every piece keeps the WORLD angular momentum R L, and |L|, exactly;
+    //      - the composition is time-reversible and second order, and EXACT
+    //        for every sphere and every axisymmetric body (then c_j or c_k is
+    //        0 and the two remaining flows commute);
+    //      - a turn whose angle is exactly 0 is skipped, a turn never touches
+    //        the component along its own axis, and only the components the
+    //        rotation changed are converted back to omega, so a sphere, a spin
+    //        about a principal axis, an eigenspace spin of an axisymmetric
+    //        body and a body at rest keep omega bit for bit;
+    //      - the energy is NOT kept exactly for three distinct moments: its
+    //        error is second order and stayed bounded in every measured case,
+    //        which is not a general guarantee.
     //
-    //        |q'| = |q| |(1, (dt/2) omega)| = |q| sqrt(1 + |omega|^2 dt^2 / 4)
+    //      Each turn is about a BODY axis, so it is composed on the right,
+    //      q <- q r. Composing on the left would turn about the world axis of
+    //      the same name, a silent way to rotate wrongly.
+    //
+    //   3. RENORMALIZE the orientation. Each turn is a unit quaternion, so the
+    //      product stays on the unit sphere up to rounding, which this removes.
     //
     //      Unlike the positional correction in the 2D contact code, this costs
     //      nothing physically. A nonzero quaternion and any scaling of it
@@ -223,7 +234,7 @@ public:
     //      unit-only form and that form is NOT scale invariant: fed a
     //      quaternion of norm k it returns p + k^2 (R p - p), scaling the
     //      displacement instead of rotating. Renormalizing also stops the
-    //      factor above from compounding over a long run.
+    //      rounding of the turns from compounding over a long run.
     //
     //   4. move the centre of mass by velocity * dt, with the solved velocity.
     //      Without gravity and without a contact this is still a body flying
@@ -312,25 +323,30 @@ math::Vec3 total_linear_momentum3d(const std::vector<RigidBody3D>& bodies);
 //
 // --- What the torque does to the SPIN, exactly ---
 //
-// Each body's SPIN angular momentum obeys an exact discrete law. Writing
-// L = I omega and u = L x omega + T_body, so the update is
-// omega' = omega + dt I^-1 u, the cross term is orthogonal to both L and omega
-// and only the torque survives the first-order part:
+// Each body's SPIN angular momentum obeys an exact discrete law. The kick adds
+// T_world dt to the world vector and the free rotation keeps it (step 2), so
+// with no contact, for ANY inertia,
 //
-//   |L'|^2 = |L|^2 + 2 dt (L . T_body) + dt^2 |u|^2
-//   T'     = T     +     dt (omega . T_body) + dt^2 (I^-1 u) . u / 2
+//   L_world' = L_world + T_world dt,  so  L_world(t_n) = L_world(0) + T_world t_n,
+//   |L'|^2   = |L|^2 + 2 dt (L . T_body) + dt^2 |T_world|^2,
 //
-// Both are equalities, both are asserted every step in the tests, and both come
-// from the FORWARD-EULER angular step. Note L . T_body = L_world . T_world and
+// the continuum's straight line, met at every step boundary. The kick changes
+// the rotational energy by exactly
+//
+//   dt (omega . T_body) + dt^2 (T_body . I^-1 T_body) / 2,
+//
+// and the free rotation keeps the energy of a sphere or an axisymmetric body
+// (for three distinct moments it adds its own second-order error). All of these
+// are asserted in the tests. Note L . T_body = L_world . T_world and
 // omega . T_body = omega_world . T_world, since a rotation preserves the dot
 // product: the work the torque does is frame independent.
 //
-// With T = 0 this is the M20 law, |L'|^2 = |L|^2 + dt^2 |u|^2, and the
-// first-order term is gone, which is why the drift there is second order and a
-// principal-axis spin holds exactly. Under a torque the first-order term is
-// present and the WORLD-frame angular momentum grows along the straight line
-// L(t) = L(0) + T_world t, which is the exact continuum law the discrete scheme
-// tracks to first order (and, for a spin-up about the torque axis, exactly).
+// With T = 0 the world vector and |L| are constant to rounding, where the
+// forward-Euler step this replaced (issue #88) gained dt^2 |L x omega|^2 in
+// |L|^2 every step. Starting from the synchronous state (the stored spin is
+// the value at the start of the step, and there is no half kick), the
+// orientation is FIRST order in time under a torque; without one it is the
+// free rotation's second order.
 //
 // This function's MAGNITUDE still does not inherit the per-body law: it is the
 // magnitude of a vector SUM, and moves when the world-frame vectors turn
@@ -340,8 +356,9 @@ math::Vec3 total_angular_momentum3d(const std::vector<RigidBody3D>& bodies);
 
 // Translational plus rotational KINETIC energy.
 //
-// The rotational part follows the energy law above: a torque does work at rate
-// omega . T_body, plus the same second-order forward-Euler term M20 had. The
+// The rotational part follows the energy law above: the kick does the torque's
+// work exactly, and the free rotation keeps the energy of a sphere or an
+// axisymmetric body and has a bounded second-order error otherwise. The
 // translational part is constant without gravity or a contact; under gravity it
 // trades with the potential below, and a contact removes (1 - e^2) of the normal
 // part on each bounce.
