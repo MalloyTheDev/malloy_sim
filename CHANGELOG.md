@@ -265,8 +265,11 @@ All notable changes to MalloySim are recorded here. The format follows
       multi-point impacts before the change and 28.1% after (8.8% and 9.2% at
       friction 0.3), with the same spread of errors. Without friction it capped
       once in 2000 drops after the change, 4.9e-11 m/s off, and never before.
-    - **Effects.** No capped impact raised the kinetic energy. A few leave the
-      restitution law far from met (worst 1.9 m/s before, 0.5 m/s after).
+    - **Effects.** No capped impact raised the kinetic energy. What the cap
+      leaves unconverged was small in every measurement, before and after the
+      change: normal complementarity violations at most 6.0e-3 m/s (about
+      0.2% of the target) and friction residuals at most 1.3e-2 m/s. The cap
+      itself is tracked in issue #92.
   - **Changed numbers.**
     - `gyroscope.scn`: the energy at 12 s is 49.6081314, from 49.6086482, which
       carried forward Euler's spurious gain; the new value is within 3e-9 of
