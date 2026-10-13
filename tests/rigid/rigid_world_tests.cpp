@@ -8005,12 +8005,17 @@ int main()
         //         then acts on the same body after the impact). With friction,
         //         only a ONE-point impact is held to it: a frictional impact
         //         at several points can stop at the 100-sweep cap
-        //         (kMaxSweeps, ADR 0011), short of the tolerance, as it
-        //         already did on the forward-Euler step in this scenario
-        //         (measured with an instrumented build: the impact phase
-        //         stopped at the cap once there and 3 times here, the worst
-        //         law error 2.2e-6 m/s), so those are counted and their worst
-        //         printed;
+        //         (kMaxSweeps, ADR 0011), short of the tolerance, so those
+        //         are counted and their worst printed. That is the solver's
+        //         behaviour, not this step's (measured with instrumented
+        //         builds of both: in this scenario the impact phase stopped
+        //         at the cap once on the forward-Euler step and 3 times here,
+        //         law errors up to 2.7e-6 m/s, and each of those 4 states
+        //         caps identically on either step's solver; over 2000 seeded
+        //         random drops at friction 0.5 the cap stopped 28.4% of the
+        //         multi-point impacts before and 28.1% after, none of them
+        //         raising the kinetic energy). So the law is asserted for the
+        //         impacts held to it, not for every impact;
         //       - the energy never rises above the start by more than this
         //         body's own rotational envelope, the largest change of its
         //         rotational energy rotating freely from the same start for the

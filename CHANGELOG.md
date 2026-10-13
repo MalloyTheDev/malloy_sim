@@ -246,9 +246,16 @@ All notable changes to MalloySim are recorded here. The format follows
     dated note). Every M40 acceptance criterion still holds. AC-4 now compares
     exact pre-solve and solved states, and two AC-6 regressions are new: the
     prediction for a fast anisotropic box under a torque, and that box's
-    bounces at e 0.5. A frictional impact at several points can still stop at
-    the solver's 100-sweep cap, short of the impact tolerance, as it did
-    before; the bounce test counts those instead of holding them to it.
+    bounces at e 0.5.
+  - **Not every impact meets the impact tolerance.** A frictional impact at
+    several points can stop at the solver's 100-sweep cap (ADR 0011) short of
+    it, so the bounce test holds frictionless and one-point impacts to the
+    mid-step law and only counts the rest. This is the solver's behaviour, not
+    the new step's: over 2000 seeded random drops at friction 0.5 the cap
+    stopped 28.4% of the multi-point impacts before the change and 28.1% after
+    (8.8% and 9.2% at friction 0.3), with the same spread of errors, and no
+    capped impact raised the kinetic energy. A few capped impacts leave the
+    restitution law far from met (worst 1.9 m/s before, 0.5 m/s after).
   - **Changed numbers.**
     - `gyroscope.scn`: the energy at 12 s is 49.6081314, from 49.6086482, which
       carried forward Euler's spurious gain; the new value is within 3e-9 of
