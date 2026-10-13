@@ -112,9 +112,11 @@ constexpr double max_work = 1e11;
 // in 3D, 2.2 ns in 2D): a pair or plane test where a body has no collider, two
 // immovable 2D bodies, an immovable 2D body against a ground, or a 2D box with
 // a disc (issue #48), all of which the worlds skip before detecting. A rigid
-// body costs 15 units a step in 3D and 10 in 2D: its integration, validation,
+// body costs 25 units a step in 3D and 10 in 2D: its integration, validation,
 // and entries in the phases' per-body arrays (0.08 us measured, 0.15 us in the
-// solver's own figures). A body is classified as its world classifies it: a box
+// solver's own figures; in 3D issue #88's exact free rotation added 0.09 us,
+// 0.058 to 0.147 us a step for a free asymmetric body, so 0.24 us, rounded up).
+// A body is classified as its world classifies it: a box
 // when every half-extent is positive, otherwise round when its radius is above
 // 0, and in 2D immovable when its mass and inertia are both infinite.
 //
@@ -127,7 +129,7 @@ constexpr double max_work = 1e11;
 // wherever the work is large; only a body's own cost runs about 30 times
 // slower, which matters in small scenes, far inside the budget.
 constexpr double sweeps_per_phase = 100.0; // kMaxSweeps in src/rigid
-constexpr double rigid3_body_work = 15.0;
+constexpr double rigid3_body_work = 25.0;
 constexpr double rigid2_body_work = 10.0;
 constexpr double no_contact_work = 1.0;
 constexpr double box3_box3_detect = 460.0;
