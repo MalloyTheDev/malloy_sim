@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, recorded at M40.
+Accepted, recorded at M40; dated note at the end (issue #88).
 
 ## Context
 
@@ -135,3 +135,28 @@ cent.
   - A box much heavier than the one under it (1e4 times) still sinks, slowly
     and without gaining energy.
   - Box against disc in 2D is still not implemented (#48).
+
+## Note, 2026-10-13 (issue #88)
+
+The Decision above says the forcing "is applied exactly as before, so free
+flight is bit-identical". That held at M40. Issue #88 then changed the 3D
+step's rotation, because forward Euler on Euler's equations grew |L| and the
+energy every step. In 3D, after this note:
+
+- **Forcing before the solve** is the velocity's (gravity and F/m) and the
+  applied torque as ONE kick. There is no gyroscopic term in it.
+- **After the rest phase,** each body rotates freely by exact turns that keep
+  its world angular momentum (`rigid3d_world.hpp`, step 2), and only then
+  translates and projects.
+- **Free flight is no longer bit-identical** to the step before #88 for a body
+  with distinct moments. It still is for a sphere, a spin about a principal
+  axis and a body at rest, whose stored angular velocity the rotation keeps bit
+  for bit.
+- **The impact phase's prediction** delta changes to match: the forcing and
+  the kick, body b's change minus body a's, with no gyroscopic term. Only the
+  angular part of one line changes; the solver, its tolerances, the threshold
+  and the cap are as decided above, and every M40 acceptance criterion still
+  holds.
+
+No Constraint type, solver interface or new state is added, and the 2D world
+is unchanged.
