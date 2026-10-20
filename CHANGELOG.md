@@ -221,6 +221,34 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #57: with a sphere's centre inside an oriented box,
+  `contact(Box3, Sphere)` took the centre as the box's surface point. So the
+  reported point was not midway between the two surfaces, as it is in every
+  other case: it fell short by half the depth of the nearest face. The normal
+  and the penetration were right, so the normal impulse's torque was not
+  affected, but the 3D rigid world uses this point as the friction lever arm,
+  which was wrong for a sphere that had sunk into a box.
+  - **The point.** The box's surface is now the nearest face point, the centre
+    plus the normal times that face's depth, so the point is midway, as in the
+    2D circle/box pair. On a unit cube with radius 0.3, a centre at 0 gives 0.1
+    (was -0.15), and a centre at 0.45 gives 0.325 (was 0.30).
+  - **`overlaps`.** It measured the distance to the nearest point rebuilt from
+    the box frame, which misses a centre inside a rotated box by rounding. For
+    a zero or tiny radius that exceeded the radius squared, so `overlaps` said
+    no where `contact` said yes (729 of 1000 zero-radius centres in the issue).
+    It is now `contact(...).has_value()`, so the two agree exactly. Nothing in
+    the libraries calls it.
+  - **Templates.** All 33 give byte-identical output (MSVC Release, against
+    `main`).
+  - **Tests.**
+    - The inside cases pin the exact point, in both orders.
+    - A seeded sweep of 2000 rotated boxes, half of them near 1e6, checks the
+      midway point, normal and penetration for centres well inside. It also
+      checks that such a centre overlaps at radii 0, 1e-300 and 1e-12, and
+      that `overlaps` agrees with `contact` in both orders.
+    - Restoring the old point fails the pinned point. Restoring the old
+      `overlaps` gives 2575 disagreements in the sweep.
+
 - Issue #88: a 3D rigid body's rotation gained angular momentum and energy every
   step, without bound. The angular velocity advanced by forward Euler on
   Euler's equations, which grows |L|^2 by exactly dt^2 |L x omega|^2 a step: a

@@ -628,19 +628,12 @@ math::Vec3 closest_point_on_obb(const Obb& o, const math::Vec3& p)
 
 bool overlaps(const Box3& box, const Sphere& sphere)
 {
-    if (!box.is_valid() || !sphere.is_valid())
-    {
-        return false;
-    }
-    const math::Vec3 nearest = closest_point_on_obb(make_obb(box), sphere.center);
-    const math::Vec3 delta = sphere.center - nearest;
-    const math::Real distance_squared = math::dot(delta, delta);
-    if (!math::is_finite(distance_squared))
-    {
-        return false; // so far away the squared distance overflowed
-    }
-    // Touching counts, matching every other query.
-    return distance_squared <= sphere.radius * sphere.radius;
+    // The contact query itself, so the two agree exactly. Measuring the
+    // distance to the clamped nearest point instead lost a centre inside a
+    // rotated box: the point rebuilt from the box frame misses the centre by
+    // rounding, which exceeds a zero or tiny radius squared, so `overlaps` said
+    // no where `contact`'s exact inside test said yes (issue #57).
+    return contact(box, sphere).has_value();
 }
 
 bool overlaps(const Sphere& sphere, const Box3& box)
@@ -721,7 +714,10 @@ std::optional<Contact3> contact(const Box3& box, const Sphere& sphere, math::Rea
             projection[axis] >= math::Real{0} ? math::Real{1} : math::Real{-1};
         normal = o.u[axis] * sign;                 // outward through that face
         penetration = sphere.radius + shallowest;  // its depth plus the radius
-        box_surface = sphere.center; // the centre is its own nearest point
+        // The box's surface is that face, `shallowest` out along the normal,
+        // not the centre: the centre made the point miss midway by half that
+        // depth, which moved the friction lever arm (issue #57).
+        box_surface = sphere.center + normal * shallowest;
     }
 
     Contact3 result;
