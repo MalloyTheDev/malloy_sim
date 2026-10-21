@@ -103,3 +103,13 @@ rigid_box3d 1.0  0.5 0.5 0.5   0.0 0.0 2.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0
 # m g 5e-7 = 2e-6 (the kinetic part adds 2e-19), 2.1e-6.
 # check step 2000 momentum_z    0.00000000e+00   tol 7e-10
 # check step 2000 energy        2.00000000e+00   tol 2.1e-6
+#
+# Where the box ENDS UP, and that it is at rest there (issue #67). The energy
+# line above already fails a box that falls through the floor, but it says so
+# only through a potential; these say it directly. The resting centre is half a
+# box above the floor at z = 0, and the kinetic energy is gone. Both are
+# measured exactly (0.5 and 0) on MSVC Release and clang 21 Release; the
+# position tolerance is the projection slop derived above, 1e-6 x 0.5, and the
+# kinetic one matches box_stack.scn's resting line.
+# check step 2000 position_z    5.00000000e-01   tol 5e-7
+# check step 2000 kinetic       0.00000000e+00   tol 1e-16

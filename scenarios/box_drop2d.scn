@@ -90,3 +90,8 @@ rigid_box 1.0  0.5 0.5  0.0 2.0  0.0  0.0 0.0  0.0
 # m g 5e-7 = 2e-6, 2.1e-6.
 # check step 2000 momentum_y  0.00000000e+00   tol 6e-10
 # check step 2000 energy      2.00000000e+00   tol 2.1e-6
+# And that it is at rest there, as box_drop.scn checks in 3D (issue #67). The
+# 2D rigid domain has no position quantity, so the resting HEIGHT is pinned
+# only through the energy line above. Tolerance as box_stack2d.scn's resting
+# line.
+# check step 2000 kinetic     0.00000000e+00   tol 1e-16

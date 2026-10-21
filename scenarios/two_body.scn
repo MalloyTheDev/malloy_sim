@@ -27,6 +27,22 @@ body 0.000001  1.0  0.0   0.0  1.0
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests (issue #14). `step 0` is the state before any step, matching the column
 # the app prints, and the tolerance is absolute.
+#
+# The final energy quoted above is checked, not just quoted (issue #67). The
+# angular momentum alone could not carry the file: under this integrator it is
+# exact for ANY central pairwise force, so weakening the force law to 1/r (the
+# acceleration's inv_r^3 written as inv_r^2) left every check here passing.
+# With the energy line, that mutation gives -4.99999811e-07 and fails. It is
+# a close call on purpose: r stays within 5e-4 of 1, where the laws agree, so
+# whole signal is 2.71e-13, and it clears the tolerance by 271 times only
+# because the tolerance is the printing's. three_body_triangle.scn is the
+# robust guard for the force law, at 1.4e8 tolerances.
+# Changing dt by a factor of 4, or by one per cent either way, also fails it.
+#
+# Tolerance: the figure is identical on MSVC Release and clang 21 Release to all
+# nine printed digits, so the printing binds, and 1e-15 is twice half an ulp of
+# the last digit of a value near -5e-7.
 # check step 0    energy     -5.00000000e-07   tol 1e-15
 # check step 0    angular     1.00000000e-06   tol 1e-15
 # check step 10000 angular    1.00000000e-06   tol 1e-15
+# check step 10000 energy    -4.99999540e-07   tol 1e-15

@@ -52,5 +52,21 @@ rigid_static 1.20   2.60  0.00  0.00
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests (issue #14). `step 0` is the state before any step, matching the column
 # the app prints, and the tolerance is absolute.
+#
+# The post-impact figures above are checked too, not just quoted (issue #67):
+# without them every check held for a run with no wall at all, where nothing
+# bounces and E and L never change. Step 2000 is where the impacts have
+# finished, and step 9000 repeats it, which is the "then holds flat" claim:
+# with the wall removed E stays at its step-0 7.43822500e+00 and L at
+# -2.74176291e+00, so each of the four lines fails.
+#
+# Tolerances: both figures are identical on MSVC Release and clang 21 Release
+# to all nine printed digits, so the binding uncertainty is the printing, not
+# the arithmetic. Each tolerance is twice half an ulp of the last printed digit:
+# 1e-8 for a value near 5 and near 3.
 # check step 0    energy      7.43822500e+00   tol 1e-8
 # check step 0    angular    -2.74176291e+00   tol 1e-8
+# check step 2000 energy      5.11885782e+00   tol 1e-8
+# check step 2000 angular     3.09461144e+00   tol 1e-8
+# check step 9000 energy      5.11885782e+00   tol 1e-8
+# check step 9000 angular     3.09461144e+00   tol 1e-8
