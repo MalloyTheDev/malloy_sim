@@ -249,16 +249,27 @@ a real run by the scenario tests:
 tolerance is ABSOLUTE and required rather than defaulted, so a template states
 the precision it claims instead of inheriting one.
 
-Quantities available in every domain: `energy`, `kinetic`, `momentum_x`,
-`momentum_y`. Also `angular` in nbody and rigid, `elastic` in springs, and
-`speed` in charges. Since M38, particles and particles3d also have
-`temperature`, `pressure`, `speed_ratio` and `slow_fraction`; pressure does not
-exist before any time has passed, so a `step 0 pressure` check fails. Since
-M39 they also have the per-wall heats `heat_min_x`, `heat_max_x`, `heat_min_y`
-and `heat_max_y` (particles3d adds `heat_min_z` and `heat_max_z`). Naming a
+Quantities available in every domain: `energy`, which is the TOTAL mechanical
+energy wherever a domain has a potential (issue #63), `kinetic`, `momentum_x`
+and `momentum_y`; every 3D domain adds `momentum_z`. Also `angular` in the 2D
+nbody and rigid domains, with `angular_x`, `angular_y` and `angular_z` in
+nbody3d and rigid3d instead; `elastic` in springs and springs3d; and `speed` in
+charges and charges3d. rigid3d carries more, because what one body does is the
+claim a 3D contact template makes: `spin_x`, `spin_y`, `spin_z` and
+`rotational` (the first body's angular velocity and rotational energy, in its
+own body frame), `position_x/y/z` and `velocity_x/y/z` (the first body's),
+`potential`, and `total_energy`, an older alias of `energy` now that the two
+agree. Since M38, particles and particles3d also have `temperature`,
+`pressure`, `speed_ratio` and `slow_fraction`; pressure does not exist before
+any time has passed, so a `step 0 pressure` check fails. Since M39 they also
+have the per-wall heats `heat_min_x`, `heat_max_x`, `heat_min_y` and
+`heat_max_y` (particles3d adds `heat_min_z` and `heat_max_z`). Naming a
 quantity a domain does not have FAILS rather than being skipped, so a check
-cannot quietly stop checking. A check on a statistical quantity carries a
-DERIVED tolerance, stated beside it, never one fitted to the run
+cannot quietly stop checking, and since issue #63 so does a line that only
+LOOKS like a check: `#check` with no space, any other case of `check`, a
+negative step, or tokens after the tolerance are reported as malformed instead
+of being read as prose. A check on a statistical quantity carries a DERIVED
+tolerance, stated beside it, never one fitted to the run
 (`docs/05_TESTING_STRATEGY.md`).
 
 ## Testing policy

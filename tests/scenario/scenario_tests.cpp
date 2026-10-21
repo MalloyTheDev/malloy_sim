@@ -81,9 +81,24 @@ struct TemplateCheck
     malloy::math::Real tolerance{0.0};
 };
 
+// ASCII lower case, for recognising a line that MEANT to be a check. The
+// comparison that accepts a check stays exact; this only widens what is
+// recognised as claiming to be one.
+std::string lowered(const std::string& word)
+{
+    std::string out = word;
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return out;
+}
+
 std::vector<TemplateCheck> parse_checks(const std::string& text)
 {
     std::vector<TemplateCheck> checks;
+    const auto malformed = []() {
+        return std::vector<TemplateCheck>{TemplateCheck{-1, "malformed", 0.0, 0.0}};
+    };
     std::istringstream lines(text);
     std::string line;
     while (std::getline(lines, line))
@@ -91,20 +106,64 @@ std::vector<TemplateCheck> parse_checks(const std::string& text)
         std::istringstream tokens(line);
         std::string hash;
         std::string word;
-        if (!(tokens >> hash >> word) || hash != "#" || word != "check")
+        if (!(tokens >> hash))
+        {
+            continue; // blank
+        }
+        // Issue #63: a line that CLAIMS to be a check must either run or fail.
+        // Three forms claimed one and were silently skipped as prose, so a
+        // template could quietly stop checking: `#check` with no space, any
+        // other case of `check`, and trailing tokens after the tolerance.
+        //
+        // A line claims to be a check when its first token is `#check` in any
+        // case, or when it is `#` and the next token is `check` in any case.
+        // Everything else is prose, which keeps `# checked ...`
+        // (inclined_orbits.scn) prose and leaves a typo such as `# chekc`
+        // prose, since neither claims anything.
+        const bool glued = lowered(hash) == "#check";
+        bool claims = glued;
+        if (!glued && hash == "#")
+        {
+            if (!(tokens >> word))
+            {
+                continue; // a bare `#`: a blank comment line
+            }
+            claims = lowered(word) == "check";
+        }
+        if (!claims)
         {
             continue;
+        }
+        // From here the line is a check or the template is malformed. The
+        // accepted spelling is exactly `# check`, so the near misses above are
+        // reported rather than honoured.
+        if (glued || word != "check")
+        {
+            return malformed();
         }
         TemplateCheck check;
         std::string step_word;
         std::string tol_word;
+        std::string extra;
         if (!(tokens >> step_word >> check.step >> check.quantity >> check.value >>
               tol_word >> check.tolerance) ||
             step_word != "step" || tol_word != "tol")
         {
-            checks.clear();
-            checks.push_back(TemplateCheck{-1, "malformed", 0.0, 0.0});
-            return checks;
+            return malformed();
+        }
+        // Trailing tokens: the rest of the line was read as prose, so
+        // `# check step 0 energy 1 tol 1e-9 garbage 999` checked only the
+        // first six fields and ignored a figure that looked checked.
+        if (tokens >> extra)
+        {
+            return malformed();
+        }
+        // A negative step was parsed and then never evaluated, because the run
+        // visits step 0 and then 1..steps. It was reported only when it was the
+        // template's only check, and then as "malformed" with no reason.
+        if (check.step < 0)
+        {
+            return malformed();
         }
         checks.push_back(check);
     }
@@ -302,6 +361,65 @@ int main()
         const ScenarioParseResult r = parse_scenario(in);
         MALLOY_CHECK_FALSE(r.ok);
         MALLOY_CHECK_FALSE(r.error.empty());
+    }
+
+    // --- Issue #63: a line that CLAIMS to be a check must run or fail, never
+    //     be skipped as prose. The harness used to read only `# check` with
+    //     exactly that spelling and only the first six fields, so a glued
+    //     `#check`, a capitalised `# Check`, a negative step and trailing
+    //     tokens all looked checked and were not. A template could quietly
+    //     stop checking, which is the failure mode #14 exists to prevent.
+    //
+    //     The oracle is whether the line is accepted, ignored or reported
+    //     malformed, so it needs no run: `parse_checks` is called directly. ---
+    {
+        const auto count = [](const char* text) { return parse_checks(text).size(); };
+        const auto is_malformed = [](const char* text) {
+            const std::vector<TemplateCheck> c = parse_checks(text);
+            return c.size() == 1 && c.front().quantity == "malformed";
+        };
+
+        // Accepted: the canonical form, and several on one template.
+        {
+            const std::vector<TemplateCheck> c =
+                parse_checks("# check step 0 energy 1.5 tol 1e-9\n");
+            MALLOY_CHECK_EQ(c.size(), std::size_t{1});
+            MALLOY_CHECK_EQ(c.front().step, 0);
+            MALLOY_CHECK_TRUE(c.front().quantity == "energy");
+            MALLOY_CHECK_NEAR(c.front().value, 1.5, 0.0);
+            MALLOY_CHECK_NEAR(c.front().tolerance, 1e-9, 0.0);
+        }
+        MALLOY_CHECK_EQ(count("# check step 0 energy 1 tol 1e-9\n"
+                              "# check step 20 kinetic 2 tol 1e-9\n"),
+                        std::size_t{2});
+
+        // Reported malformed: each form that used to pass silently.
+        MALLOY_CHECK_TRUE(is_malformed("#check step 0 energy 1 tol 1e-9\n"));
+        MALLOY_CHECK_TRUE(is_malformed("# Check step 0 energy 1 tol 1e-9\n"));
+        MALLOY_CHECK_TRUE(is_malformed("#CHECK step 0 energy 1 tol 1e-9\n"));
+        MALLOY_CHECK_TRUE(is_malformed("# check step -5 energy 1 tol 1e-9\n"));
+        // Beside a good check too, where the old detector could not see it at
+        // all: two checks are not one, so nothing reported the negative step.
+        MALLOY_CHECK_TRUE(is_malformed("# check step 0 energy 1 tol 1e-9\n"
+                                       "# check step -5 energy 1 tol 1e-9\n"));
+        MALLOY_CHECK_TRUE(is_malformed("# check step 0 energy 1 tol 1e-9 garbage 999\n"));
+        // Still malformed for the reasons it always was.
+        MALLOY_CHECK_TRUE(is_malformed("# check step 0 energy 1 1e-9\n"));
+        MALLOY_CHECK_TRUE(is_malformed("# check 0 energy 1 tol 1e-9\n"));
+        MALLOY_CHECK_TRUE(is_malformed("# check\n"));
+        // One malformed line condemns the template even beside a good one, so
+        // a real check cannot mask it.
+        MALLOY_CHECK_TRUE(is_malformed("# check step 0 energy 1 tol 1e-9\n"
+                                       "#check step 1 energy 1 tol 1e-9\n"));
+
+        // Prose: nothing here claims to be a check, so each is ignored as it
+        // always was. `# checked` appears in inclined_orbits.scn.
+        MALLOY_CHECK_EQ(count("# checked against the closed form\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count("# chekc step 0 energy 1 tol 1e-9\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count("# checking step 0\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count("#\n# a comment\n\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count("check step 0 energy 1 tol 1e-9\n"), std::size_t{0});
+        MALLOY_CHECK_EQ(count(""), std::size_t{0});
     }
 
     // --- Issue #12: every shipped template must parse and build a runnable
@@ -579,7 +697,10 @@ int main()
             // real run below. Documented figures have gone stale twice in this
             // repository and were corrected by hand both times.
             const std::vector<TemplateCheck> checks = parse_checks(text);
-            if (checks.size() == 1 && checks.front().step < 0)
+            // The sentinel is named, not inferred from a negative step: a real
+            // check can no longer carry one (issue #63), and reading the step
+            // was what made a lone negative-step check report as "malformed".
+            if (checks.size() == 1 && checks.front().quantity == "malformed")
             {
                 std::cerr << "template " << name << " has a malformed # check line\n";
                 return 1;
@@ -674,7 +795,18 @@ int main()
                 MALLOY_CHECK_TRUE(world.validate() == StepStatus::Ok);
                 const auto value_of = [&](const std::string& q) -> std::optional<Real> {
                     const auto& b = world.bodies();
-                    if (q == "energy") return malloy::rigid::total_kinetic_energy3d(b);
+                    // Issue #63: `energy` is the TOTAL mechanical energy, the
+                    // same quantity the app's E column and `Rigid3DReadout`
+                    // print and the same meaning 2D rigid gives the name. It
+                    // was kinetic only, so a template could document the app's
+                    // figure and have the check compare a different number.
+                    // `kinetic` is the kinetic part, as in every other domain.
+                    const Real kinetic = malloy::rigid::total_kinetic_energy3d(b);
+                    const Real potential_energy =
+                        malloy::rigid::total_potential_energy3d(b, world.settings().gravity) +
+                        malloy::rigid::total_force_potential3d(b, world.settings().force);
+                    if (q == "energy") return kinetic + potential_energy;
+                    if (q == "kinetic") return kinetic;
                     if (q == "momentum_x")
                         return malloy::rigid::total_linear_momentum3d(b).x;
                     if (q == "momentum_y")
@@ -708,15 +840,13 @@ int main()
                     if (q == "velocity_y") return b.front().velocity.y;
                     if (q == "velocity_z") return b.front().velocity.z;
                     // The potential energy, of gravity and of the applied force
-                    // (M28, issue #47), and the total mechanical energy, which
-                    // trade off during a fall, a push and a bounce. The total
-                    // is what the app's E column prints.
-                    const Real potential =
-                        malloy::rigid::total_potential_energy3d(b, world.settings().gravity) +
-                        malloy::rigid::total_force_potential3d(b, world.settings().force);
-                    if (q == "potential") return potential;
-                    if (q == "total_energy")
-                        return malloy::rigid::total_kinetic_energy3d(b) + potential;
+                    // (M28, issue #47), which trades off against the kinetic
+                    // part during a fall, a push and a bounce.
+                    if (q == "potential") return potential_energy;
+                    // `total_energy` is kept as an alias of `energy`, which it
+                    // now equals (issue #63). Eight check lines in the shipped
+                    // templates use the older name.
+                    if (q == "total_energy") return kinetic + potential_energy;
                     return std::nullopt;
                 };
                 if (!run_checked(world, name, r.scenario.steps, checks, value_of))
