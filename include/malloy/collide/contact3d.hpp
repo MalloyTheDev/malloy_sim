@@ -126,8 +126,11 @@ std::vector<Contact3> contacts(const Box3& a, const Box3& b);
 // back to the least-penetrated face axis (its outward direction, ties broken by
 // axis order), the deterministic analogue of the sphere pair's fixed normal.
 // The contact point is midway between the box surface and the sphere surface
-// along the normal. Returns no value when they do not overlap or either shape is
-// invalid; never throws (docs/04).
+// along the normal, in that case too: the box surface is then the point on
+// that face, not the centre (issue #57). `overlaps` is exactly
+// `contact(...).has_value()`, so the two agree, including for a centre inside a
+// rotated box at a zero or tiny radius. Returns no value when they do not
+// overlap or either shape is invalid; never throws (docs/04).
 bool overlaps(const Box3& box, const Sphere& sphere);
 bool overlaps(const Sphere& sphere, const Box3& box);
 std::optional<Contact3> contact(const Box3& box, const Sphere& sphere);

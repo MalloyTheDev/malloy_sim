@@ -1016,6 +1016,12 @@ int main()
         // Sphere centre INSIDE the box: the degenerate case. Centre at
         // (0.2, 0, 0), radius 0.3, is 0.3 from the +x face (the nearest), so it
         // pushes out +x with penetration radius + 0.3 = 0.6.
+        //
+        // The point is midway between the two surfaces along the normal, as in
+        // every other case (issue #57): the box's is the face point (0.5, 0, 0),
+        // the sphere's deepest is (-0.1, 0, 0), so (0.2, 0, 0). Taking the
+        // centre as the box's surface gave (0.05, 0, 0), half the face depth
+        // short.
         {
             const Sphere s{Vec3{0.2, 0.0, 0.0}, 0.3};
             const auto c = contact(cube, s);
@@ -1023,12 +1029,20 @@ int main()
             MALLOY_CHECK_TRUE(c.has_value());
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
             MALLOY_CHECK_NEAR(c->penetration, 0.6, eps);
-            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->point, Vec3{0.2, 0.0, 0.0}, eps));
+
+            // Reversed order: the normal is negated, the point is the same.
+            const auto r = contact(s, cube);
+            MALLOY_CHECK_TRUE(overlaps(s, cube) == r.has_value());
+            MALLOY_CHECK_TRUE(r.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(r->normal, Vec3{-1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(r->point, Vec3{0.2, 0.0, 0.0}, eps));
         }
 
         // The mirror inside case: centre at (-0.2, 0, 0) is nearest the -x face,
         // so the push is -x, which pins the SIGN of the deep-contact normal (a
-        // fixed +x would pass the case above but fail here).
+        // fixed +x would pass the case above but fail here). The point mirrors
+        // too: (-0.2, 0, 0).
         {
             const Sphere s{Vec3{-0.2, 0.0, 0.0}, 0.3};
             const auto c = contact(cube, s);
@@ -1036,18 +1050,34 @@ int main()
             MALLOY_CHECK_TRUE(c.has_value());
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{-1.0, 0.0, 0.0}, eps));
             MALLOY_CHECK_NEAR(c->penetration, 0.6, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->point, Vec3{-0.2, 0.0, 0.0}, eps));
+        }
+
+        // A centre just inside a face, (0.45, 0, 0) with radius 0.3: face depth
+        // 0.05, penetration 0.35, and the point midway between the face at 0.5
+        // and the sphere's deepest point at 0.15, so 0.325 (issue #57 measured
+        // 0.30 before the fix).
+        {
+            const Sphere s{Vec3{0.45, 0.0, 0.0}, 0.3};
+            const auto c = contact(cube, s);
+            MALLOY_CHECK_TRUE(c.has_value());
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
+            MALLOY_CHECK_NEAR(c->penetration, 0.35, eps);
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->point, Vec3{0.325, 0.0, 0.0}, eps));
         }
 
         // Sphere centre exactly at the box centre: every face is equidistant, so
         // the tie breaks to axis 0 with a +x normal (a fixed, repeatable choice),
-        // penetration radius + half-extent, no divide by zero.
+        // penetration radius + half-extent, no divide by zero. The point is
+        // midway between the face at 0.5 and the sphere's deepest point at -0.3:
+        // (0.1, 0, 0), where the centre as the box surface gave (-0.15, 0, 0).
         {
             const Sphere s{Vec3{0.0, 0.0, 0.0}, 0.3};
             const auto c = contact(cube, s);
             MALLOY_CHECK_TRUE(c.has_value());
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, Vec3{1.0, 0.0, 0.0}, eps));
             MALLOY_CHECK_NEAR(c->penetration, 0.8, eps);
-            MALLOY_CHECK_TRUE(malloy::math::is_finite(c->point));
+            MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->point, Vec3{0.1, 0.0, 0.0}, eps));
         }
 
         // A tilted box: rotated 45 degrees about z with the sphere placed along
@@ -1064,6 +1094,124 @@ int main()
             MALLOY_CHECK_TRUE(c.has_value());
             MALLOY_CHECK_TRUE(malloy::math::approx_equal(c->normal, bx, 1e-9));
             MALLOY_CHECK_NEAR(c->penetration, 0.2, 1e-9);
+        }
+
+        // Two properties over many random rotated boxes (a fixed, fully
+        // specified generator, so the run repeats), both from issue #57.
+        //
+        // 1. A centre inside the box gives the midway point: halfway between
+        //    the face `d` out along the normal and the sphere's deepest point
+        //    `radius` back from the centre, with `d` the least face depth,
+        //    recomputed here in the box frame, and the normal that face's axis.
+        // 2. `overlaps` agrees with `contact` in both orders, and a centre well
+        //    inside overlaps at ANY radius, zero included. Measuring the
+        //    distance to the nearest point instead missed most zero-radius
+        //    centres inside a rotated box (729 of 1000 in the issue): the point
+        //    rebuilt from the box frame misses the centre by rounding, which
+        //    exceeds a zero radius squared. Half the boxes sit near 1e6, where
+        //    that rounding is largest, and the radii include 0, 1e-300 and 1e-12.
+        //
+        // "Well inside" keeps every coordinate within 0.9 of its half-extent,
+        // so the face depth is at least 0.02, far above rounding even at 1e6,
+        // and the old point's error (half that depth) far above the tolerance.
+        {
+            using malloy::math::conjugate;
+            using malloy::math::rotate;
+            std::uint64_t state = 0x2545F4914F6CDD1DULL;
+            const auto next = [&state]() {
+                state += 0x9E3779B97F4A7C15ULL; // splitmix64
+                std::uint64_t z = state;
+                z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+                z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+                z ^= z >> 31;
+                return static_cast<Real>(z >> 11) * (1.0 / 9007199254740992.0); // [0, 1)
+            };
+            const auto signed_unit = [&next]() { return 2.0 * next() - 1.0; };
+            const Real radii[] = {0.0, 1e-300, 1e-12, 0.05, 0.3};
+
+            int deep_cases = 0;
+            int deep_missed = 0;     // a centre well inside that did not overlap
+            int not_midway = 0;      // a deep contact off the midway point
+            int disagreements = 0;   // overlaps != contact, either order
+            int near_overlapping = 0;
+            int near_clear = 0;
+            for (int it = 0; it < 2000; ++it)
+            {
+                const Real scale = (it % 2 == 0) ? 1.0 : 1e6;
+                const bool deep = (it % 4) < 2;
+                const Vec3 centre{scale * signed_unit(), scale * signed_unit(),
+                                  scale * signed_unit()};
+                const Vec3 e{0.2 + next(), 0.2 + next(), 0.2 + next()};
+                const Quat q = from_axis_angle(
+                    Vec3{signed_unit(), signed_unit(), signed_unit()}, 3.14159 * signed_unit());
+                const Box3 box{centre, e, q};
+                // Deep: well inside. Otherwise near the surface, inside or out.
+                const Real reach = deep ? 0.9 : 1.3;
+                const Vec3 local{reach * e.x * signed_unit(), reach * e.y * signed_unit(),
+                                 reach * e.z * signed_unit()};
+                const Vec3 p = centre + rotate(q, local);
+
+                for (const Real r : radii)
+                {
+                    const Sphere s{p, r};
+                    const auto c = contact(box, s);
+                    if (overlaps(box, s) != c.has_value() || overlaps(s, box) != c.has_value())
+                    {
+                        ++disagreements;
+                    }
+                    if (!deep)
+                    {
+                        if (c.has_value())
+                        {
+                            ++near_overlapping;
+                        }
+                        else
+                        {
+                            ++near_clear;
+                        }
+                        continue;
+                    }
+                    ++deep_cases;
+                    if (!overlaps(box, s) || !c.has_value())
+                    {
+                        ++deep_missed;
+                        continue;
+                    }
+                    // The least face depth and its axis, in the box frame.
+                    const Vec3 l = rotate(conjugate(q), p - centre);
+                    const Real depth[3] = {e.x - std::abs(l.x), e.y - std::abs(l.y),
+                                           e.z - std::abs(l.z)};
+                    const Real coord[3] = {l.x, l.y, l.z};
+                    int k = 0;
+                    for (int j = 1; j < 3; ++j)
+                    {
+                        if (depth[j] < depth[k])
+                        {
+                            k = j;
+                        }
+                    }
+                    const Vec3 local_axis{k == 0 ? 1.0 : 0.0, k == 1 ? 1.0 : 0.0,
+                                          k == 2 ? 1.0 : 0.0};
+                    const Vec3 normal = rotate(q, local_axis) * (coord[k] >= 0.0 ? 1.0 : -1.0);
+                    const Vec3 face = p + normal * depth[k];
+                    const Vec3 deepest = p - normal * r;
+                    const Vec3 midway = (face + deepest) * 0.5;
+                    const Real tol = 1e-12 * scale;
+                    if (!malloy::math::approx_equal(c->normal, normal, 1e-12) ||
+                        !malloy::math::approx_equal(c->point, midway, tol) ||
+                        !malloy::math::approx_equal(c->penetration, r + depth[k], tol))
+                    {
+                        ++not_midway;
+                    }
+                }
+            }
+            MALLOY_CHECK_EQ(disagreements, 0);
+            MALLOY_CHECK_EQ(deep_missed, 0);
+            MALLOY_CHECK_EQ(not_midway, 0);
+            // The sweep really covers both regimes, so it cannot pass vacuously.
+            MALLOY_CHECK_EQ(deep_cases, 1000 * 5);
+            MALLOY_CHECK_TRUE(near_overlapping > 500);
+            MALLOY_CHECK_TRUE(near_clear > 500);
         }
 
         // Invalid shapes never overlap or contact, in either order.
