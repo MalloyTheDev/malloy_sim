@@ -20,6 +20,21 @@ body 1.0  -0.5  -0.8660254   0.6580407399359999  -0.37992
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests (issue #14). `step 0` is the state before any step, matching the column
 # the app prints, and the tolerance is absolute.
+#
+# The final energy quoted above is checked, not just quoted (issue #67), and
+# this template is the one that really guards the force law. Angular momentum
+# is exact under this integrator for any central pairwise force, so weakening
+# the force law to 1/r (the acceleration's inv_r^3 written as inv_r^2) passed
+# every check in both nbody templates. Here that mutation gives
+# -7.30738819e-01, moving the step-10000 energy by 0.135, about 1.4e8
+# tolerances, because the three separations are 1.73 rather than near 1 where
+# the two laws nearly agree.
+# Changing dt by a factor of 4, or by one per cent either way, also fails it.
+#
+# Tolerance: the figure is identical on MSVC Release and clang 21 Release to all
+# nine printed digits, so the printing binds, and 1e-9 is twice half an ulp of
+# the last digit of a value near -0.87.
 # check step 0    energy     -8.66015288e-01   tol 1e-8
 # check step 0    angular     2.27951999e+00   tol 1e-8
 # check step 10000 angular    2.27951999e+00   tol 1e-8
+# check step 10000 energy    -8.66015093e-01   tol 1e-9

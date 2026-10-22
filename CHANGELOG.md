@@ -221,6 +221,42 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #67: four templates documented a result in prose that no `# check` line
+  could detect, so each would still have passed with its headline behaviour
+  broken. Twelve check lines were added, and every figure is measured rather
+  than quoted.
+  - **`tumbling_impact.scn`** checked only step 0, which holds for a run with
+    no wall at all. Its post-impact energy and angular momentum at step 2000
+    are now checked, and repeated at step 9000, which is its "then holds flat"
+    claim. Removing the wall, or setting restitution to 1, fails them.
+  - **`projectile_arc.scn`** checked only step 0. Its fall to 1.29616818e+01 by
+    step 3000, that it then holds flat at step 12000, and the horizontal
+    momentum that persists because there is no friction, are now checked.
+  - **`two_body.scn` and `three_body_triangle.scn`** checked energy only at
+    step 0 and angular momentum at the end. Angular momentum is exact under
+    this integrator for ANY central pairwise force, so weakening the force law
+    to 1/r passed every check in both. Their final energies are now checked.
+    `three_body_triangle` is the robust guard (the mutation moves it by 0.135,
+    about 1.4e8 tolerances); `two_body` catches it by 271 tolerances, because
+    its orbit stays within 5e-4 of r = 1 where the two laws nearly agree.
+  - **`box_drop.scn`** now checks where the box ends up and that it is at rest
+    there, `position_z` 0.5 and `kinetic` 0, which say directly what its energy
+    line said only through a potential. **`box_drop2d.scn`** gains the kinetic
+    half; the 2D rigid domain has no position quantity.
+  - **Tolerances are derived, not fitted.** Every figure is identical on MSVC
+    Release and clang 21 Release to all nine printed digits, so the printing
+    binds rather than the arithmetic, and each tolerance is twice half an ulp
+    of the last printed digit. `box_drop`'s position tolerance is the
+    projection slop the template already derives, 1e-6 x 0.5.
+  - **Acceptance: 13 mutations, 0 undetected.** No wall; restitution 1 in two
+    templates and 0.59 in one; no floor in 3D and no ground in 2D; dt times 4,
+    1.01 and 0.99 in both nbody templates; and the force law. Each fails at
+    least one line, and the unmutated templates pass.
+  - The issue's first bullet was stale: `box_drop` and `box_drop2d` gained
+    step-2000 checks in M40, and a box falling through the floor already failed
+    them. Its `tumbling_impact` figures also predate M40.
+  - No template output changes: all 33 are byte-identical.
+
 - Issue #63: the template check harness read a quantity that did not mean what
   the app printed, and silently ignored three kinds of line that claimed to be
   a check. Both let a template quietly stop checking, which is the failure

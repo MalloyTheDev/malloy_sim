@@ -42,4 +42,19 @@ particle 0.5  0.22  -6.0   2.0    8.0   4.5
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests (issue #14). `step 0` is the state before any step, matching the column
 # the app prints, and the tolerance is absolute.
-# check step 0    energy      2.02367500e+02   tol 1e-8
+#
+# Each sentence of the paragraph above is now checked rather than quoted
+# (issue #67): the fall to about 1.30e+01 by step 3000, that it then holds flat
+# (the same figure at step 12000, four times later), and that the horizontal
+# momentum persists because there is no friction. Before these, the only check
+# was step 0, which holds whatever the bouncing does: at restitution 1.0,
+# nothing is damped and the energy never falls, so the step-3000 line fails.
+#
+# Tolerances: every figure is identical on MSVC Release and clang 21 Release to
+# all nine printed digits, so the printing, not the arithmetic, is the binding
+# uncertainty. Each is twice half an ulp of the last printed digit: 1e-7 for an
+# energy near 13, 1e-9 for a momentum near -0.86.
+# check step 0     energy      2.02367500e+02   tol 1e-8
+# check step 3000  energy      1.29616818e+01   tol 1e-7
+# check step 12000 energy      1.29604459e+01   tol 1e-7
+# check step 12000 momentum_x -8.63989925e-01   tol 1e-9
