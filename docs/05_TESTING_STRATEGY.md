@@ -161,6 +161,13 @@ running to the end is also the NaN check. A check that names a quantity its
 domain does not have FAILS rather than being skipped, and so does one that
 names a step past the end of the run.
 
+Since issue #63 a line that only LOOKS like a check fails too, rather than
+being read as prose: `#check` with no space, any other case of `check`, a
+negative step, and tokens after the tolerance are all reported as a malformed
+check line. The accepted spelling is exactly `# check`. A line that claims
+nothing stays prose, so `# checked against the closed form` and a typo such as
+`# chekc` are still comments.
+
 The same test executable guards the documents that state counts: the template,
 domain and test-executable counts in `README.md`, the test-executable count in
 `docs/00_START_HERE.md`, the `M1-M<n>` milestone range in `CLAUDE.md`,
@@ -168,12 +175,8 @@ domain and test-executable counts in `README.md`, the test-executable count in
 `CHANGELOG.md` entry), and the ADR range in `docs/00` and `docs/08` (checked
 against the newest file in `docs/decisions/`).
 
-Known limits of the harness, all open:
+Known limits of the harness:
 
-- A `#check` line with no space after the `#`, and a check at a negative step
-  (unless it is the only one), are skipped without a word; and in the 3D rigid
-  domain `energy` is the kinetic energy only and there is no `kinetic`
-  ([#63](https://github.com/MalloyTheDev/malloy_sim/issues/63)).
 - Several templates' checks would still pass if their headline behaviour broke,
   for example a box that falls through the floor in `box_drop.scn`
   ([#67](https://github.com/MalloyTheDev/malloy_sim/issues/67)).

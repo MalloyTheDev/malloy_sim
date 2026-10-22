@@ -221,6 +221,48 @@ All notable changes to MalloySim are recorded here. The format follows
 
 ### Fixed
 
+- Issue #63: the template check harness read a quantity that did not mean what
+  the app printed, and silently ignored three kinds of line that claimed to be
+  a check. Both let a template quietly stop checking, which is the failure
+  `# check` lines exist to prevent.
+  - **rigid3d `energy` is the total mechanical energy**, kinetic plus the
+    potentials of gravity and of the applied force. It was the kinetic energy
+    alone, so it disagreed with the app's E column, with `Rigid3DReadout` and
+    with the same name in every other domain. **`kinetic` now exists in
+    rigid3d** as well, as it does everywhere else. `total_energy` is kept as an
+    alias of `energy`, which it now equals.
+    - The defect was invisible because every rigid3d template that checked
+      `energy` had no potential at all (`box_collision`, `box_sphere_collision`,
+      `gyroscope`, `intermediate_axis`), and the two that did have one used
+      `total_energy` to get the app's figure.
+    - `box_stack.scn` and `box_drop.scn` now check `energy` and `kinetic` the
+      way their 2D siblings `box_stack2d.scn` and `box_drop2d.scn` always have.
+      No documented value changed: the lines were renamed to the quantity each
+      one already meant.
+  - **A line that claims to be a check now runs or fails.** `#check` with no
+    space, any other case of `check`, a negative step, and tokens after the
+    tolerance were all read as prose. They are reported as a malformed check
+    line. The accepted spelling is exactly `# check`, and a line that claims
+    nothing stays prose, so `# checked against the closed form` and a typo such
+    as `# chekc` are still comments.
+  - **A negative step is named rather than inferred.** It was reported only
+    when it was a template's only check, and then as "malformed" with no
+    reason, because the harness recognised a malformed result by its negative
+    step. The sentinel now carries a name.
+  - **Documents corrected:** `CLAUDE.md`'s quantity list, which claimed
+    `kinetic` existed everywhere and omitted `momentum_z`, `angular_x/y/z` and
+    rigid3d's `spin_*`, `rotational`, `position_*`, `velocity_*`, `potential`
+    and `total_energy`; and `docs/05`, whose known-limits list carried this
+    issue.
+  - **Tests.** `parse_checks` is now tested directly on 18 strings, needing no
+    run: 2 accepted (the canonical form, and two checks on one template),
+    10 reported malformed (each of the four near misses, a negative step beside
+    a good check, the forms that were already malformed, and a malformed line
+    beside a good one), and 6 left as prose. Mutations: 6 of 6 caught
+    (reverting the `energy` mapping, removing `kinetic`, and removing each of
+    the four parser rejections).
+  - No template output changes: all 33 are byte-identical.
+
 - Issue #57: with a sphere's centre inside an oriented box,
   `contact(Box3, Sphere)` took the centre as the box's surface point. So the
   reported point was not midway between the two surfaces, as it is in every

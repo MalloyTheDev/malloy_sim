@@ -80,9 +80,9 @@ rigid_box3d 1.0  0.5 0.5 0.5   0.0 0.0 2.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0
 
 # Machine-checkable assertions, evaluated against a real run by the scenario
 # tests. `step 0` is the state before any step, and the tolerance is absolute.
-# The rigid3d `energy` quantity is kinetic only (the app's E column adds the
-# gravitational potential the story above quotes), and it is near zero at rest,
-# so it is not the useful thing to pin here. The invariants are: no horizontal
+# The rigid3d `energy` quantity is the total mechanical energy, the figure the
+# app's E column prints and the one the story above quotes; `kinetic` is its
+# kinetic part, which is near zero at rest. The invariants are: no horizontal
 # motion and no rotation, both exactly zero through the whole drop and bounce,
 # which is what says the symmetric landing exerts no spurious torque.
 # check step 0    momentum_x  0.00000000e+00   tol 1e-12
@@ -102,4 +102,4 @@ rigid_box3d 1.0  0.5 0.5 0.5   0.0 0.0 2.0   0.0 0.0 1.0 0.0   0.0 0.0 0.0   0.0
 # projection's slop of the floor, 1e-6 x 0.5, so the energy is 2 to within
 # m g 5e-7 = 2e-6 (the kinetic part adds 2e-19), 2.1e-6.
 # check step 2000 momentum_z    0.00000000e+00   tol 7e-10
-# check step 2000 total_energy  2.00000000e+00   tol 2.1e-6
+# check step 2000 energy        2.00000000e+00   tol 2.1e-6
